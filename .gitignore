@@ -1,0 +1,7 @@
+# Your personal collection and card art stay local. Never commit card images.
+collection.csv
+art/*
+!art/.gitkeep
+node_modules/
+.DS_Store
+Thumbs.db

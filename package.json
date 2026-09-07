@@ -1,0 +1,11 @@
+{
+  "name": "fivefold",
+  "version": "0.1.0",
+  "description": "An open-source, Shandalar-inspired single-player card adventure. MVP demo.",
+  "license": "GPL-3.0-or-later",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  }
+}

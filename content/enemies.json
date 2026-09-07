@@ -1,0 +1,94 @@
+{
+  "_comment": "Enemy roster. Decks are card names only; the game fetches rules text from Scryfall at runtime. Tier 1 decks double as the player's starter deck for that color.",
+  "enemies": [
+    {
+      "id": "novice-cleric", "name": "Novice Cleric", "color": "W", "tier": 1, "life": 10, "bribe": 8, "gold": 6,
+      "taunt": "The light will judge you.",
+      "deck": {
+        "Plains": 17, "Savannah Lions": 4, "Tundra Wolves": 3, "Pearled Unicorn": 3, "Mesa Pegasus": 3,
+        "Wild Griffin": 3, "Longbow Archer": 2, "Swords to Plowshares": 2, "Angelic Page": 3
+      }
+    },
+    {
+      "id": "knight-of-the-order", "name": "Knight of the Order", "color": "W", "tier": 2, "life": 14, "bribe": 15, "gold": 12,
+      "taunt": "Steel and faith. You have neither.",
+      "deck": {
+        "Plains": 17, "White Knight": 4, "Tundra Wolves": 3, "Longbow Archer": 3, "Wild Griffin": 3,
+        "Serra Angel": 2, "Swords to Plowshares": 3, "Pearled Unicorn": 2, "Savannah Lions": 3
+      }
+    },
+    {
+      "id": "tidecaller", "name": "Tidecaller", "color": "U", "tier": 1, "life": 10, "bribe": 8, "gold": 6,
+      "taunt": "The sea takes what it wants.",
+      "deck": {
+        "Island": 17, "Merfolk of the Pearl Trident": 4, "Coral Merfolk": 3, "Sage Owl": 3, "Wind Drake": 3,
+        "Horned Turtle": 3, "Giant Octopus": 2, "Unsummon": 3, "Divination": 2
+      }
+    },
+    {
+      "id": "stormseer", "name": "Stormseer", "color": "U", "tier": 2, "life": 14, "bribe": 15, "gold": 12,
+      "taunt": "I have already seen how this ends.",
+      "deck": {
+        "Island": 17, "Wind Drake": 3, "Phantom Monster": 3, "Air Elemental": 2, "Horned Turtle": 3,
+        "Coral Merfolk": 3, "Unsummon": 3, "Divination": 2, "Giant Octopus": 2, "Sage Owl": 2
+      }
+    },
+    {
+      "id": "grave-robber", "name": "Grave Robber", "color": "B", "tier": 1, "life": 10, "bribe": 8, "gold": 6,
+      "taunt": "Your cards will look lovely in my collection.",
+      "deck": {
+        "Swamp": 17, "Scathe Zombies": 4, "Bog Imp": 3, "Drudge Skeletons": 3, "Vampire Bats": 3,
+        "Black Knight": 3, "Terror": 2, "Raise Dead": 3, "Bog Wraith": 2
+      }
+    },
+    {
+      "id": "necromancer", "name": "Necromancer", "color": "B", "tier": 2, "life": 14, "bribe": 15, "gold": 12,
+      "taunt": "Death is only a change of employer.",
+      "deck": {
+        "Swamp": 17, "Black Knight": 3, "Bog Wraith": 3, "Sengir Vampire": 2, "Hypnotic Specter": 3,
+        "Terror": 3, "Raise Dead": 2, "Scathe Zombies": 3, "Bog Imp": 2, "Gravedigger": 2
+      }
+    },
+    {
+      "id": "hill-raider", "name": "Hill Raider", "color": "R", "tier": 1, "life": 10, "bribe": 8, "gold": 6,
+      "taunt": "Burn first, ask later.",
+      "deck": {
+        "Mountain": 17, "Mons's Goblin Raiders": 4, "Raging Goblin": 3, "Gray Ogre": 3, "Hill Giant": 3,
+        "Hurloon Minotaur": 3, "Shock": 3, "Lightning Bolt": 2, "Balduvian Barbarians": 2
+      }
+    },
+    {
+      "id": "fire-mage", "name": "Fire Mage", "color": "R", "tier": 2, "life": 14, "bribe": 15, "gold": 12,
+      "taunt": "Everything is kindling if you try.",
+      "deck": {
+        "Mountain": 17, "Lightning Bolt": 4, "Incinerate": 3, "Volcanic Hammer": 3, "Hill Giant": 3,
+        "Balduvian Barbarians": 3, "Earth Elemental": 2, "Hurloon Minotaur": 3, "Gray Ogre": 2
+      }
+    },
+    {
+      "id": "woodland-druid", "name": "Woodland Druid", "color": "G", "tier": 1, "life": 10, "bribe": 8, "gold": 6,
+      "taunt": "The forest is older than your ambitions.",
+      "deck": {
+        "Forest": 17, "Llanowar Elves": 4, "Grizzly Bears": 4, "Scryb Sprites": 3, "Elvish Archers": 3,
+        "Giant Spider": 3, "Giant Growth": 3, "War Mammoth": 2, "Craw Wurm": 1
+      }
+    },
+    {
+      "id": "wurmcaller", "name": "Wurmcaller", "color": "G", "tier": 2, "life": 14, "bribe": 15, "gold": 12,
+      "taunt": "Big. Bigger. Biggest.",
+      "deck": {
+        "Forest": 17, "Llanowar Elves": 4, "Grizzly Bears": 3, "Giant Spider": 3, "Trained Armodon": 3,
+        "War Mammoth": 3, "Ironroot Treefolk": 2, "Craw Wurm": 2, "Giant Growth": 3
+      }
+    },
+    {
+      "id": "the-usurper", "name": "The Usurper", "color": "M", "tier": 5, "life": 30, "bribe": 0, "gold": 100, "boss": true,
+      "taunt": "Five colors. One throne. Kneel.",
+      "deck": {
+        "City of Brass": 12, "Plains": 2, "Island": 2, "Swamp": 2, "Mountain": 2, "Forest": 2,
+        "Serra Angel": 2, "Air Elemental": 2, "Sengir Vampire": 2, "Earth Elemental": 2, "Craw Wurm": 2,
+        "Lightning Bolt": 2, "Terror": 2, "Swords to Plowshares": 2, "Giant Growth": 2
+      }
+    }
+  ]
+}

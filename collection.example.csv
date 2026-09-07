@@ -1,0 +1,13 @@
+# Fivefold collection list. Copy this file to collection.csv and edit it.
+# One card per line. Any of these formats work (set codes in parentheses are ignored):
+#   4 Lightning Bolt
+#   4x Lightning Bolt (M10)
+#   Lightning Bolt,4
+#   Lightning Bolt
+# Basic lands never need to be listed; you get unlimited basics in the deck builder.
+4 Lightning Bolt
+4 Grizzly Bears
+2 Serra Angel
+3 Giant Growth
+1 Sengir Vampire
+2 Counterspell
