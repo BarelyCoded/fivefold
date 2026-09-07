@@ -79,7 +79,21 @@ tr.st-unsupported td:nth-child(6), tr.st-unsupported td:nth-child(3), tr.st-miss
 .mapscreen { display: grid; grid-template-columns: 1fr 300px; gap: 16px; }
 @media (max-width: 1100px) { .mapscreen { grid-template-columns: 1fr; } }
 .mapwrap { background: #0f1210; border: 1px solid var(--line); border-radius: 6px; padding: 6px; overflow: auto; }
-#map { display: block; width: 100%; max-width: 780px; image-rendering: pixelated; cursor: pointer; }
+#map { display: block; width: 100%; max-width: 1080px; cursor: pointer; border-radius: 4px; }
+
+/* big hover preview */
+#bigcard { position: fixed; z-index: 60; width: 320px; pointer-events: none; background: #14120f; border: 1px solid #5a5244; border-radius: 14px; box-shadow: 0 12px 40px rgba(0,0,0,.7); overflow: hidden; }
+#bigcard .bc-img { width: 320px; height: 446px; background: #24211c center / cover no-repeat; }
+#bigcard .bc-img.none { display: grid; place-items: center; height: 120px; }
+#bigcard .bc-fallback { text-align: center; color: var(--ink); }
+#bigcard .bc-fallback span { display: block; font-size: 12px; color: var(--ink3); }
+#bigcard .bc-text { padding: 10px 14px 12px; font-size: 14px; line-height: 1.45; color: var(--ink); background: #1c1a16; border-top: 1px solid #5a5244; }
+#bigcard .bc-name { font-weight: 700; font-size: 16px; display: flex; justify-content: space-between; gap: 8px; }
+#bigcard .bc-name span { color: var(--gold); font-weight: 600; }
+#bigcard .bc-type { color: var(--ink3); font-size: 12.5px; margin-bottom: 6px; }
+#bigcard .bc-oracle { white-space: pre-wrap; }
+#bigcard .bc-pt { margin-top: 6px; font-weight: 700; }
+#bigcard .bc-notes { padding: 6px 14px 9px; font-size: 12px; color: var(--gold); background: #1c1a16; border-top: 1px dashed #5a5244; }
 .mappanel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 16px; }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; }
 .sw { display: inline-block; width: 12px; height: 12px; margin-right: 5px; vertical-align: -1px; border: 1px solid rgba(0,0,0,.4); }
