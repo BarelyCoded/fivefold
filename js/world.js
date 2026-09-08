@@ -5,7 +5,7 @@
 import { COLORS } from './cards.js';
 import { atlasReady, atlasState, blit, blitAt, pick, sheetPixels, TERRAIN, ACCENT_RATE, SPRITES, SCENERY, MONSTERS } from './atlas.js';
 
-export const W = 30, H = 20;
+export const W = 42, H = 28;
 export const PX = 38;          // internal pixels per tile (one sprite-sheet tile)
 export const TILE = PX * 2;    // displayed pixels per tile
 export const VIEW = { w: 24, h: 16 };
@@ -37,14 +37,15 @@ function field(rng, w, h, passes = 2) {
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 
 export function generateWorld(rng, enemies, startColor) {
-  const cx = W / 2, cy = H / 2, r = Math.min(W, H) * 0.36;
+  const cx = W / 2, cy = H / 2, r = Math.min(W, H) * (0.30 + rng() * 0.09);
+  const stretch = 1.15 + rng() * 0.25, nStr = 8 + rng() * 7;   // per-game biome spread and border wobble
   const rot = rng() * Math.PI * 2;
-  const seeds = COLORS.map((c, i) => { const a = rot + i * Math.PI * 2 / 5 + (rng() - 0.5) * 0.4; return { c, x: Math.round(cx + Math.cos(a) * r * 1.25), y: Math.round(cy + Math.sin(a) * r) }; });
+  const seeds = COLORS.map((c, i) => { const a = rot + i * Math.PI * 2 / 5 + (rng() - 0.5) * 0.5; return { c, x: Math.round(cx + Math.cos(a) * r * stretch), y: Math.round(cy + Math.sin(a) * r) }; });
   const noise = COLORS.map(() => field(rng, W, H));
   const tiles = new Array(W * H);
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     let best = 0, bd = Infinity;
-    seeds.forEach((s, i) => { const d = dist({ x, y }, s) + (noise[i][y][x] - 0.5) * 9; if (d < bd) { bd = d; best = i; } });
+    seeds.forEach((s, i) => { const d = dist({ x, y }, s) + (noise[i][y][x] - 0.5) * nStr; if (d < bd) { bd = d; best = i; } });
     tiles[y * W + x] = COLORS[best];
   }
   const at = (x, y) => tiles[y * W + x];
@@ -61,9 +62,11 @@ export function generateWorld(rng, enemies, startColor) {
   occupied.add(`${castle.x},${castle.y}`);
   const roam = [];
   let uid = 1;
-  for (let i = 0; i < 16; i++) {
+  const enemyCount = Math.round(W * H / 38);
+  const tierCut = Math.min(W, H) * 0.42;
+  for (let i = 0; i < enemyCount; i++) {
     const t = randomTile((x, y) => dist({ x, y }, start) >= 3); if (!t) continue;
-    const color = at(t.x, t.y); const tier = dist(t, start) < 9 ? 1 : 2;
+    const color = at(t.x, t.y); const tier = dist(t, start) < tierCut ? 1 : 2;
     const pool = enemies.filter(e => e.color === color && !e.boss); const tpl = pool.find(e => e.tier === tier) || pool[0]; if (!tpl) continue;
     roam.push({ uid: uid++, x: t.x, y: t.y, template: tpl.id, tier: tpl.tier, color }); occupied.add(`${t.x},${t.y}`);
   }
@@ -102,7 +105,7 @@ export function placeDungeons(world, rng, templates) {
 // Landmarks: a dozen scenery features that hold a riddle. Each sits alone on its tile; the kind fits the biome.
 const LANDMARK_KINDS = { G: ['well', 'standingStone', 'signpost', 'tower'], W: ['pond', 'well', 'standingStone'], R: ['volcano', 'cave', 'lavaVent'], B: ['skull', 'cave', 'bones', 'standingStone'], U: ['wreck', 'seaRock'] };
 export const landmarkAt = (world, x, y) => (world.landmarks || []).find(l => l.x === x && l.y === y);
-export function placeLandmarks(world, rng, count = 12) {
+export function placeLandmarks(world, rng, count = Math.max(12, Math.round(world.w * world.h / 55))) {
   if (world.landmarks) return world.landmarks;
   const taken = new Set([...world.cities.map(c => `${c.x},${c.y}`), ...world.links.map(l => `${l.x},${l.y}`), `${world.castle.x},${world.castle.y}`, ...world.enemies.map(e => `${e.x},${e.y}`), ...(world.dungeons || []).map(d => `${d.x},${d.y}`)]);
   const out = [];
@@ -125,7 +128,7 @@ export function placeSpecials(world, rng) {
   if (world.specials) return world.specials;
   const taken = new Set([...world.cities.map(c => `${c.x},${c.y}`), ...world.links.map(l => `${l.x},${l.y}`), `${world.castle.x},${world.castle.y}`, ...world.enemies.map(e => `${e.x},${e.y}`), ...(world.dungeons || []).map(d => `${d.x},${d.y}`), ...(world.landmarks || []).map(l => `${l.x},${l.y}`)]);
   const out = [];
-  const want = [{ kind: 'gemcutter' }, { kind: 'lostcity' }, { kind: 'diamondmine' }, { kind: 'diamondmine' }];
+  const want = [{ kind: 'gemcutter' }, { kind: 'lostcity' }, { kind: 'diamondmine' }, { kind: 'diamondmine' }, { kind: 'diamondmine' }];
   for (const spec of want) {
     for (let i = 0; i < 800; i++) {
       const x = Math.floor(rng() * world.w), y = Math.floor(rng() * world.h);
