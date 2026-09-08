@@ -75,7 +75,7 @@ export function parseTarget(phrase) {
   const r = {};
   if (p === 'any target' || /^target (creature or player|creature, player, or planeswalker|creature or planeswalker|player or planeswalker)$/.test(p)) return { sel: p.includes('player or planeswalker') && !p.includes('creature') ? 'player' : 'any', restrict: r };
   if (p === 'you' || p === 'yourself') return { sel: 'you', restrict: r };
-  if (p === '~' || p === 'it') return { sel: 'self', restrict: r };
+  if (p === '~' || p === 'it' || p === 'itself' || p === 'themselves') return { sel: 'self', restrict: r };
   if (p === 'that player' || p === "that player's") return { sel: 'thatPlayer', restrict: r };
   if (/^(?:that (?:land|creature|permanent)'s|its|the creature's) controller$/.test(p)) return { sel: 'prevController', restrict: r };
   if (/^(that creature|that permanent|it|them|that card|the creature|the other creature)$/.test(p)) return { sel: 'prev', restrict: r };
@@ -90,6 +90,8 @@ export function parseTarget(phrase) {
   if (p === 'the sacrificed creature' || p === 'that creature\'s') return { sel: 'sacrificed', restrict: r };
   let m;
   if ((m = p.match(/^you and (each .+)$/))) { const k = parseTarget(m[1]); if (!k || k.sel !== 'each') return null; k.restrict.players = 'you'; return k; }
+  if (/^another target /.test(p)) { const inner = parseTarget(p.replace(/^another /, '')); if (inner) { inner.restrict.other = true; return inner; } }
+  if (/^target spell with (?:converted mana cost|mana value) x$/.test(p)) return { sel: 'spell', restrict: { spellKind: 'spell', cmcX: true } };
   if ((m = p.match(/^target (.*?)\s*spell$/))) {
     const words = m[1].trim().split(/\s+/).filter(Boolean);
     const rr = { spellKind: 'spell' };
@@ -215,6 +217,7 @@ const rules = [
   [/^target player chooses (\S+) cards? from their hand and puts (?:them|it) on top of their library in any order$/, m => [{ type: 'putBack', amount: amt(m[1]), sel: 'player' }]],
   [/^target player discards (\S+) cards?, then draws as many cards as they discarded this way$/, m => [{ type: 'discard', amount: amt(m[1]), sel: 'player' }, { type: 'draw', amount: amt(m[1]), sel: 'prev', note: 'draws the full number even if fewer cards were discarded' }]],
   [/^look at the top (\S+) cards of your library, put one of them into your hand, and exile the rest$/, m => [{ type: 'peek', amount: amt(m[1]), mode: 'pick', sel: 'you', restrict: {} }]],
+  [/^look at the top (\S+) cards of (your|target player's) library\. put one of them into your hand and the rest on top of (?:your|their) library in any order$/, m => { const k = m[2] === 'your' ? { sel: 'you', restrict: {} } : T('target player'); return k ? [{ type: 'peek', amount: amt(m[1]), mode: 'handTop', ...k }] : null; }],
   [/^return (target creature) and all (?:white )?auras you own attached to it to their owners' hands$/, m => tgt({ type: 'bounce', note: 'auras go to the graveyard instead of your hand' }, m[1])],
   [/^put (target creature card from a graveyard) onto the battlefield under your control$/, m => tgt({ type: 'fromGraveyard', to: 'battlefield' }, m[1])],
   [/^return that card to the battlefield under your control$/, () => [{ type: 'fromGraveyard', to: 'battlefield', sel: 'prev' }]],
@@ -325,9 +328,11 @@ const rules = [
   [/^(target player|target opponent|each player|each opponent) loses (\S+) life$/, m => { const k = T(m[1]); return k ? [{ type: 'lose', amount: amt(m[2]), ...k }] : null; }],
   [/^its controller gains life equal to its power$/, () => [{ type: 'gainEqualPower', sel: 'prev' }]],
   [/^you gain life equal to (?:the damage dealt this way|its power|that creature's power)$/, () => [{ type: 'gainEqualPrev' }]],
-  [/^(target player|target opponent|each player|each opponent) mills (\S+) cards?$/, m => { const k = T(m[1]); return k ? [{ type: 'mill', amount: amt(m[2]), ...k }] : null; }],
+  [/^(target player|target opponent|each player|each opponent|that player) mills (\S+) cards?$/, m => { const k = T(m[1]); return k ? [{ type: 'mill', amount: amt(m[2]), ...k }] : null; }],
   [/^(?:you )?mill (\S+) cards?$/, m => [{ type: 'mill', amount: amt(m[1]), sel: 'you' }]],
   [/^counter (target(?: .+?)? spell)(?: unless its controller pays \{(\w+)\})?$/, m => { const k = T(m[1]); if (!k) return null; return [{ type: 'counter', unlessPay: m[2] ? (m[2].toUpperCase() === 'X' ? 'X' : Number(m[2])) : null, ...k }]; }],
+  [/^counter (target spell with mana value x)$/, m => { const k = T(m[1]); return k ? [{ type: 'counter', unlessPay: null, note: 'X must equal the spell\'s mana value; the game does not enforce it', ...k }] : null; }],
+  [/^counter (target(?: .+?)? spell)\. if that spell is countered this way, put it on top of its owner's library instead of into that player's graveyard$/, m => { const k = T(m[1]); return k ? [{ type: 'counter', toTop: true, unlessPay: null, ...k }] : null; }],
   [/^search your library for (?:a|an|up to \S+) (.+?) cards?(?:, reveal (?:it|that card|them),)?(?:,)? (?:and )?put (?:it|that card|them) (into your hand|onto the battlefield( tapped)?|on top of your library)(?:, then shuffle| and shuffle|, then shuffle your library| and shuffle your library)?$/, m => {
     const what = m[1].replace(/ or /g, '|'); const to = m[2].startsWith('into') ? 'hand' : m[2].startsWith('on top') ? 'top' : 'battlefield';
     return [{ type: 'tutor', what, to, tapped: !!m[3] }];
@@ -380,6 +385,8 @@ const rules = [
   [/^tap ~$/, () => [{ type: 'tap', sel: 'self' }]],
   [/^destroy (?:that creature|that wall|it|the other creature) at end of combat$/, () => [{ type: 'flag', flag: 'destroyAtEndOfCombat', sel: 'prev' }]],
   [/^destroy ~$/, () => [{ type: 'destroy', sel: 'self' }]],
+  [/^(?:~ )?deals (\S+) damage to you$/, m => [{ type: 'damage', amount: amt(m[1]), sel: 'you' }]],
+  [/^(?:~ |it )?deals (\S+) damage to itself$/, m => [{ type: 'damage', amount: amt(m[1]), sel: 'self' }]],
   [/^remove ~ from combat and tap it$/, () => [{ type: 'removeFromCombat', sel: 'self' }, { type: 'tap', sel: 'self' }]],
   [/^remove ~ from combat and it can't block this turn$/, () => [{ type: 'removeFromCombat', sel: 'self' }, { type: 'flag', flag: 'cantBlock', sel: 'self' }]],
   [/^destroy (?:that creature|it)$/, () => [{ type: 'destroy', sel: 'prev' }]],
@@ -417,7 +424,7 @@ function parseSentence(s) {
     const inner = parseSentence(um[1]);
     if (inner) return [{ type: 'unlessPay', life: Number(um[3]), effects: inner, payer: um[2] === 'you' ? 'you' : 'thatPlayer' }];
   }
-  for (const splitter of [/, then /, /\. then /, / and (?=you |target |~ |each |all |put |untap |tap |draw |discard |destroy |exile |return |gain |lose |that )/]) {
+  for (const splitter of [/, then /, /\. then /, / and (?=you |target |~ |each |all |put |untap |tap |draw |discard |destroy |exile |return |gain |lose |that |deals |it deals )/]) {
     if (splitter.test(t)) {
       const parts = t.split(splitter).map(parseClause);
       if (parts.every(Boolean)) return parts.flat();
@@ -457,6 +464,11 @@ export function parseEffects(text) {
       out.effects.push(coin);
       continue;
     }
+    const last = out.effects[out.effects.length - 1];
+    // Riders: a sentence that upgrades the previous effect in place instead of adding a new one.
+    if (last && last.type === 'counter' && /^if that spell is countered this way, put it on top of its owner's library instead of into that player's graveyard$/i.test(s.replace(/\.$/, ''))) { last.toTop = true; continue; }
+    if (last && last.type === 'peek' && /^put one of them into your hand and the rest on top of (?:your|their) library in any order$/i.test(s.replace(/\.$/, ''))) { last.mode = 'handTop'; continue; }
+    if (last && last.type === 'peek' && /^you may have that player shuffle$/i.test(s.replace(/\.$/, ''))) { last.mayShuffle = true; continue; }
     const e = parseSentence(s);
     if (e) { out.effects.push(...e); for (const x of e) if (x.note) out.notes.push('Approximated: ' + x.note); }
     else out.notes.push('Ignored: ' + s.slice(0, 80));
@@ -521,6 +533,7 @@ function parseKeywordLine(line, def) {
       else def.notes.push(`${p} ignored`);
     }
     else if ((m = p.match(/^(Plains|Island|Swamp|Mountain|Forest)walk$/))) found.push({ k: 'Landwalk', land: m[1] });
+    else if ((m = p.match(/^Snow (plains|island|swamp|mountain|forest)walk$/i))) found.push({ k: 'Landwalk', land: cap(m[1].toLowerCase()), snow: true });
     else if ((m = p.match(/^(Legendary )?landwalk$/i))) def.notes.push(`${p} ignored`);
     else if ((m = p.match(/^Cumulative upkeep[—\s-]+(.+)$/))) { const c = parseAbilityCost(m[1].replace(/\.$/, '')); if (c && !c.sacSelf) found.push({ k: 'Cumulative upkeep', cost: c }); else def.notes.push('Cumulative upkeep ignored'); }
     else if ((m = p.match(/^Cycling (\{.+\})$/))) found.push({ k: 'Cycling', cost: parseCost(m[1]) });
@@ -605,6 +618,7 @@ function parseStatic(t) {
     if (cond) {
       let cm, c = null;
       if ((cm = cond.match(/^you control (?:a|an) (plains|island|swamp|mountain|forest)$/))) c = { landType: cap(cm[1]) };
+      else if (/^you control a snow land$/.test(cond)) c = { snowLand: true };
       else if (/^~ is untapped$/.test(cond)) c = { selfUntapped: true };
       else if (/^it's untapped$/.test(cond)) c = scope.who === 'enchanted' ? { enchantedUntapped: true } : { selfUntapped: true };
       else if ((cm = cond.match(/^it's (white|blue|black|red|green)$/)) && scope.who === 'enchanted') c = { enchantedColor: COLOR_WORD[cm[1]] };
@@ -767,6 +781,7 @@ function parseEvent(w) {
   if (/^~ attacks$/.test(w)) return { event: 'attacks' };
   if (/^~ attacks and isn't blocked$/.test(w)) return { event: 'unblocked' };
   if (/^~ blocks$/.test(w)) return { event: 'blocks' };
+  if (/^~ blocks or becomes blocked$/.test(w)) return { event: 'blocksOrBecomesBlocked' };
   if (/^~ becomes blocked$/.test(w)) return { event: 'becomesBlocked' };
   if (/^~ attacks or blocks$/.test(w)) return { event: 'attacksOrBlocks' };
   if ((m = w.match(/^~ blocks or becomes blocked by (?:a |an )?(.+?)$/))) return { event: 'blocksOrBlockedBy', filter: parseCreatureFilter(m[1] === 'creature' ? '' : m[1]) };
@@ -801,7 +816,8 @@ function parseEvent(w) {
   if (/^enchanted creature deals (?:combat )?damage to you$/.test(w)) return { event: 'enchantedDealsDamage', toYou: true };
   if (/^enchanted creature dies$/.test(w)) return { event: 'enchantedDies' };
   if (/^enchanted creature attacks$/.test(w)) return { event: 'enchantedAttacks' };
-  if (/^you cast a (?:noncreature|creature|historic)? ?spell$/.test(w)) return { event: 'youCast', kind: w.includes('noncreature') ? 'noncreature' : w.includes('creature') ? 'creature' : 'any' };
+  if (/^you cast a spell$/.test(w)) return { event: 'youCast', kind: 'any' };
+  if ((m = w.match(/^you cast (?:a|an) (\w+) spell$/))) { const k = m[1]; return { event: 'youCast', kind: ['noncreature', 'creature', 'artifact', 'enchantment', 'instant', 'sorcery'].includes(k) ? k : 'any' }; }
   if (/^a player casts a spell$/.test(w)) return { event: 'anyCast' };
   if (/^~ is turned face up$/.test(w)) return null;
   return null;

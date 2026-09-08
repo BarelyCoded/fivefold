@@ -361,6 +361,7 @@ export class Duel {
       case 'attacks': return ev.type === 'attacks' && ev.card === c;
       case 'unblocked': return ev.type === 'unblocked' && ev.card === c;
       case 'blocks': return ev.type === 'blocks' && ev.card === c;
+      case 'blocksOrBecomesBlocked': return (ev.type === 'blocks' || ev.type === 'becomesBlocked') && ev.card === c;
       case 'becomesBlocked': return ev.type === 'becomesBlocked' && ev.card === c;
       case 'becomesBlockedBy': return ev.type === 'becomesBlocked' && ev.card === c && ev.by.some(b => this.matchFilter(b, ab.filter));
       case 'enchantedTapped': return ev.type === 'tapped' && !!c.attachedTo && ev.card === c.attachedTo;
@@ -394,7 +395,7 @@ export class Duel {
       case 'endstep': return ev.type === 'endstep' && (ab.who === 'each' || ev.player === c.controller);
       case 'drawstep': return ev.type === 'drawstep' && (ab.who === 'each' || ev.player === c.controller);
       case 'beginCombat': return ev.type === 'beginCombat' && ev.player === c.controller;
-      case 'youCast': return ev.type === 'cast' && ev.player === c.controller && (ab.kind === 'any' || (ab.kind === 'creature') === isCreatureDef(ev.card));
+      case 'youCast': return ev.type === 'cast' && ev.player === c.controller && (ab.kind === 'any' || (ab.kind === 'creature' ? isCreatureDef(ev.card) : ab.kind === 'noncreature' ? !isCreatureDef(ev.card) : ev.card.def.kind === ab.kind || ev.card.def.types.map(t => t.toLowerCase()).includes(ab.kind)));
       case 'anyCast': return ev.type === 'cast' && (!ab.color || ev.card.def.colors.includes(ab.color)) && (!ab.who || (ab.who === 'opp') === (ev.player !== c.controller)) && (!ab.kind || ab.kind === 'any' || (ab.kind === 'noncreature' ? !isCreatureDef(ev.card) : ab.kind === 'creature' ? isCreatureDef(ev.card) : ev.card.def.kind === ab.kind || ev.card.def.types.map(t => t.toLowerCase()).includes(ab.kind)));
       case 'exalted': return false;
     }
@@ -986,6 +987,7 @@ export class Duel {
       case 'gainEqualPrev': { const s = e.of === 'sacrificed' ? (ctx.item?.sacrificed ? { card: ctx.item.sacrificed } : null) : (this.prevCard(ctx) ? { card: this.prevCard(ctx) } : null); const k = s?.card ? (e.stat === 'toughness' ? toughness(s.card) : e.stat === 'cmc' ? s.card.def.cmc : power(s.card)) : (ctx.lastDamage || 0); if (k) { p.life += k; this.say(`${p.name} gains ${k} life.`); } break; }
       case 'mill': for (const s of subs) if (s.player) { const k = this.amount(e.amount, ctx, s); for (let i = 0; i < k; i++) { const c = s.player.library.pop(); if (c) this.moveTo(c, 'graveyard'); } } break;
       case 'counter': for (const s of subs) if (s.item) {
+        if (e.toTop) s.item._toTop = true;
         const ctrl = this.players[s.item.controller];
         if (e.unlessPay) { const pay = this.amount(e.unlessPay, ctx); const cost = { pips: [], generic: pay, x: false }; if (this.canPay(ctrl, cost)) { const yes = yield { kind: 'yesno', player: ctrl.idx, text: `Pay {${pay}} to stop ${s.item.card.def.name} from being countered?`, value: 'pay' }; if (yes) { this.payMana(ctrl, this.planPayment(ctrl, cost)); this.say(`${ctrl.name} pays ${pay}.`); continue; } } }
         this.counterItem(s.item);
@@ -1019,7 +1021,7 @@ export class Duel {
         this.say(`${who.name} puts ${k} card${k > 1 ? 's' : ''} from hand on top of their library.`);
         break;
       }
-      case 'peek': for (const s of subs) if (s.player) yield* this.peek(p, s.player, n, e.mode); break;
+      case 'peek': for (const s of subs) if (s.player) yield* this.peek(p, s.player, n, e.mode, e.mayShuffle); break;
       case 'extraTurn': this.extraTurns++; break;
       case 'token': { const cnt = this.amount(e.count ?? e.amount ?? 1, ctx) || 1; for (let i = 0; i < cnt; i++) this.createToken(p, e); break; }
       case 'exileGraveyard': { const pls = e.who === 'you' ? [p] : e.who === 'each' ? this.players : subs.filter(s => s.player).map(s => s.player); for (const pl of pls) for (const c of pl.graveyard.slice()) this.moveTo(c, 'exile'); break; }
@@ -1080,7 +1082,7 @@ export class Duel {
     if (e.to === 'top' && c) { removeFrom(p.library, c); p.library.push(c); }
   }
   // Look at the top n cards of `owner`'s library. mode: 'look' | 'reorder' (put back in any order) | 'bottom' (may put on the bottom).
-  *peek(p, owner, n, mode = 'look') {
+  *peek(p, owner, n, mode = 'look', mayShuffle = false) {
     const top = owner.library.slice(-n).reverse(); // top card first
     if (!top.length) return;
     const whose = owner === p ? (p.ai ? 'their' : 'your') : `${owner.name}'s`;
@@ -1096,6 +1098,16 @@ export class Duel {
     } else if (mode === 'bottom') {
       const ids = yield { kind: 'choose', player: p.idx, text: `Choose cards to put on the bottom of ${whose} library`, options: opts, min: 0, max: top.length, secret: true };
       for (const id of ids || []) { const c = this.card(id); if (c && top.includes(c)) { removeFrom(owner.library, c); owner.library.unshift(c); } }
+    } else if (mode === 'handTop') {
+      const pick = yield { kind: 'choose', player: p.idx, text: `Put one card from the top ${top.length} of ${whose} library into your hand; the rest go back on top`, options: opts, min: 1, max: 1, secret: true };
+      const keep = this.card((pick || [])[0]) || top[0];
+      const rest = top.filter(c => c !== keep);
+      let order = rest;
+      if (rest.length > 1) { const ids = yield { kind: 'order', player: p.idx, text: `Order the remaining ${rest.length} cards on top (first ends up on top)`, options: rest.map(c => ({ id: c.id, label: c.def.name })), secret: true }; const o = (ids || []).map(id => this.card(id)).filter((c, i, a) => c && rest.includes(c) && a.indexOf(c) === i); for (const c of rest) if (!o.includes(c)) o.push(c); order = o; }
+      for (const c of top) removeFrom(owner.library, c);
+      for (const c of order.slice().reverse()) owner.library.push(c);
+      this.moveTo(keep, 'hand');
+      this.say(`${p.name} takes one card and puts ${rest.length} back on top.`);
     } else if (mode === 'pick') {
       const ids = yield { kind: 'choose', player: p.idx, text: `Choose one card to put into your hand; the rest are exiled`, options: opts, min: 1, max: 1, secret: true };
       const keep = this.card((ids || [])[0]) || top[0];
@@ -1103,6 +1115,10 @@ export class Duel {
       this.say(`${p.name} keeps one card and exiles ${top.length - 1}.`);
     } else if (!p.ai) {
       yield { kind: 'look', player: p.idx, text: `Top of ${whose} library, top card first`, options: opts, secret: true };
+    }
+    if (mayShuffle) {
+      const yes = p.ai ? false : yield { kind: 'yesno', player: p.idx, text: `Have ${owner === p ? 'yourself' : owner.name} shuffle?`, value: 'shuffle' };
+      if (yes) { shuffle(owner.library, this.rng); this.say(`${owner.name}'s library is shuffled.`); }
     }
   }
   *scry(p, n) {
@@ -1198,7 +1214,7 @@ export class Duel {
     const i = this.stack.indexOf(item); if (i < 0) return;
     this.stack.splice(i, 1);
     this.say(`${item.card.def.name} is countered.`);
-    if (item.kind === 'spell') { item.card.zone = 'limbo'; this.moveTo(item.card, item.flashback ? 'exile' : 'graveyard'); }
+    if (item.kind === 'spell') { item.card.zone = 'limbo'; if (item._toTop) { this.moveTo(item.card, 'library'); const ow = this.players[item.card.owner]; removeFrom(ow.library, item.card); ow.library.push(item.card); } else this.moveTo(item.card, item.flashback ? 'exile' : 'graveyard'); }
   }
   dealDamage(source, target, n, opts = {}) {
     if (n <= 0) return 0;
@@ -1253,7 +1269,7 @@ export class Duel {
     if (has(a, 'Intimidate') && !(isType(b, 'artifact') || b.def.colors.some(c => a.def.colors.includes(c)))) return false;
     if (b.cur.flags.has('blockOnlyFlying') && !has(a, 'Flying')) return false;
     if (b.cur.cantBlockPower !== undefined && power(a) >= b.cur.cantBlockPower) return false;
-    for (const k of a.cur.kw) if (typeof k === 'object' && k.k === 'Landwalk' && !this.ignoreLandwalk.has('all') && !this.ignoreLandwalk.has(k.land) && this.players[b.controller].battlefield.some(l => isLand(l) && hasSubtype(l, k.land))) return false;
+    for (const k of a.cur.kw) if (typeof k === 'object' && k.k === 'Landwalk' && !this.ignoreLandwalk.has('all') && !this.ignoreLandwalk.has(k.land) && this.players[b.controller].battlefield.some(l => isLand(l) && hasSubtype(l, k.land) && (!k.snow || l.def.supertypes.includes('Snow')))) return false;
     if (a.flags.has('cantBeBlockedByWalls') && hasSubtype(b, 'Wall')) return false;
     if (a.flags.has('blockableOnlyByWalls') && !hasSubtype(b, 'Wall')) return false;
     if (this.protectedFrom(a, b)) return false;
@@ -1350,6 +1366,7 @@ export class Duel {
     const me = this.players[src.controller], opp = this.opponentOf(me);
     let ok = true;
     if (cond.landType && !me.battlefield.some(l => isLand(l) && hasSubtype(l, cond.landType))) ok = false;
+    if (cond.snowLand && !me.battlefield.some(l => isLand(l) && l.def.supertypes.includes('Snow'))) ok = false;
     if (cond.selfUntapped && src.tapped) ok = false;
     if (cond.selfTapped && !src.tapped) ok = false;
     if (cond.hasCounter && !((src.counters[cond.hasCounter] || 0) > 0)) ok = false;
