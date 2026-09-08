@@ -3,7 +3,7 @@
 // gnarled trees in swamps, stone castles and domed keeps. Rendered at half resolution and
 // scaled 2x with smoothing off for chunky pixels. A camera follows the player.
 import { COLORS } from './cards.js';
-import { atlasReady, blit, blitAt, pick, sheetPixels, TERRAIN, ACCENT_RATE, SPRITES, SCENERY, MONSTERS } from './atlas.js';
+import { atlasReady, atlasState, blit, blitAt, pick, sheetPixels, TERRAIN, ACCENT_RATE, SPRITES, SCENERY, MONSTERS } from './atlas.js';
 
 export const W = 30, H = 20;
 export const PX = 38;          // internal pixels per tile (one sprite-sheet tile)
@@ -185,22 +185,44 @@ function paintTiles(world) {
   const h = (x, y, s) => hash(x, y, s + seed);
   const at = (x, y) => inBounds(world, x, y) ? tileAt(world, x, y) : null;
   const sheetOf = rect => sheetPixels(rect);
+  // Per-cell tables: whether all neighbours share the cell's biome (then no border noise is needed),
+  // and whether a sea cell touches land (then it may get a beach).
+  const W_ = world.w, H_ = world.h;
+  const uniform = new Uint8Array(W_ * H_), coast = new Uint8Array(W_ * H_);
+  for (let ty = 0; ty < H_; ty++) for (let tx = 0; tx < W_; tx++) {
+    const b = at(tx, ty); let same = true, land = false;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const t = at(tx + dx, ty + dy); if (t && t !== b) { same = false; if (b === 'U') land = true; } }
+    uniform[ty * W_ + tx] = same ? 1 : 0; coast[ty * W_ + tx] = land ? 1 : 0;
+  }
   const owner = (x, y) => {
     const tx = Math.floor(x / PX), ty = Math.floor(y / PX);
-    let best = at(tx, ty), bd = Infinity;
-    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-      const t = at(tx + dx, ty + dy); if (!t) continue;
+    const b = at(tx, ty);
+    if (uniform[ty * W_ + tx]) return b;
+    // jittered distance to a neighbouring cell centre
+    const dist2 = (dx, dy) => {
       const cx = (tx + dx) * PX + PX / 2 + (vnoise(x / 11, y / 11, seed + dx * 3 + dy * 7) - 0.5) * 26;
       const cy = (ty + dy) * PX + PX / 2 + (vnoise(x / 13, y / 13, seed + dx * 5 + dy * 11) - 0.5) * 26;
-      const d = Math.hypot(x - cx, y - cy); if (d < bd) { bd = d; best = t; }
+      return (x - cx) * (x - cx) + (y - cy) * (y - cy);
+    };
+    // Only a neighbour of another biome can change the answer, so measure those first and the
+    // same-biome neighbours only when one of them actually beats the cell's own centre.
+    let best = b, bd = dist2(0, 0), foreign = false;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      if (!dx && !dy) continue; const t = at(tx + dx, ty + dy); if (!t || t === b) continue;
+      const d = dist2(dx, dy); if (d < bd) { bd = d; best = t; foreign = true; }
+    }
+    if (!foreign) return b;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      if (!dx && !dy) continue; const t = at(tx + dx, ty + dy); if (t !== b) continue;
+      if (dist2(dx, dy) < bd) return b;
     }
     return best;
   };
-  const rectCache = new Map();
+  const rectTable = {};
   // Ground per cell; accent cells (lava pools, volcano tiles) get an organic noise mask so they do not read as squares.
   const tileFor = (b, tx, ty, x, y) => {
-    const k = b + tx + ',' + ty; let r = rectCache.get(k);
-    if (!r) { const t = TERRAIN[b] || TERRAIN.G; const a = h(tx, ty, 5), pk = h(tx, ty, 6); r = { base: pick(t.base, pk), accent: a < (ACCENT_RATE[b] ?? 0.15) && t.accent.length ? pick(t.accent, pk) : null }; rectCache.set(k, r); }
+    const tab = rectTable[b] || (rectTable[b] = new Array(W_ * H_)); let r = tab[ty * W_ + tx];
+    if (!r) { const t = TERRAIN[b] || TERRAIN.G; const a = h(tx, ty, 5), pk = h(tx, ty, 6); r = { base: pick(t.base, pk), accent: a < (ACCENT_RATE[b] ?? 0.15) && t.accent.length ? pick(t.accent, pk) : null }; tab[ty * W_ + tx] = r; }
     if (r.accent && x !== undefined) {
       // pools: noise inside a soft disc around the cell centre, so no pool follows a cell edge
       const nx = x - (tx * PX + PX / 2), ny = y - (ty * PX + PX / 2);
@@ -214,7 +236,7 @@ function paintTiles(world) {
     const b = owner(x, y);
     const tx = Math.floor(x / PX), ty = Math.floor(y / PX);
     let rect;
-    if (b === 'U') {
+    if (b === 'U' && coast[ty * W_ + tx]) {
       let dl = 99;
       for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const t = at(tx + dx, ty + dy); if (t && t !== 'U') dl = Math.min(dl, Math.hypot(x - ((tx + dx) * PX + PX / 2), y - ((ty + dy) * PX + PX / 2))); }
       const sandy = dl < PX * 0.9 + (vnoise(x / 7, y / 7, seed + 77) - 0.5) * 16;
@@ -301,6 +323,11 @@ function paintRoads(ctx, world, seed) {
 }
 function paintTerrain(world) {
   if (atlasReady()) return paintTiles(world);
+  if (atlasState() === 'loading') { // the sheet arrives in a moment; a flat placeholder avoids painting twice
+    const c = document.createElement('canvas'); c.width = world.w * PX; c.height = world.h * PX;
+    const ctx = c.getContext('2d'); for (let y = 0; y < world.h; y++) for (let x = 0; x < world.w; x++) { ctx.fillStyle = PAL[tileAt(world, x, y)].ground[0]; ctx.fillRect(x * PX, y * PX, PX, PX); }
+    return c;
+  }
   const Wp = world.w * PX, Hp = world.h * PX;
   const c = document.createElement('canvas'); c.width = Wp; c.height = Hp;
   const ctx = c.getContext('2d'); ctx.imageSmoothingEnabled = false;

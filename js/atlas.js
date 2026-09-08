@@ -168,6 +168,7 @@ function applyEntry(key, rect, lists) {
   }
 }
 export const atlasReady = () => ready;
+export const atlasState = () => ready ? 'ready' : failed ? 'failed' : images.length ? 'loading' : 'idle';
 export function onAtlas(fn) { listeners.push(fn); if (ready) fn(); }
 
 // Raw pixels of the sheet a rectangle lives in, for painters that sample textures per pixel.
