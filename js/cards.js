@@ -587,6 +587,10 @@ function parseStatic(t) {
   if (/^you may play an additional land on each of your turns$/.test(t)) return [{ type: 'static', kind: 'extraLands', n: 1, who: 'you', scope: { who: 'self' } }];
   if (/^artifacts, creatures, and lands your opponents control enter tapped$/.test(t)) return [{ type: 'static', kind: 'oppEntersTapped', scope: { who: 'self' } }];
   if (/^you have no maximum hand size$/.test(t)) return [{ type: 'static', kind: 'noMaxHand', scope: { who: 'self' } }];
+  if ((m = t.match(/^all (lands|(?:plains|islands|swamps|mountains|forests)) are (\d+)\/(\d+)(?: (?:white|blue|black|red|green))? creatures that are still lands$/))) {
+    const scope = m[1] === 'lands' ? { who: 'all', types: ['land'] } : { who: 'all', types: ['land'], subtype: cap(m[1].replace(/s$/, '')) };
+    return [{ type: 'static', kind: 'animateLand', p: Number(m[2]), t: Number(m[3]), scope }];
+  }
   if ((m = t.match(/^damage that would reduce your life total to less than (\d+) reduces it to \1 instead$/))) return [{ type: 'static', kind: 'lifeFloor', n: Number(m[1]), scope: { who: 'self' } }];
   if (/^~ can't be the target of aura spells$/.test(t)) return [{ type: 'static', kind: 'noAuras', scope: { who: 'self' } }];
   if ((m = t.match(/^~ can't attack if defending player controls an untapped creature with power (\d+) or greater$/))) return [{ type: 'static', kind: 'cantAttackIfDefenderPower', n: Number(m[1]), scope: { who: 'self' } }];

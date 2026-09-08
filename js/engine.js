@@ -1413,6 +1413,7 @@ export class Duel {
           case 'cantAttackIfDefenderPower': c.cur.cantAttackIfDefenderPower = Math.min(c.cur.cantAttackIfDefenderPower ?? 99, ab.n); break;
           case 'blockableOnlyBy': c.cur.blockableOnlyBy.push(ab.filter); break;
           case 'attackOnlyIfDefenderHas': c.cur.attackOnlyIfDefenderHas = ab.land; break;
+          case 'animateLand': if (isLand(c)) { c.cur.types.add('creature'); c.cur.p += ab.p; c.cur.t += ab.t; } break;
           case 'preventFrom': (c.cur.preventFrom ||= []).push(ab.from); break;
         }
       }
