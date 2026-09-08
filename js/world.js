@@ -628,9 +628,9 @@ export function present(canvas, frame, fw, fh, labels = [], opts = {}) {
   const k = opts.scale || (avail >= fw * 2 ? 2 : avail >= fw * 1.5 ? 1.5 : 1);
   const dpr = window.devicePixelRatio || 1;
   const s = k * dpr;
-  canvas.width = Math.round(fw * s); canvas.height = Math.round(fh * s);
-  canvas.style.width = Math.round(fw * k) + 'px'; canvas.style.height = Math.round(fh * k) + 'px';
-  const ctx = canvas.getContext('2d'); ctx.imageSmoothingEnabled = false;
+  const cw = Math.round(fw * s), ch = Math.round(fh * s);
+  if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; canvas.style.width = Math.round(fw * k) + 'px'; canvas.style.height = Math.round(fh * k) + 'px'; }
+  const ctx = canvas.getContext('2d'); ctx.imageSmoothingEnabled = false; ctx.clearRect(0, 0, cw, ch);
   ctx.drawImage(frame, 0, 0, canvas.width, canvas.height);
   for (const l of labels) {
     const size = Math.round((l.size || 9) * s);

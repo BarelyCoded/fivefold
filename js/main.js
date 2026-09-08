@@ -430,7 +430,9 @@ function render() {
   app.classList.toggle('full', S.screen === 'duel');
   renderTop();
   const views = { title, collection, deck, map, city, duel, result, end, dungeon };
-  app.innerHTML = '';
+  // The map keeps its canvas between steps (re-creating a full-size canvas every keypress is what made walking feel slow).
+  const keepMap = S.screen === 'map' && !!app.querySelector('.mapscreen #map');
+  if (keepMap) { for (const el of app.querySelectorAll('.overlay, .toast')) el.remove(); } else app.innerHTML = '';
   (views[S.screen] || title)();
   if (S.modal) app.insertAdjacentHTML('beforeend', `<div class="overlay"><div class="modal"><h3>${S.modal.title}</h3><div class="mbody">${S.modal.body}</div><div class="mbtns">${S.modal.buttons.map((b, i) => `<button class="btn${b.primary ? ' primary' : ''}" data-modal="${i}" ${b.disabled ? 'disabled' : ''}>${esc(b.label)}</button>`).join('')}</div></div></div>`);
   if (S.toast) app.insertAdjacentHTML('beforeend', `<div class="toast">${esc(S.toast)}</div>`);
@@ -523,20 +525,20 @@ function map() {
   const g = S.game; if (!g) return title();
   const here = tileAt(g.world, g.player.x, g.player.y);
   const near = g.world.enemies.filter(e => Math.abs(e.x - g.player.x) <= 1 && Math.abs(e.y - g.player.y) <= 1);
-  app.innerHTML = `<section class="screen mapscreen">
-    <div class="mapwrap"><canvas id="map"></canvas></div>
-    <aside class="mappanel">
-      <canvas id="minimap" class="minimap"></canvas>
+  const panel = `<canvas id="minimap" class="minimap"></canvas>
       <h2>${esc(g.name)}</h2>
       <p>Standing in the <b>${BIOME[here].name}</b> (${COLOR_NAME[here]}). ${near.length ? `<br>${near.map(e => enemyById(e.template).name).join(', ')} nearby.` : ''}</p>
       <p class="small">Move with WASD or the arrow keys, or click a neighbouring tile. Walking costs food. Blue crystals are mana links (+2 life). Landmarks marked ? ask a riddle about a card: answer right for a card of that region's color, wrong and you lose life, food or, rarely, a card. Pits with a torch are dungeons: revealed by clues from beaten foes, fought room by room with your life carried over. The dark fortress is the Usurper.</p>
       ${(g.world.dungeons || []).some(d => d.revealed) ? `<p class="small">Known dungeons: ${g.world.dungeons.filter(d => d.revealed).map(d => `${dungeonTemplate(d.id).name}${d.cleared ? ' (cleared)' : ''}`).join(', ')}.</p>` : ''}
       <div class="btnrow"><button class="btn" id="b-rest" ${g.player.food < 3 || g.player.life >= g.player.maxLife ? 'disabled' : ''}>Rest (3 food, +5 life)</button><button class="btn ghost" data-go="title">Menu</button></div>
       <h3>Legend</h3>
-      <div class="legend">${COLORS.map(c => `<span><i class="sw" style="background:${BIOME[c].fill}"></i>${BIOME[c].name}</span>`).join('')}</div>
-    </aside>
-  </section>`;
-  const canvas = document.getElementById('map');
+      <div class="legend">${COLORS.map(c => `<span><i class="sw" style="background:${BIOME[c].fill}"></i>${BIOME[c].name}</span>`).join('')}</div>`;
+  let canvas = app.querySelector('.mapscreen #map');
+  if (canvas) app.querySelector('.mappanel').innerHTML = panel;
+  else {
+    app.innerHTML = `<section class="screen mapscreen"><div class="mapwrap"><canvas id="map"></canvas></div><aside class="mappanel">${panel}</aside></section>`;
+    canvas = document.getElementById('map');
+  }
   if (!g.world.landmarks) { placeLandmarks(g.world, Math.random); save(); }
   const hl = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dy]) => [g.player.x + dx, g.player.y + dy]).filter(([x, y]) => inBounds(g.world, x, y));
   const cam = drawWorld(canvas, g.world, g.player, { highlight: hl });
