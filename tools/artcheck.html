@@ -22,7 +22,7 @@
 <h2>Portraits</h2>
 <div id="portraits" class="strip"></div>
 <script type="module">
-import { generateWorld, drawWorld, drawMinimap, placeDungeons } from '../js/world.js';
+import { generateWorld, drawWorld, drawMinimap, placeDungeons, placeLandmarks } from '../js/world.js';
 import { generateDungeon, drawDungeon } from '../js/dungeon.js';
 import { loadAtlas, onAtlas, spriteStyle, SPRITES, MONSTERS } from '../js/atlas.js';
 let seed = Number(new URLSearchParams(location.search).get('seed') || 3);
@@ -34,6 +34,7 @@ onAtlas(() => {
   const world = generateWorld(rng, enemies, 'G');
   placeDungeons(world, rng, dungeons);
   for (const d of world.dungeons) d.revealed = true;
+  placeLandmarks(world, rng);
   const at = new URLSearchParams(location.search).get('at');
   const player = at === 'castle' ? { x: world.castle.x - 2, y: world.castle.y } : { x: world.start.x, y: world.start.y };
   const cam = drawWorld(document.getElementById('map'), world, player);

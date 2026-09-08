@@ -2,7 +2,7 @@
 import { parseList, importNames, defOf, forgetDefs, loadArtIndex, artFor, artCount, hasOwnArt } from './collection.js';
 import { fetchCards, cacheSize, cached as cachedCard } from './scryfall.js';
 import { COLORS, COLOR_NAME, costString, statusLabel } from './cards.js';
-import { generateWorld, drawWorld, drawMinimap, tileAt, inBounds, cityAt, linkAt, enemyAt, stepEnemies, BIOME, TILE, VIEW, placeDungeons, dungeonAt } from './world.js';
+import { generateWorld, drawWorld, drawMinimap, tileAt, inBounds, cityAt, linkAt, enemyAt, stepEnemies, BIOME, TILE, VIEW, placeDungeons, dungeonAt, placeLandmarks, landmarkAt } from './world.js';
 import { Duel } from './engine.js';
 import { mountDuel, cardHtml } from './duelview.js';
 import { aiHooks } from './ai.js';
@@ -119,6 +119,7 @@ async function newGame({ name, color, difficulty }) {
   for (const [n, c] of Object.entries(starter.deck)) { deck[n] = c; if (!BASIC_NAMES.has(n)) addCards(S.collection, n, c); }
   const world = generateWorld(Math.random, S.content.enemies, color);
   placeDungeons(world, Math.random, S.dungeons.dungeons);
+  placeLandmarks(world, Math.random);
   S.game = {
     name: name || 'Wanderer', color, difficulty, deck, world,
     player: { x: world.start.x, y: world.start.y, life: d.life, maxLife: d.life, gold: d.gold, food: 60, day: 1, steps: 0 },
@@ -149,6 +150,37 @@ function move(dx, dy) {
   save();
   const city = cityAt(g.world, nx, ny);
   if (city) { go('city'); return; }
+  const lm = landmarkAt(g.world, nx, ny);
+  if (lm && !lm.used) { landmarkRiddle(lm); return; }
+  render();
+}
+// ---- landmark riddles ---------------------------------------------------------------
+const LANDMARK_TEXT = { well: 'An old well. A voice echoes up from the water', standingStone: 'A standing stone carved with runes', signpost: 'A signpost with a riddle scratched into it', tower: 'A watchtower. The lookout wants a password', pond: 'An oasis. Something under the water speaks', volcano: 'A volcano. A voice rumbles from the crater', cave: 'A cave mouth. Something inside asks a question', lavaVent: 'A lava vent hisses a question', skull: 'A skull on a pike. Its jaw moves', bones: 'Bones arranged into words', wreck: 'A wreck. A drowned sailor asks', seaRock: 'A rock in the surf. A siren sings a question' };
+function landmarkRiddle(lm) {
+  const g = S.game;
+  const color = lm.color || tileAt(g.world, lm.x, lm.y);
+  const pool = [...new Set([...cityPool(color), ...S.dungeons.dungeons.filter(d => d.color === color).flatMap(d => d.treasure)])].filter(n => { const d = defOf(n); return d && d.kind !== 'unsupported' && d.kind !== 'land'; });
+  const r = makeRiddle(Math.random, pool.map(defOf), ['cost', 'color', 'pt']);
+  if (!r) { lm.used = true; save(); render(); return; }
+  S.modal = {
+    title: LANDMARK_TEXT[lm.kind] || 'A landmark',
+    body: `<p class="taunt">${esc(r.q)}</p><p class="small">Answer right for a ${esc(COLOR_NAME[color] || '')} card. Answer wrong and it takes something from you.</p>`,
+    buttons: r.options.map(o => ({ label: o, action: () => {
+      S.modal = null; lm.used = true;
+      let msg;
+      if (o === r.answer) {
+        const card = rnd(pool.filter(n => defOf(n).cmc <= 6)) || rnd(pool);
+        addCards(S.collection, card, 1); msg = `Correct. You are given ${card}.`;
+      } else {
+        const roll = Math.random();
+        const owned = Object.keys(S.collection).filter(n => !BASIC_NAMES.has(n) && S.collection[n] > 0);
+        if (roll < 0.05 && owned.length) { const lost = rnd(owned); addCards(S.collection, lost, -1); if (g.deck[lost]) { addCards(g.deck, lost, -1); if (deckSize(g.deck) < 40) fillBasics(g.deck); } msg = `Wrong: it was ${r.answer}. ${lost} is taken from you.`; }
+        else if (roll < 0.5) { const n = 1 + Math.floor(Math.random() * 3); g.player.life = Math.max(1, g.player.life - n); msg = `Wrong: it was ${r.answer}. You lose ${n} life.`; }
+        else { const n = 2 + Math.floor(Math.random() * 4); g.player.food = Math.max(0, g.player.food - n); msg = `Wrong: it was ${r.answer}. ${n} food spoils in your pack.`; }
+      }
+      save(); toast(msg);
+    } })),
+  };
   render();
 }
 function bossLink() {
@@ -496,7 +528,7 @@ function map() {
       <canvas id="minimap" class="minimap"></canvas>
       <h2>${esc(g.name)}</h2>
       <p>Standing in the <b>${BIOME[here].name}</b> (${COLOR_NAME[here]}). ${near.length ? `<br>${near.map(e => enemyById(e.template).name).join(', ')} nearby.` : ''}</p>
-      <p class="small">Move with WASD or the arrow keys, or click a neighbouring tile. Walking costs food. Blue crystals are mana links (+2 life). Pits with a torch are dungeons: revealed by clues from beaten foes, fought room by room with your life carried over. The dark fortress is the Usurper.</p>
+      <p class="small">Move with WASD or the arrow keys, or click a neighbouring tile. Walking costs food. Blue crystals are mana links (+2 life). Landmarks marked ? ask a riddle about a card: answer right for a card of that region's color, wrong and you lose life, food or, rarely, a card. Pits with a torch are dungeons: revealed by clues from beaten foes, fought room by room with your life carried over. The dark fortress is the Usurper.</p>
       ${(g.world.dungeons || []).some(d => d.revealed) ? `<p class="small">Known dungeons: ${g.world.dungeons.filter(d => d.revealed).map(d => `${dungeonTemplate(d.id).name}${d.cleared ? ' (cleared)' : ''}`).join(', ')}.</p>` : ''}
       <div class="btnrow"><button class="btn" id="b-rest" ${g.player.food < 3 || g.player.life >= g.player.maxLife ? 'disabled' : ''}>Rest (3 food, +5 life)</button><button class="btn ghost" data-go="title">Menu</button></div>
       <h3>Legend</h3>
@@ -504,6 +536,7 @@ function map() {
     </aside>
   </section>`;
   const canvas = document.getElementById('map');
+  if (!g.world.landmarks) { placeLandmarks(g.world, Math.random); save(); }
   const hl = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dy]) => [g.player.x + dx, g.player.y + dy]).filter(([x, y]) => inBounds(g.world, x, y));
   const cam = drawWorld(canvas, g.world, g.player, { highlight: hl });
   drawMinimap(document.getElementById('minimap'), g.world, g.player, cam);

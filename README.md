@@ -58,6 +58,8 @@ At the time of writing, 76% of the 1,590 distinct cards from Alpha to Alliances 
 
 Five dungeons are hidden on the map, one per color. Beating a roaming mage has a chance to yield a clue that reveals one. Inside is a top-down stone maze on black rock: stationary monsters block the corridors until beaten, and your life carries from fight to fight under a per-dungeon rule (six-card hands, a Wall guarding every fight, a life drain, tougher guardians). Treasure piles hold gold, healing draughts, cards from the dungeon's list, or an amulet that raises maximum life. Scrolls ask a riddle about a real card: answer right for a card and gold, wrong and the scroll burns you. The guardian before the exit keeps the vault: a card from the list in `content/dungeons.json`, a chance at a famous artifact, and gold. There is no ante inside. Leave by the entrance or the exit at any time; the maze remembers what you cleared.
 
+Landmarks: a dozen wells, standing stones, signposts, towers, oases, volcanoes, caves, skulls and wrecks stand on their own tiles, marked with a ?. Step on one and it asks a riddle about a real card: its mana cost, its colour, or its power and toughness. Answer right for a random card of that region's colour. Answer wrong and you lose one to three life, two to five food, or very rarely a card.
+
 Food: every step on the overworld costs one. At zero you lose a life every other step until you eat. Cities sell food and every won duel yields some.
 
 ## Layout

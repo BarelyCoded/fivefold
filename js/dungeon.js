@@ -9,6 +9,7 @@ const OY = 34;                 // banner strip above the map
 const key = (x, y) => `${x},${y}`;
 import { present } from './world.js';
 import { atlasReady, blit, blitAt, pick, DUNGEON_TILES, SPRITES, MONSTERS, DUNGEON_MONSTER } from './atlas.js';
+import { costString } from './cards.js';
 let labels = [];
 
 // ---- generation ------------------------------------------------------------------
@@ -73,16 +74,18 @@ export function remainingMonsters(layout) { return Object.values(layout.cells).f
 
 // ---- riddles from real card facts ---------------------------------------------------
 const COLOR_WORDS = { W: 'White', U: 'Blue', B: 'Black', R: 'Red', G: 'Green' };
-export function makeRiddle(rng, defs) {
+// only: optional list of riddle kinds to allow ('cost', 'pt', 'power', 'toughness', 'color', 'cmc', 'keyword').
+export function makeRiddle(rng, defs, only = null) {
   const pool = defs.filter(d => d && d.kind !== 'unsupported');
   if (!pool.length) return null;
   const d = pool[Math.floor(rng() * pool.length)];
-  const kinds = [];
-  if (d.kind === 'creature') kinds.push('power', 'toughness');
+  let kinds = [];
+  if (d.kind === 'creature') kinds.push('power', 'toughness', 'pt');
   if (d.colors.length === 1) kinds.push('color');
-  if (d.cmc > 0) kinds.push('cmc');
+  if (d.cmc > 0) kinds.push('cmc', 'cost');
   if (d.kwNames?.length) kinds.push('keyword');
-  if (!kinds.length) return makeRiddle(rng, pool.filter(x => x !== d));
+  if (only) kinds = kinds.filter(k => only.includes(k));
+  if (!kinds.length) return makeRiddle(rng, pool.filter(x => x !== d), only);
   const kind = kinds[Math.floor(rng() * kinds.length)];
   let q, answer, options;
   const nums = n => [...new Set([n, n + 1, Math.max(0, n - 1), n + 2, n + 3, Math.max(0, n - 2)])].slice(0, 4);
@@ -91,6 +94,21 @@ export function makeRiddle(rng, defs) {
     case 'toughness': q = `What is the toughness of ${d.name}?`; answer = String(d.toughness); options = nums(d.toughness).map(String); break;
     case 'color': q = `What color is ${d.name}?`; answer = COLOR_WORDS[d.colors[0]]; options = Object.values(COLOR_WORDS); break;
     case 'cmc': q = `What is the mana value of ${d.name}?`; answer = String(d.cmc); options = nums(d.cmc).map(String); break;
+    case 'cost': {
+      q = `What is the mana cost of ${d.name}?`; answer = costString(d.cost);
+      const c = d.cost; const pipColor = c.pips[0]?.[0] || 'W'; const other = ['W', 'U', 'B', 'R', 'G'].filter(x => x !== pipColor);
+      const vars = [
+        { pips: c.pips, generic: c.generic + 1 }, { pips: c.pips, generic: Math.max(0, c.generic - 1) },
+        { pips: [...c.pips, [pipColor]], generic: Math.max(0, c.generic - 1) }, { pips: c.pips.map(() => [other[Math.floor(rng() * other.length)]]), generic: c.generic },
+        { pips: c.pips.slice(1), generic: c.generic + 1 },
+      ].map(v => costString({ ...v, x: c.x })).filter(v => v && v !== answer);
+      options = [answer, ...[...new Set(vars)].sort(() => rng() - 0.5).slice(0, 3)]; break;
+    }
+    case 'pt': {
+      q = `What are the power and toughness of ${d.name}?`; answer = `${d.power}/${d.toughness}`;
+      const vars = [[1, 0], [0, 1], [-1, 0], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]].map(([dp, dt]) => `${Math.max(0, d.power + dp)}/${Math.max(1, d.toughness + dt)}`).filter(v => v !== answer);
+      options = [answer, ...[...new Set(vars)].sort(() => rng() - 0.5).slice(0, 3)]; break;
+    }
     case 'keyword': { const all = ['Flying', 'First strike', 'Trample', 'Banding', 'Regeneration', 'Swampwalk', 'Islandwalk', 'Forestwalk', 'Mountainwalk', 'Plainswalk', 'Protection from red', 'Vigilance', 'Haste']; answer = d.kwNames[0]; options = [answer, ...all.filter(k => !d.kwNames.includes(k)).sort(() => rng() - 0.5).slice(0, 5)]; q = `What special ability does ${d.name} have?`; break; }
   }
   options = [...new Set(options)].sort(() => rng() - 0.5);

@@ -99,6 +99,32 @@ export function placeDungeons(world, rng, templates) {
   return out;
 }
 
+// Landmarks: a dozen scenery features that hold a riddle. Each sits alone on its tile; the kind fits the biome.
+const LANDMARK_KINDS = { G: ['well', 'standingStone', 'signpost', 'tower'], W: ['pond', 'well', 'standingStone'], R: ['volcano', 'cave', 'lavaVent'], B: ['skull', 'cave', 'bones', 'standingStone'], U: ['wreck', 'seaRock'] };
+export const landmarkAt = (world, x, y) => (world.landmarks || []).find(l => l.x === x && l.y === y);
+export function placeLandmarks(world, rng, count = 12) {
+  if (world.landmarks) return world.landmarks;
+  const taken = new Set([...world.cities.map(c => `${c.x},${c.y}`), ...world.links.map(l => `${l.x},${l.y}`), `${world.castle.x},${world.castle.y}`, ...world.enemies.map(e => `${e.x},${e.y}`), ...(world.dungeons || []).map(d => `${d.x},${d.y}`)]);
+  const out = [];
+  const isCoast = (x, y) => [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => inBounds(world, x + dx, y + dy) && tileAt(world, x + dx, y + dy) !== 'U');
+  for (let i = 0; i < 600 && out.length < count; i++) {
+    const x = Math.floor(rng() * world.w), y = Math.floor(rng() * world.h);
+    if (taken.has(`${x},${y}`) || dist({ x, y }, world.start) < 3) continue;
+    if (world.cities.some(c => dist(c, { x, y }) < 2.5) || out.some(l => dist(l, { x, y }) < 3.5)) continue;
+    const b = tileAt(world, x, y);
+    if (b === 'U' && !isCoast(x, y)) continue;
+    const kinds = LANDMARK_KINDS[b]; const kind = kinds[Math.floor(rng() * kinds.length)];
+    out.push({ x, y, kind, color: b, used: false }); taken.add(`${x},${y}`);
+  }
+  world.landmarks = out;
+  return out;
+}
+function drawLandmark(ctx, cx, cy, lm) {
+  const rect = SPRITES[lm.kind];
+  if (atlasReady() && rect) { if (lm.used) ctx.globalAlpha = 0.6; blitAt(ctx, rect, cx, cy + PX / 2 - 1, tileFit(rect, { volcano: 1.15, skull: 0.5, bones: 0.5, seaRock: 0.6, lavaVent: 0.6, pond: 0.6 }[lm.kind] || 0.95)); ctx.globalAlpha = 1; }
+  else { px(ctx, cx - 6, cy - 4, 12, 12, lm.used ? '#5a5a5a' : '#c9a367'); }
+  if (!lm.used) labels.push({ x: cx + 12, y: cy - 12, text: '?', size: 8, color: '#ffe9a8', bg: 'rgba(40,30,10,.85)' });
+}
 export function stepEnemies(world, rng, player) {
   for (const e of world.enemies) {
     if (rng() > 0.45) continue;
@@ -205,46 +231,46 @@ function paintTiles(world) {
   ctx.putImageData(image, 0, 0);
   paintRoads(ctx, world, seed);
   // scenery, back to front
-  const reserved = new Set([...world.cities.map(ct => `${ct.x},${ct.y}`), `${world.castle.x},${world.castle.y}`, ...world.links.map(l => `${l.x},${l.y}`), ...(world.dungeons || []).map(d => `${d.x},${d.y}`)]);
+  const reserved = new Set([...world.cities.map(ct => `${ct.x},${ct.y}`), `${world.castle.x},${world.castle.y}`, ...world.links.map(l => `${l.x},${l.y}`), ...(world.dungeons || []).map(d => `${d.x},${d.y}`), ...(world.landmarks || []).map(l => `${l.x},${l.y}`)]);
   const feats = [];
   const nearCity = (x, y) => world.cities.some(ct => Math.abs(ct.x - x) <= 3 && Math.abs(ct.y - y) <= 3 && (Math.abs(ct.x - x) + Math.abs(ct.y - y)) >= 2);
   for (let y = 0; y < world.h; y++) for (let x = 0; x < world.w; x++) {
     const b = at(x, y), X = x * PX, Y = y * PX;
     if (reserved.has(`${x},${y}`)) continue;
-    const spot = (i) => [X + 6 + Math.floor(h(x, y, 400 + i) * (PX - 12)), Y + 14 + Math.floor(h(x, y, 420 + i) * (PX - 12))];
-    const add = (rect, fx, fy, sc) => feats.push({ y: fy, draw: () => blitAt(ctx, rect, fx, fy, sc) });
-    const S = SPRITES, sc = 0.6;
+    // objects sit on their tile: feet near the tile's bottom edge, a little jitter, sized to the tile by `frac`
+    const spot = (i) => [X + PX / 2 + Math.round((h(x, y, 400 + i) - 0.5) * 10) + (i === 1 ? 9 : i === 0 ? -3 : 0), Y + PX - 2 + Math.round((h(x, y, 420 + i) - 0.5) * 4)];
+    const add = (rect, fx, fy, frac) => feats.push({ y: fy, draw: () => blitAt(ctx, rect, fx, fy, tileFit(rect, frac)) });
+    const S = SPRITES, sc = 0.95;
     const any = (...names) => names.map(n => S[n]).filter(Boolean);
     const from = (list, t) => list.length ? pick(list, t) : null;
-    if ((b === 'G' || b === 'W') && nearCity(x, y) && h(x, y, 390) < 0.08) { const [fx, fy] = spot(9); const r = h(x, y, 391); const hamlet = from(any('hut', 'huts', 'watchtower', 'well', 'signpost'), r) || S.city.town; add(hamlet, fx, fy + 4, hamlet === S.city.town ? 0.5 : 0.7); continue; }
+    if ((b === 'G' || b === 'W') && nearCity(x, y) && h(x, y, 390) < 0.05) { const [fx, fy] = spot(9); const r = h(x, y, 391); const hamlet = from(any('hut', 'huts', 'watchtower', 'well', 'signpost'), r) || S.city.town; add(hamlet, fx, fy, hamlet === S.city.town ? 0.8 : 0.85); continue; }
     if (b === 'G') {
-      const d = h(x, y, 440); const n = d < 0.3 ? 0 : d < 0.85 ? 1 : 2;
+      const d = h(x, y, 440); const n = d < 0.55 ? 0 : d < 0.92 ? 1 : 2;
       const trees = any('pines', 'pines-2', 'oak', 'pine', 'roundTree', 'sapling', 'bush', 'bush-2', 'shrub', 'bushSmall');
-      for (let i = 0; i < n; i++) { const [fx, fy] = spot(i); const r = h(x, y, 460 + i); const t = from(trees, r * 0.999); if (t) add(t, fx, fy, t === S.pines || t === S['pines-2'] ? 0.7 : sc); }
-      if (h(x, y, 470) < 0.02 && S.pond) { const [fx, fy] = spot(3); add(S.pond, fx, fy, 0.9); }
-      if (h(x, y, 471) < 0.012 && S.tower) { const [fx, fy] = spot(4); add(S.tower, fx, fy, 0.9); }
+      for (let i = 0; i < n; i++) { const [fx, fy] = spot(i); const r = h(x, y, 460 + i); const t = from(trees, r * 0.999); if (t) add(t, fx, fy, t === S.pines || t === S['pines-2'] ? 1 : t === S.bush || t === S['bush-2'] || t === S.shrub ? 0.55 : t === S.bushSmall || t === S.sapling ? 0.45 : sc); }
+      if (h(x, y, 470) < 0.01 && S.pond) { const [fx, fy] = spot(3); add(S.pond, fx, fy, 0.6); }
+      if (h(x, y, 471) < 0.006 && S.tower) { const [fx, fy] = spot(4); add(S.tower, fx, fy, 1); }
     } else if (b === 'W') {
       const r = h(x, y, 500);
-      if (r < 0.12 && SCENERY.dunes.length) { const [fx, fy] = spot(0); add(pick(SCENERY.dunes, h(x, y, 502)), fx, fy + 6, 0.8); }
-      else if (r < 0.18) { const [fx, fy] = spot(1); const t = from(any('cactus', 'palm', 'bush', 'tuft'), h(x, y, 501)); if (t) add(t, fx, fy, sc); }
-      else if (r < 0.2 && S.pond) { const [fx, fy] = spot(2); add(S.pond, fx, fy, 0.8); }
+      if (r < 0.07 && SCENERY.dunes.length) { const [fx, fy] = spot(0); add(pick(SCENERY.dunes, h(x, y, 502)), fx, fy, 0.55); }
+      else if (r < 0.1) { const [fx, fy] = spot(1); const t = from(any('cactus', 'palm', 'bush', 'tuft'), h(x, y, 501)); if (t) add(t, fx, fy, t === S.bush ? 0.5 : t === S.tuft ? 0.3 : sc); }
+      else if (r < 0.11 && S.pond) { const [fx, fy] = spot(2); add(S.pond, fx, fy, 0.6); }
     } else if (b === 'R') {
-      const d = h(x, y, 540); const n = d < 0.35 ? 0 : d < 0.85 ? 1 : 2;
-      for (let i = 0; i < n; i++) { const [fx, fy] = spot(i); add(pick(SCENERY.peaks, h(x, y, 550 + i)), fx, fy + 4, 0.75 + h(x, y, 560 + i) * 0.35); }
+      const d = h(x, y, 540); const n = d < 0.5 ? 0 : d < 0.92 ? 1 : 2;
+      for (let i = 0; i < n; i++) { const [fx, fy] = spot(i); add(pick(SCENERY.peaks, h(x, y, 550 + i)), fx, fy, n === 2 ? 0.75 : 0.85 + h(x, y, 560 + i) * 0.15); }
       const r = h(x, y, 570);
-      if (r < 0.03 && S.volcano) { const [fx, fy] = spot(2); add(S.volcano, fx, fy + 6, 1); }
-      else if (r < 0.07 && S.volcanoSmall) { const [fx, fy] = spot(2); add(S.volcanoSmall, fx, fy + 4, 0.8); }
-      else if (r < 0.1 && S.lavaVent) { const [fx, fy] = spot(3); add(S.lavaVent, fx, fy, 0.7); }
+      if (r < 0.03 && S.volcanoSmall) { const [fx, fy] = spot(2); add(S.volcanoSmall, fx, fy, 0.9); }
+      else if (r < 0.05 && S.lavaVent) { const [fx, fy] = spot(3); add(S.lavaVent, fx, fy, 0.6); }
     } else if (b === 'B') {
       const r = h(x, y, 600);
-      if (r < 0.16 && SCENERY.rocks.length) { const [fx, fy] = spot(0); add(pick(SCENERY.rocks, r * 6), fx, fy, 0.6 + h(x, y, 601) * 0.3); }
-      else if (r < 0.24) { const [fx, fy] = spot(1); const t = from(any('deadtree', 'deadtree-2', 'skull', 'bones', 'standingStone'), h(x, y, 602)); if (t) add(t, fx, fy, t === S.skull ? 0.5 : sc); }
-      else if (r < 0.26 && S.cave) { const [fx, fy] = spot(2); add(S.cave, fx, fy + 2, 0.8); }
+      if (r < 0.09 && SCENERY.rocks.length) { const [fx, fy] = spot(0); add(pick(SCENERY.rocks, r * 11), fx, fy, 0.6 + h(x, y, 601) * 0.2); }
+      else if (r < 0.13) { const [fx, fy] = spot(1); const t = from(any('deadtree', 'deadtree-2', 'skull', 'bones', 'standingStone'), h(x, y, 602)); if (t) add(t, fx, fy, t === S.skull ? 0.4 : t === S.bones ? 0.45 : t === S.standingStone ? 0.8 : sc); }
+      else if (r < 0.135 && S.cave) { const [fx, fy] = spot(2); add(S.cave, fx, fy, 0.9); }
     } else if (b === 'U') {
       const coast = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => at(x + dx, y + dy) && at(x + dx, y + dy) !== 'U');
       const r = h(x, y, 590);
-      if (coast && r < 0.06) { const [fx, fy] = spot(0); const t = from(any('reeds', 'reeds-2', 'lilypads', 'tuft'), h(x, y, 591)); if (t) add(t, fx, fy, sc); }
-      else if (!coast && r < 0.015) { const [fx, fy] = spot(1); const t = from(any('seaRock', 'wreck', 'serpentCoil'), h(x, y, 592)); if (t) add(t, fx, fy, sc); }
+      if (coast && r < 0.035) { const [fx, fy] = spot(0); const t = from(any('reeds', 'reeds-2', 'lilypads', 'tuft'), h(x, y, 591)); if (t) add(t, fx, fy, 0.5); }
+      else if (!coast && r < 0.008) { const [fx, fy] = spot(1); const t = from(any('seaRock', 'wreck', 'serpentCoil'), h(x, y, 592)); if (t) add(t, fx, fy, 0.7); }
     }
   }
   feats.sort((a, b) => a.y - b.y);
@@ -252,6 +278,8 @@ function paintTiles(world) {
   c.atlas = true;
   return c;
 }
+// Scale so a sprite is `frac` of a tile tall and never wider than a tile.
+function tileFit(rect, frac) { return Math.min(PX * frac / rect[3], PX * 0.98 / rect[2]); }
 function paintRoads(ctx, world, seed) {
   const roads = [];
   for (const a of world.cities) {
@@ -599,6 +627,7 @@ export function drawMinimap(canvas, world, player, cam) {
   for (const ct of world.cities) dot(ct.x, ct.y, '#f3ecd8', 2.5);
   for (const d of world.dungeons || []) if (d.revealed) dot(d.x, d.y, '#ffb347', 2);
   for (const l of world.links) if (!l.taken) dot(l.x, l.y, '#9fe7ff', 1.5);
+  for (const lm of world.landmarks || []) if (!lm.used) dot(lm.x, lm.y, '#ffe9a8', 1.5);
   dot(world.castle.x, world.castle.y, '#ff3b3b', 3);
   dot(player.x, player.y, '#ffffff', 2.5);
   if (cam) { ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 1; ctx.strokeRect(cam.x * k + 0.5, cam.y * k + 0.5, VIEW.w * k - 1, VIEW.h * k - 1); }
@@ -620,6 +649,7 @@ export function drawWorld(canvas, world, player, opts = {}) {
   const objs = [];
   for (const l of world.links) if (vis(l.x, l.y)) { const [cx, cy] = c(l.x, l.y); objs.push({ y: cy, draw: () => drawCrystal(f, cx, cy, l.taken) }); }
   for (const d of world.dungeons || []) if (d.revealed && vis(d.x, d.y)) { const [cx, cy] = c(d.x, d.y); objs.push({ y: cy, draw: () => drawDungeon(f, cx, cy, d.cleared) }); }
+  for (const lm of world.landmarks || []) if (vis(lm.x, lm.y)) { const [cx, cy] = c(lm.x, lm.y); objs.push({ y: cy - 1, draw: () => drawLandmark(f, cx, cy, lm) }); }
   for (const ct of world.cities) if (vis(ct.x, ct.y)) { const [cx, cy] = c(ct.x, ct.y); objs.push({ y: cy, draw: () => drawCity(f, cx, cy, ct.color, ct.name) }); }
   if (vis(world.castle.x, world.castle.y)) { const [cx, cy] = c(world.castle.x, world.castle.y); objs.push({ y: cy, draw: () => drawFortress(f, cx, cy) }); }
   const robes = { W: ['#d9d2b8', '#f0ead6'], U: ['#2f5f9c', '#5e8cc9'], B: ['#3a2d4a', '#5e4d75'], R: ['#a33a2a', '#d0604a'], G: ['#3f6f2f', '#6a9a4a'] };
