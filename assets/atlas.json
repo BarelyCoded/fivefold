@@ -1331,19 +1331,10 @@
    22
   ]
  },
- "scenery.peak-3": {
-  "file": "scenery.png",
-  "rect": [
-   144,
-   115,
-   48,
-   29
-  ]
- },
  "scenery.pine": {
   "file": "scenery.png",
   "rect": [
-   200,
+   152,
    96,
    31,
    48
@@ -1352,7 +1343,7 @@
  "scenery.pines-2": {
   "file": "scenery.png",
   "rect": [
-   242,
+   194,
    96,
    44,
    48
@@ -1361,7 +1352,7 @@
  "scenery.pines": {
   "file": "scenery.png",
   "rect": [
-   289,
+   241,
    96,
    46,
    48
@@ -1370,7 +1361,7 @@
  "scenery.pond": {
   "file": "scenery.png",
   "rect": [
-   336,
+   288,
    114,
    48,
    30
@@ -1379,8 +1370,8 @@
  "scenery.reeds-2": {
   "file": "scenery.png",
   "rect": [
-   1,
-   144,
+   337,
+   96,
    46,
    48
   ]
@@ -1388,7 +1379,7 @@
  "scenery.reeds": {
   "file": "scenery.png",
   "rect": [
-   48,
+   0,
    144,
    48,
    48
@@ -1397,7 +1388,7 @@
  "scenery.rock-1": {
   "file": "scenery.png",
   "rect": [
-   96,
+   48,
    158,
    48,
    34
@@ -1406,7 +1397,7 @@
  "scenery.rock-2": {
   "file": "scenery.png",
   "rect": [
-   144,
+   96,
    151,
    48,
    41
@@ -1415,7 +1406,7 @@
  "scenery.rock-3": {
   "file": "scenery.png",
   "rect": [
-   193,
+   145,
    144,
    46,
    48
@@ -1424,7 +1415,7 @@
  "scenery.rock-4": {
   "file": "scenery.png",
   "rect": [
-   240,
+   192,
    155,
    48,
    37
@@ -1433,7 +1424,7 @@
  "scenery.roundTree": {
   "file": "scenery.png",
   "rect": [
-   293,
+   245,
    144,
    37,
    48
@@ -1442,7 +1433,7 @@
  "scenery.sapling": {
   "file": "scenery.png",
   "rect": [
-   336,
+   288,
    162,
    48,
    30
@@ -1451,8 +1442,8 @@
  "scenery.seaRock": {
   "file": "scenery.png",
   "rect": [
-   0,
-   202,
+   336,
+   154,
    48,
    38
   ]
@@ -1460,7 +1451,7 @@
  "scenery.serpentCoil": {
   "file": "scenery.png",
   "rect": [
-   48,
+   0,
    200,
    48,
    40
@@ -1469,7 +1460,7 @@
  "scenery.signpost": {
   "file": "scenery.png",
   "rect": [
-   102,
+   54,
    192,
    35,
    48
@@ -1478,10 +1469,19 @@
  "scenery.skull": {
   "file": "scenery.png",
   "rect": [
-   144,
+   96,
    200,
    48,
    40
+  ]
+ },
+ "scenery.snowPeak": {
+  "file": "scenery.png",
+  "rect": [
+   144,
+   211,
+   48,
+   29
   ]
  },
  "scenery.standingStone": {
