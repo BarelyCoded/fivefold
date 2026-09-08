@@ -159,13 +159,23 @@ export function drawDungeon(canvas, layout, tpl, opts = {}) {
     if (near) kind[ty][tx] = 'wall';
   }
   const at = (tx, ty) => kind[ty]?.[tx] || 'rock';
+  // One rock texture outside with sparse lava veins; grey floors only; walls are darkened rock with a lit
+  // edge towards the corridor, except where a wall fronts onto a corridor from the north: that is a brick face.
+  const rockTiles = DUNGEON_TILES.rock.length > 1 ? [DUNGEON_TILES.rock[1]] : DUNGEON_TILES.rock;
+  const floorTiles = DUNGEON_TILES.floor.length > 3 ? DUNGEON_TILES.floor.slice(1) : DUNGEON_TILES.floor;
   for (let ty = 0; ty < TY; ty++) for (let tx = 0; tx < TX; tx++) {
     const k = at(tx, ty), x = tx * T, y = OY + ty * T, r = hash(tx, ty, seed), r2 = hash(tx, ty, seed + 1);
-    if (!ready) { px(ctx, x, y, T, T, k === 'floor' ? '#4a443e' : k === 'wall' ? '#6b6258' : r < 0.1 ? '#b3401a' : '#1c1816'); continue; }
-    if (k === 'floor') blit(ctx, pick(DUNGEON_TILES.floor, r), x, y, T, T);
-    else if (k === 'wall') blit(ctx, at(tx, ty + 1) === 'floor' ? pick(DUNGEON_TILES.wallFace, r) : pick(DUNGEON_TILES.wallTop, r), x, y, T, T);
-    else blit(ctx, r < 0.035 ? pick(DUNGEON_TILES.lava, r2) : r < 0.18 ? pick(DUNGEON_TILES.rockCrack, r2) : pick(DUNGEON_TILES.rock, r2), x, y, T, T);
-    if (k === 'wall' && at(tx, ty + 1) === 'floor' && r2 < 0.22) blitAt(ctx, SPRITES.torch, x + T / 2, y + T - 4, Math.min(0.7, 26 / SPRITES.torch[3]));
+    if (!ready) { px(ctx, x, y, T, T, k === 'floor' ? '#4a443e' : k === 'wall' ? '#6b6258' : '#1c1816'); continue; }
+    if (k === 'floor') { blit(ctx, pick(floorTiles, r), x, y, T, T); continue; }
+    const rock = r < 0.025 && DUNGEON_TILES.rockCrack.length ? pick(DUNGEON_TILES.rockCrack, r2) : pick(rockTiles, r2);
+    if (k === 'rock') { blit(ctx, rock, x, y, T, T); continue; }
+    if (at(tx, ty + 1) === 'floor') { blit(ctx, pick(DUNGEON_TILES.wallTop, r), x, y, T, T); if (r2 < 0.22) blitAt(ctx, SPRITES.torch, x + T / 2, y + T - 4, Math.min(0.7, 26 / SPRITES.torch[3])); continue; }
+    blit(ctx, rock, x, y, T, T);
+    ctx.fillStyle = 'rgba(0,0,0,.42)'; ctx.fillRect(x, y, T, T);
+    ctx.fillStyle = 'rgba(255,255,255,.14)';
+    if (at(tx, ty - 1) === 'floor') ctx.fillRect(x, y, T, 3);
+    if (at(tx - 1, ty) === 'floor') ctx.fillRect(x, y, 3, T);
+    if (at(tx + 1, ty) === 'floor') ctx.fillRect(x + T - 3, y, 3, T);
   }
   // reachable cells
   const reach = neighbours(layout.cells, links, playerCell(layout));
