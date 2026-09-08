@@ -249,3 +249,15 @@ tr.st-unsupported td:nth-child(7), tr.st-unsupported td:nth-child(3), tr.st-miss
 .dungeonbox { background: linear-gradient(180deg, #2a2320, #171412); border-color: #6e5637; }
 .dungeonbox h2 { color: #f0e6cf; }
 .stats .starving { color: var(--warn); font-weight: 700; }
+
+/* stack tray and arrows */
+.stack { padding: 6px 10px; }
+.stack-title span { margin-left: 6px; background: #6e5637; color: #ffe9a8; border-radius: 999px; padding: 0 6px; font-size: 10px; }
+.stack-tray { display: flex; gap: 8px; align-items: flex-start; --cw: 72px; --ch: 100px; }
+.stack-tray .card { transition: none; }
+.stack-tray .card.top { box-shadow: 0 0 0 2px var(--gold), 0 4px 14px rgba(0,0,0,.6); transform: translateY(-2px); }
+.stack-tray .card.theirs { outline: 1px solid rgba(255,120,120,.5); }
+.stack-tray .card .card-top { font-size: 8px; padding: 2px 3px; }
+.stack-tray .card .card-body { display: none; }
+.stack-tray .card.targetable { box-shadow: 0 0 0 3px #ff4b4b; }
+svg.arrows { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 6; overflow: visible; }

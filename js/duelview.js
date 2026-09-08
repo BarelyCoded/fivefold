@@ -81,7 +81,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420 }) {
           if (t) { t.classList.add('fx-hit'); floatText(t, `-${f.amount}`, 'fx-dmg'); }
           wait = Math.max(wait, 750); break;
         }
-        case 'cast': { const s = root.querySelector(`.stack-item[data-stack]`); if (s) s.classList.add('fx-cast'); wait = Math.max(wait, 250); break; }
+        case 'cast': { const s = root.querySelector('.stack-item.top'); if (s) s.classList.add('fx-cast'); wait = Math.max(wait, 300); break; }
         case 'die': { const z = f.controller === 0 ? '.zone.mine .field' : '.zone.opp .field'; floatText(root.querySelector(z), `${f.name} ✝`, 'fx-die'); wait = Math.max(wait, 500); break; }
       }
     }
@@ -170,11 +170,61 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420 }) {
 
   function stackHtml() {
     if (!duel.stack.length) return '';
-    return `<div class="stack"><div class="stack-title">Stack</div>${duel.stack.slice().reverse().map(it => {
-      const tgts = (it.targets || []).map(t => t.type === 'player' ? duel.players[t.idx].name : (duel.card(t.id)?.def.name || duel.stack.find(s => s.id === t.id)?.card.def.name || '?')).join(', ');
-      const targetable = targeting() && isLegal({ type: 'spell', id: it.id }) ? ' targetable' : '';
-      return `<div class="stack-item${targetable}" data-stack="${it.id}" data-preview="${esc(it.card.def.name)}"><b>${esc(it.card.def.name)}</b> <span>${it.kind === 'spell' ? '' : it.kind === 'trigger' ? 'trigger' : 'ability'} · ${esc(duel.players[it.controller].name)}</span>${tgts ? `<div class="stack-tgt">→ ${esc(tgts)}</div>` : ''}</div>`;
-    }).join('')}</div>`;
+    const items = duel.stack.slice().reverse();
+    return `<div class="stack"><div class="stack-title">Stack<span>${items.length}</span></div><div class="stack-tray">${items.map((it, i) => {
+      const classes = ['stack-item'];
+      if (i === 0) classes.push('top');
+      if (targeting() && isLegal({ type: 'spell', id: it.id })) classes.push('targetable');
+      if (it.controller === 1) classes.push('theirs');
+      const kind = it.kind === 'spell' ? '' : it.kind === 'trigger' ? 'trigger' : 'ability';
+      const html = cardHtml(it.card.def, { id: it.card.id, zone: 'stack', classes, badge: kind || undefined });
+      return html.replace('<div class="card ', `<div data-stack="${it.id}" class="card `);
+    }).join('')}</div></div>`;
+  }
+
+  // ---- targeting and combat arrows, drawn over the table after every render ----------------
+  const ARROW_COLOR = { damage: '#ff5a3c', destroy: '#ff5a3c', exile: '#ff5a3c', bounce: '#ff9a3c', fight: '#ff5a3c', damageEqualPower: '#ff5a3c', tap: '#ffb347', freeze: '#ffb347', discard: '#ff9a3c', control: '#d060ff', counter: '#c070ff', pump: '#6fe08a', grant: '#6fe08a', regenerate: '#6fe08a', counters: '#6fe08a', untap: '#6fe08a', gain: '#6fe08a', draw: '#8fd0ff', fromGraveyard: '#8fd0ff', attack: '#ff8a3a', block: '#7fc4ff' };
+  function targetEl(t) {
+    if (!t) return null;
+    if (t.type === 'player') return root.querySelector(`.pbox[data-player="${t.idx}"]`);
+    if (t.type === 'perm') return root.querySelector(`[data-zone="bf"][data-id="${t.id}"]`);
+    if (t.type === 'spell') return root.querySelector(`.stack-item[data-stack="${t.id}"]`);
+    if (t.type === 'card') return root.querySelector(`.card[data-id="${t.id}"]`);
+    return null;
+  }
+  function drawArrows() {
+    const table = root.querySelector('.table'); if (!table) return;
+    const old = table.querySelector('svg.arrows'); if (old) old.remove();
+    const tr = table.getBoundingClientRect();
+    const center = el => { const r = el.getBoundingClientRect(); return [r.left - tr.left + r.width / 2, r.top - tr.top + r.height / 2]; };
+    const arrows = [];
+    for (const it of duel.stack) {
+      const from = root.querySelector(`.stack-item[data-stack="${it.id}"]`); if (!from) continue;
+      const kind = (it.effects || []).find(e => e.type)?.type;
+      for (const t of it.targets || []) { const to = targetEl(t); if (to) arrows.push({ from, to, color: ARROW_COLOR[kind] || '#e3c56a', width: 3 }); }
+    }
+    if (duel.attackers.length && ['attackers', 'blockers', 'firstStrike', 'damage'].includes(duel.step)) {
+      const def = root.querySelector(`.pbox[data-player="${1 - duel.active}"]`);
+      for (const id of duel.attackers) { const from = targetEl({ type: 'perm', id }); if (from && def && !(duel.blocks[id] || []).length) arrows.push({ from, to: def, color: ARROW_COLOR.attack, width: 2, dash: true }); }
+      const blocks = Object.keys(duel.blocks).length ? duel.blocks : ui.blocks;
+      for (const [aid, bids] of Object.entries(blocks)) for (const bid of bids) { const from = targetEl({ type: 'perm', id: Number(bid) }), to = targetEl({ type: 'perm', id: Number(aid) }); if (from && to) arrows.push({ from, to, color: ARROW_COLOR.block, width: 3 }); }
+    }
+    if (ui.wizard?.stage === 'targets') for (const t of ui.wizard.targets) { const from = root.querySelector(`.card[data-id="${ui.wizard.card.id}"]`), to = targetEl(t); if (from && to) arrows.push({ from, to, color: '#e3c56a', width: 2, dash: true }); }
+    if (!arrows.length) return;
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'arrows'); svg.setAttribute('width', tr.width); svg.setAttribute('height', tr.height);
+    const defs = [];
+    const paths = arrows.map((a, i) => {
+      const [x1, y1] = center(a.from), [x2, y2] = center(a.to);
+      const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy) || 1;
+      // shorten so the head lands on the target's edge, and bow the curve sideways
+      const ex = x2 - dx / len * 34, ey = y2 - dy / len * 34;
+      const mx = (x1 + ex) / 2 - dy / len * Math.min(60, len * 0.25), my = (y1 + ey) / 2 + dx / len * Math.min(60, len * 0.25);
+      defs.push(`<marker id="ah${i}" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L10,5 L0,10 z" fill="${a.color}"/></marker>`);
+      return `<path d="M${x1},${y1} Q${mx},${my} ${ex},${ey}" fill="none" stroke="#000" stroke-opacity=".55" stroke-width="${a.width + 3}" stroke-linecap="round"/><path d="M${x1},${y1} Q${mx},${my} ${ex},${ey}" fill="none" stroke="${a.color}" stroke-width="${a.width}" stroke-linecap="round" ${a.dash ? 'stroke-dasharray="8 6"' : ''} marker-end="url(#ah${i})"/>`;
+    });
+    svg.innerHTML = `<defs>${defs.join('')}</defs>${paths.join('')}`;
+    table.appendChild(svg);
   }
   function phaseStrip() {
     const cur = COMBAT_STEPS.has(duel.step) ? 'combat' : duel.step === 'cleanup' ? 'end' : duel.step;
@@ -244,7 +294,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420 }) {
     const p = duel.players[ui.viewer];
     return `<div class="overlay" data-close-viewer><div class="modal wide"><h3>${esc(p.name)}'s graveyard</h3><div class="viewer">${p.graveyard.length ? p.graveyard.slice().reverse().map(c => cardHtml(c.def, { id: c.id, zone: 'grave', classes: p === me && duel.canCast(me, c) ? ['castable'] : [] })).join('') : '<p class="small">Empty.</p>'}</div><button class="btn" data-close-viewer>Close</button></div></div>`;
   }
-  function render() { root.innerHTML = template(); }
+  function render() { root.innerHTML = template(); drawArrows(); }
 
   // ---- cast wizard -------------------------------------------------------------------
   function startCast(card, base = {}) {
@@ -344,7 +394,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420 }) {
       case 'b-choose': { const ids = [...(ui.choice || [])]; ui.choice = null; duel.humanAnswer(ids); run(); return; }
       case 'b-concede': if (confirm('Concede this duel? You will lose your ante card.')) { duel.end(1, `${me.name} concedes.`); run(); } return;
     }
-    if (btn.classList.contains('stack-item')) { pickRef({ type: 'spell', id: Number(btn.dataset.stack) }); return; }
+    if (btn.classList.contains('stack-item')) { if (targeting()) pickRef({ type: 'spell', id: Number(btn.dataset.stack) }); return; }
     if (btn.classList.contains('pbox')) { pickRef({ type: 'player', idx: Number(btn.dataset.player) }); return; }
     if (!btn.classList.contains('card') && !btn.classList.contains('pill')) return;
     const card = cardOf(btn.dataset.id); if (!card) return;
