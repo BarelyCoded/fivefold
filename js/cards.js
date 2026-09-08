@@ -284,6 +284,7 @@ const rules = [
   [/^exile all (.+)$/, m => { const k = T('all ' + m[1]); if (!k) return null; return [{ type: 'exileAll', restrict: k.restrict }]; }],
   [/^exile (target .+)$/, m => tgt({ type: 'exile' }, m[1])],
   [/^return (target .+?) to (?:its|their) owner's hand$/, m => tgt({ type: 'bounce' }, m[1])],
+  [/^return (target .+?) to your hand$/, m => tgt({ type: 'bounce' }, m[1])],
   [/^return (target .+? (?:from|in) your graveyard) to your hand$/, m => tgt({ type: 'fromGraveyard', to: 'hand' }, m[1])],
   [/^return (target .+? (?:from|in) your graveyard) to the battlefield(?: under your control)?( tapped)?$/, m => tgt({ type: 'fromGraveyard', to: 'battlefield', tapped: !!m[2] }, m[1])],
   [/^return (target .+?) to the battlefield under your control$/, m => tgt({ type: 'fromGraveyard', to: 'battlefield' }, m[1])],
@@ -333,6 +334,7 @@ const rules = [
   [/^counter (target(?: .+?)? spell)(?: unless its controller pays \{(\w+)\})?$/, m => { const k = T(m[1]); if (!k) return null; return [{ type: 'counter', unlessPay: m[2] ? (m[2].toUpperCase() === 'X' ? 'X' : Number(m[2])) : null, ...k }]; }],
   [/^counter (target spell with mana value x)$/, m => { const k = T(m[1]); return k ? [{ type: 'counter', unlessPay: null, note: 'X must equal the spell\'s mana value; the game does not enforce it', ...k }] : null; }],
   [/^counter (target(?: .+?)? spell)\. if that spell is countered this way, put it on top of its owner's library instead of into that player's graveyard$/, m => { const k = T(m[1]); return k ? [{ type: 'counter', toTop: true, unlessPay: null, ...k }] : null; }],
+  [/^counter (target(?: .+?)? spell) that targets a permanent you control$/, m => { const k = T(m[1]); return k ? [{ type: 'counter', unlessPay: null, note: 'only counters spells that target a permanent you control; not enforced', ...k }] : null; }],
   [/^search your library for (?:a|an|up to \S+) (.+?) cards?(?:, reveal (?:it|that card|them),)?(?:,)? (?:and )?put (?:it|that card|them) (into your hand|onto the battlefield( tapped)?|on top of your library)(?:, then shuffle| and shuffle|, then shuffle your library| and shuffle your library)?$/, m => {
     const what = m[1].replace(/ or /g, '|'); const to = m[2].startsWith('into') ? 'hand' : m[2].startsWith('on top') ? 'top' : 'battlefield';
     return [{ type: 'tutor', what, to, tapped: !!m[3] }];
