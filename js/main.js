@@ -9,6 +9,8 @@ import { aiHooks } from './ai.js';
 import { initPreview, hide as hidePreview } from './preview.js';
 import { generateDungeon, drawDungeon, cellAtPixel, cellOf, linked, playerCell, remainingMonsters, makeRiddle, CANVAS as DCANVAS } from './dungeon.js';
 import { loadAtlas, onAtlas, SPRITES, MONSTERS, DUNGEON_MONSTER } from './atlas.js';
+import { unlock, sfx, music, toggleAudio, audioMuted } from './audio.js';
+import { LESSONS, TUTORIAL_CARDS } from './tutorial.js';
 
 const SAVE_KEY = 'ff.save.v1', COLL_KEY = 'ff.collection.v1';
 loadAtlas();
@@ -24,7 +26,7 @@ const rnd = a => a[Math.floor(Math.random() * a.length)];
 
 const app = document.getElementById('app');
 const topbar = document.getElementById('topbar');
-const S = { screen: 'title', game: null, collection: {}, content: null, ready: false, busy: null, report: null, modal: null, filter: 'all', deckFilter: '', cityStock: null, result: null, importText: '' };
+const S = { screen: 'title', game: null, collection: {}, content: null, ready: false, busy: null, report: null, modal: null, filter: 'all', deckFilter: '', cityStock: null, result: null, importText: '', lesson: 0 };
 
 // ---- persistence ----------------------------------------------------------------
 function save() {
@@ -54,6 +56,7 @@ async function ensureContent() {
   for (const n of S.dungeons.artifacts) names.add(n);
   for (const n of Object.values(S.dungeons.walls)) names.add(n);
   for (const e of S.content.enemies) for (const n of Object.keys(e.deck)) names.add(n);
+  for (const n of TUTORIAL_CARDS) names.add(n);
   for (const n of Object.keys(S.collection)) names.add(n);
   if (S.game) for (const n of Object.keys(S.game.deck)) names.add(n);
   setBusy('Fetching card data from Scryfall…');
@@ -140,7 +143,7 @@ function move(dx, dy) {
   if (g.world.castle.x === nx && g.world.castle.y === ny) { castlePrompt(); return; }
   const dg = dungeonAt(g.world, nx, ny);
   if (dg && dg.revealed) { g.player.x = nx; g.player.y = ny; save(); dungeonPrompt(dg); return; }
-  g.player.x = nx; g.player.y = ny; g.player.steps++;
+  g.player.x = nx; g.player.y = ny; g.player.steps++; sfx('step');
   if (g.player.food > 0) g.player.food--;
   else if (g.player.steps % 2 === 0 && g.player.life > 1) { g.player.life--; toast('You are starving: 1 life lost. Buy food in any city.'); }
   if (g.player.steps % 5 === 0) { g.player.day++; if (g.player.day % 30 === 0) bossLink(); }
@@ -170,8 +173,9 @@ function landmarkRiddle(lm) {
       let msg;
       if (o === r.answer) {
         const card = rnd(pool.filter(n => defOf(n).cmc <= 6)) || rnd(pool);
-        addCards(S.collection, card, 1); msg = `Correct. You are given ${card}.`;
+        addCards(S.collection, card, 1); msg = `Correct. You are given ${card}.`; sfx('right');
       } else {
+        sfx('wrong');
         const roll = Math.random();
         const owned = Object.keys(S.collection).filter(n => !BASIC_NAMES.has(n) && S.collection[n] > 0);
         if (roll < 0.05 && owned.length) { const lost = rnd(owned); addCards(S.collection, lost, -1); if (g.deck[lost]) { addCards(g.deck, lost, -1); if (deckSize(g.deck) < 40) fillBasics(g.deck); } msg = `Wrong: it was ${r.answer}. ${lost} is taken from you.`; }
@@ -235,6 +239,7 @@ function dungeonPrompt(dg) {
     body: `<p class="taunt">${esc(t.intro)}</p><p><b>${esc(rule.label)}:</b> ${esc(rule.text)} Your life carries from fight to fight. Monsters block the corridors until beaten; piles hold life, gold and cards; scrolls hold riddles. The guardian before the exit keeps the vault.</p><p>You have ${g.player.life} life.${dg.cleared ? ' The guardian is already dead; only leftovers remain.' : resume ? ' You have been here before, and the maze remembers.' : ''}</p>`,
     buttons: [{ label: resume ? 'Go back in' : 'Enter', primary: true, action: () => {
       S.modal = null;
+      sfx('open');
       if (!dg.layout) dg.layout = generateDungeon(Math.random, t);
       dg.layout.px = dg.layout.entrance.x; dg.layout.py = dg.layout.entrance.y; dg.layout.status = 'First move';
       g.dungeon = { id: dg.id }; save(); go('dungeon');
@@ -303,8 +308,8 @@ function dungeonRiddle(cell) {
     buttons: r.options.map(o => ({ label: o, primary: false, action: () => {
       S.modal = null; cell.done = true;
       let msg;
-      if (o === r.answer) { const c = rnd(tpl.treasure.filter(n => defOf(n) && defOf(n).kind !== 'unsupported')) || rnd(tpl.treasure); addCards(S.collection, c, 1); g.player.gold += 10; msg = `Correct. The scroll unrolls into ${c} and 10 gold.`; }
-      else { g.player.life = Math.max(1, g.player.life - 3); msg = `Wrong: it was ${r.answer}. The scroll burns your hand for 3 life.`; }
+      if (o === r.answer) { const c = rnd(tpl.treasure.filter(n => defOf(n) && defOf(n).kind !== 'unsupported')) || rnd(tpl.treasure); addCards(S.collection, c, 1); g.player.gold += 10; msg = `Correct. The scroll unrolls into ${c} and 10 gold.`; sfx('right'); }
+      else { sfx('wrong'); g.player.life = Math.max(1, g.player.life - 3); msg = `Wrong: it was ${r.answer}. The scroll burns your hand for 3 life.`; }
       layout.status = msg; save(); toast(msg);
     } })),
   };
@@ -326,7 +331,7 @@ function dungeonTreasureDrop() {
   const card = rnd(tpl.treasure.filter(n => defOf(n) && defOf(n).kind !== 'unsupported')) || rnd(tpl.treasure);
   addCards(S.collection, card, 1); lines.push(`The vault holds ${card}.`);
   if (Math.random() < 0.5) { const art = rnd(S.dungeons.artifacts.filter(n => defOf(n) && defOf(n).kind !== 'unsupported')); if (art) { addCards(S.collection, art, 1); lines.push(`A relic: ${art}.`); } }
-  const gold = 20 + Math.floor(Math.random() * 21); g.player.gold += gold; lines.push(`${gold} gold in an old chest.`);
+  const gold = 20 + Math.floor(Math.random() * 21); g.player.gold += gold; lines.push(`${gold} gold in an old chest.`); sfx('coin');
   dg.cleared = true;
   S.result = { won: true, tpl: { name: tpl.name }, lines, title: 'The vault is yours', flavour: `The Guardian of the ${tpl.name} is dead. The exit is open.`, back: 'dungeon' };
   save(); go('result');
@@ -342,7 +347,17 @@ function revealClue(color) {
   return `Your beaten foe buys mercy with a clue: the ${t.name} lies to the ${dir}, about ${Math.max(Math.abs(dx), Math.abs(dy))} days' walk. It is marked on your map.`;
 }
 function finishDuel(winner) {
-  const g = S.game; const { duel, tpl, ante, roamUid, dungeon } = S.duel; S.duel = null;
+  const g = S.game; const { duel, tpl, ante, roamUid, dungeon, tutorial } = S.duel; S.duel = null;
+  sfx(winner === 0 ? 'win' : 'lose');
+  if (tutorial) {
+    go('title');
+    S.modal = {
+      title: winner === 0 ? 'You won the practice duel' : 'You lost the practice duel',
+      body: `<p>${winner === 0 ? `${esc(tpl.name)} is at 0 life. That is the whole game: lands, creatures, attacks, and knowing when to hold back.` : `${esc(tpl.name)} got you to 0 life. Nothing is lost in practice. Keep a blocker back, attack when their creatures cannot kill yours, and cast a creature every turn you can.`}</p><p>Ready for the real thing? Start a new journey below. The hints stay off in real duels, but every screen works the same way.</p>`,
+      buttons: [{ label: 'Practice again', primary: winner !== 0, action: () => { S.modal = null; startTutorialDuel(); } }, { label: 'Back to the lessons', action: () => { S.modal = null; go('tutorial'); } }, { label: 'Back to the title', primary: winner === 0, action: () => { S.modal = null; render(); } }],
+    };
+    render(); return;
+  }
   const lines = [];
   if (dungeon) {
     const cur = currentDungeon();
@@ -423,13 +438,15 @@ function renderTop() {
   const tabs = [['map', 'Map'], ['collection', 'Collection'], ['deck', 'Deck']];
   topbar.innerHTML = `<div class="brand" data-go="title">Fivefold <span>demo</span></div>
     <nav>${tabs.map(([k, l]) => `<button class="tab${S.screen === k ? ' on' : ''}" data-go="${k}" ${inDuel || (k !== 'collection' && !g) ? 'disabled' : ''}>${l}</button>`).join('')}</nav>
-    ${g ? `<div class="stats"><span title="Life">♥ ${g.player.life}/${g.player.maxLife}</span><span title="Gold">◎ ${g.player.gold}</span><span title="Food" class="${g.player.food === 0 ? 'starving' : ''}">✦ ${g.player.food}${g.player.food === 0 ? ' STARVING' : ''}</span><span title="Day">Day ${g.player.day}</span><span title="Usurper's links">Links ${g.boss.links}/3</span></div>` : ''}`;
+    ${g ? `<div class="stats"><span title="Life">♥ ${g.player.life}/${g.player.maxLife}</span><span title="Gold">◎ ${g.player.gold}</span><span title="Food" class="${g.player.food === 0 ? 'starving' : ''}">✦ ${g.player.food}${g.player.food === 0 ? ' STARVING' : ''}</span><span title="Day">Day ${g.player.day}</span><span title="Usurper's links">Links ${g.boss.links}/3</span></div>` : ''}
+    <button class="tab audio${g ? '' : ' solo'}" data-audio title="${audioMuted() ? 'Sound is off. Click to turn it on.' : 'Sound is on. Click to mute.'}">${audioMuted() ? '🔇' : '🔊'}</button>`;
 }
 
 function render() {
   app.classList.toggle('full', S.screen === 'duel');
   renderTop();
-  const views = { title, collection, deck, map, city, duel, result, end, dungeon };
+  const views = { title, collection, deck, map, city, duel, result, end, dungeon, tutorial };
+  music({ title: 'title', tutorial: 'title', collection: 'map', deck: 'map', map: 'map', result: 'map', end: 'title', city: 'city', duel: 'duel', dungeon: 'dungeon' }[S.screen] || 'title');
   // The map keeps its canvas between steps (re-creating a full-size canvas every keypress is what made walking feel slow).
   const keepMap = S.screen === 'map' && !!app.querySelector('.mapscreen #map');
   if (keepMap) { for (const el of app.querySelectorAll('.overlay, .toast')) el.remove(); } else app.innerHTML = '';
@@ -445,6 +462,10 @@ function title() {
     <h1>Fivefold</h1>
     <p class="lede">A generation ago a wandering mage with a weak deck broke five corrupt guilds and drove a planeswalker back beyond the barrier. The barrier healed crooked. Mana pools and drains in tides now, the five Orders hoard the links that pin the cracks shut, and something that came through before the seal closed has spent thirty years whispering to their Wardens. The old Wanderer is dying. The letter, and the title, are yours.</p>
     <p class="lede small">Walk a world where geography is color. Duel the mages who roam it with the cards you actually own. Wager cards you cannot buy back. Find which Warden the Usurper is wearing before the Sealing completes.</p>
+    <div class="box learn">
+      <div><h2>New to Magic?</h2><p>Eight short lessons cover everything a duel needs: lands, mana, creatures, combat and spells. Then fight a practice duel with hints that read the table and tell you what to do next.</p></div>
+      <div class="btnrow"><button class="btn primary" data-go="tutorial">Learn to play</button><button class="btn" id="b-practice">Practice duel</button></div>
+    </div>
     <div class="cols">
       <form id="newgame" class="box">
         <h2>New journey</h2>
@@ -463,6 +484,42 @@ function title() {
     </div>
     <footer class="legal">Unofficial fan project under the Wizards of the Coast Fan Content Policy. Not approved or endorsed by Wizards. Card data is fetched from Scryfall at runtime; nothing is bundled. Magic: The Gathering is a trademark of Wizards of the Coast.</footer>
   </section>`;
+}
+
+function tutorial() {
+  const i = Math.max(0, Math.min(LESSONS.length - 1, S.lesson)); S.lesson = i;
+  const l = LESSONS[i]; const last = i === LESSONS.length - 1;
+  app.innerHTML = `<section class="screen lessonscreen">
+    <aside class="box lessonnav">
+      <h2>Learn to play</h2>
+      <ol>${LESSONS.map((x, k) => `<li class="${k === i ? 'on' : ''}${k < i ? ' done' : ''}"><button class="linkbtn" data-lesson="${k}">${esc(x.title)}</button></li>`).join('')}</ol>
+      <p class="small">Hover a green card name to see the card. Nothing here touches your collection or save.</p>
+      <button class="btn" data-go="title">Back to the title</button>
+    </aside>
+    <div class="box lesson">
+      <div class="small">Lesson ${i + 1} of ${LESSONS.length}</div>
+      <h2>${esc(l.title)}</h2>
+      ${l.html}
+      <div class="btnrow lessonbtns">
+        <button class="btn" data-lesson="${i - 1}" ${i === 0 ? 'disabled' : ''}>Previous</button>
+        ${last ? '<button class="btn primary" id="b-practice">Start the practice duel</button>' : `<button class="btn primary" data-lesson="${i + 1}">Next</button>`}
+        ${last ? '' : '<button class="btn ghost" id="b-practice">Skip to the practice duel</button>'}
+      </div>
+    </div>
+  </section>`;
+}
+// A duel outside the journey: the green starter deck against the weakest enemy, 20 life each, no ante, with hints.
+async function startTutorialDuel() {
+  await ensureContent();
+  const starter = S.content.enemies.find(e => e.color === 'G' && e.tier === 1);
+  const tpl = S.content.enemies.find(e => e.color === 'W' && e.tier === 1) || S.content.enemies.find(e => e.tier === 1);
+  const duel = new Duel({
+    player: { name: S.game?.name || 'Apprentice', deck: expandDeck({ ...starter.deck }), life: 20 },
+    ai: { name: tpl.name, deck: expandDeck({ ...tpl.deck }), life: 20, ai: true },
+    hooks: aiHooks, rules: {},
+  });
+  S.duel = { duel, tpl, ante: null, roamUid: null, dungeon: null, tutorial: true };
+  setBusy(null); go('duel');
 }
 
 function collection() {
@@ -579,7 +636,7 @@ function duel() {
     const portrait = frames => { frames = frames.filter(Boolean); return { frames, scale: Math.min(2.6, ph / Math.max(...frames.map(f => f[3]))) }; };
     const mageFrames = (color, tier) => { const c = SPRITES.mage[color] ? color : 'M'; return [SPRITES.mage[c][tier >= 2 ? 1 : 0], SPRITES[`mage-${c}-${tier >= 2 ? 2 : 1}-alt`]]; };
     const foe = d.tpl.boss ? portrait(MONSTERS.dragon.idle) : d.dungeon ? portrait(MONSTERS[DUNGEON_MONSTER[d.tpl.color] || 'skeleton'].idle) : portrait(mageFrames(d.tpl.color, d.tpl.tier));
-    mountDuel(d.root, d.duel, { ante: d.ante ? { mine: d.ante.mine || '—', theirs: d.ante.theirs || '—' } : null, onEnd: finishDuel, portraits: { me: portrait([SPRITES.hero, SPRITES['hero-alt']]), foe } });
+    mountDuel(d.root, d.duel, { ante: d.ante ? { mine: d.ante.mine || '—', theirs: d.ante.theirs || '—' } : null, onEnd: finishDuel, portraits: { me: portrait([SPRITES.hero, SPRITES['hero-alt']]), foe }, tutorial: !!d.tutorial });
   }
   app.innerHTML = '';
   const sec = document.createElement('section'); sec.className = 'screen duelscreen';
@@ -631,16 +688,19 @@ app.addEventListener('submit', ev => {
   if (ev.target.id === 'newgame') { ev.preventDefault(); const f = new FormData(ev.target); newGame({ name: f.get('name').trim(), color: f.get('color'), difficulty: f.get('difficulty') }); }
 });
 document.addEventListener('click', ev => {
-  const t = ev.target.closest('[data-go],[data-modal],[data-filter],[data-add],[data-rem],[data-dec],[data-buy],#b-import,#b-csv,#b-rescan,#b-clear-coll,#b-fill,#b-rest,#b-inn,#b-food,#b-leave,#b-newgame,#b-dleave');
+  if (ev.target.closest('.btn, .tab, .linkbtn')) sfx('click');
+  const t = ev.target.closest('[data-go],[data-modal],[data-filter],[data-add],[data-rem],[data-dec],[data-buy],[data-audio],[data-lesson],#b-import,#b-csv,#b-rescan,#b-clear-coll,#b-fill,#b-rest,#b-inn,#b-food,#b-leave,#b-newgame,#b-dleave,#b-practice');
   if (!t) return;
   const g = S.game;
+  if ('audio' in t.dataset) { toggleAudio(); renderTop(); return; }
+  if (t.dataset.lesson != null) { if (!t.disabled) { S.lesson = Number(t.dataset.lesson); go('tutorial'); } return; }
   if (t.dataset.go) { if (!t.disabled) { if (t.dataset.go === 'map' && g?.status !== 'playing' && g) go('end'); else if (t.dataset.go === 'dungeon' && !currentDungeon()) go('map'); else go(t.dataset.go); } return; }
   if (t.dataset.modal != null) { const b = S.modal?.buttons[Number(t.dataset.modal)]; if (b && !b.disabled) b.action(); return; }
   if (t.dataset.filter) { S.filter = t.dataset.filter; render(); return; }
   if (t.dataset.add) { addCards(g.deck, t.dataset.add, 1); save(); render(); return; }
   if (t.dataset.rem) { addCards(g.deck, t.dataset.rem, -1); save(); render(); return; }
   if (t.dataset.dec) { addCards(S.collection, t.dataset.dec, -1); if (g && g.deck[t.dataset.dec] > (S.collection[t.dataset.dec] || 0)) addCards(g.deck, t.dataset.dec, -1); save(); render(); return; }
-  if (t.dataset.buy != null) { const c = cityAt(g.world, g.player.x, g.player.y); const it = cityStock(c)[Number(t.dataset.buy)]; if (it && !it.sold && g.player.gold >= it.price) { g.player.gold -= it.price; it.sold = true; addCards(S.collection, it.name, 1); save(); render(); } return; }
+  if (t.dataset.buy != null) { const c = cityAt(g.world, g.player.x, g.player.y); const it = cityStock(c)[Number(t.dataset.buy)]; if (it && !it.sold && g.player.gold >= it.price) { g.player.gold -= it.price; it.sold = true; addCards(S.collection, it.name, 1); sfx('coin'); save(); render(); } return; }
   switch (t.id) {
     case 'b-import': S.importText = document.getElementById('imp').value; doImport(S.importText); break;
     case 'b-csv': fetch('/api/collection').then(r => r.ok ? r.text() : Promise.reject(new Error('collection.csv not found next to server.js'))).then(txt => { S.importText = txt; doImport(txt); }).catch(e => { S.report = { error: e.message }; render(); }); break;
@@ -653,9 +713,13 @@ document.addEventListener('click', ev => {
     case 'b-leave': go('map'); break;
     case 'b-newgame': S.game = null; save(); go('title'); break;
     case 'b-dleave': dungeonExitPrompt(false); break;
+    case 'b-practice': startTutorialDuel().catch(e => setBusy('Could not load card data: ' + e.message)); break;
   }
 });
 document.addEventListener('input', ev => { if (ev.target.id === 'dfilter') { S.deckFilter = ev.target.value; deck(); document.getElementById('dfilter').focus(); const el = document.getElementById('dfilter'); el.setSelectionRange(el.value.length, el.value.length); } });
+// Web Audio starts only after a gesture; the first click or key unlocks it and starts the score for the current screen.
+document.addEventListener('pointerdown', () => unlock(), { capture: true });
+document.addEventListener('keydown', () => unlock(), { capture: true });
 document.addEventListener('keydown', ev => {
   if (S.screen === 'dungeon' && !S.modal) {
     const k = ev.key.toLowerCase();
@@ -672,7 +736,7 @@ document.addEventListener('keydown', ev => {
 
 // ---- boot -----------------------------------------------------------------------
 // Debug handle for the console and for automated tests: window.ff.S is the app state.
-window.ff = { S, defOf, save, render, startDuel, enemyById };
+window.ff = { S, defOf, save, render, startDuel, enemyById, startTutorialDuel };
 initPreview();
 load();
 render();

@@ -564,6 +564,7 @@ export class Duel {
     }
     if (d.kind === 'land') {
       p.landPlayed++; this.moveTo(card, 'battlefield'); this.say(`${p.name} plays ${d.name}.`);
+      this.fx.push({ type: 'land', id: card.id, controller: p.idx });
       this.passes = 0; this.priority = p.idx; this.emit(); return true;
     }
     const specs = this.targetSpecs(p, card, opts);

@@ -62,6 +62,12 @@ Landmarks: a dozen wells, standing stones, signposts, towers, oases, volcanoes, 
 
 Food: every step on the overworld costs one. At zero you lose a life every other step until you eat. Cities sell food and every won duel yields some.
 
+## Learn to play, and sound
+
+The title screen has a **Learn to play** course for people who have never held a Magic card: eight short lessons (the goal, cards and turns, lands and mana, creatures, combat, spells and responding, a turn step by step, and how Fivefold changes things), with hover previews of every card they mention. It ends in a **practice duel**: the green starter deck against the weakest enemy at 20 life each, no ante, nothing saved. A green hint box above the controls reads the table and says what to do next: play a land, what you can afford, which attackers are safe, what blocks are good, when to respond and when to pass. Real duels have no hints. `js/tutorial.js` holds the lessons and the hint logic.
+
+Sound is synthesised in the browser with Web Audio, so there are no audio files. Short effects mark steps, cards, spells, land drops, attacks, blocks, hits, deaths, gold, riddles and the end of a duel; a quiet generative score changes with the screen (title, map, city, duel, dungeon) and never repeats exactly. The speaker button in the top bar mutes everything and the choice is remembered. Browsers only start audio after a click or key, so the first gesture on any screen starts the score. `js/audio.js` holds all of it.
+
 ## Layout
 
 ```

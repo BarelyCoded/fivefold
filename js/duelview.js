@@ -5,6 +5,8 @@ import { artFor, hasOwnArt } from './collection.js';
 import { costString, COLORS } from './cards.js';
 import { spriteStyle, atlasReady } from './atlas.js';
 import { onTokenArt } from './scryfall.js';
+import { sfx } from './audio.js';
+import { hintFor } from './tutorial.js';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -30,7 +32,7 @@ export function cardHtml(def, opts = {}) {
   </div>`;
 }
 
-export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = null }) {
+export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = null, tutorial = false }) {
   const me = duel.players[0], ai = duel.players[1];
   const ui = { wizard: null, attackers: new Set(), blocks: {}, blocker: null, message: '', menu: null, viewer: null, choice: null, order: null };
   let finished = false, running = false;
@@ -72,19 +74,21 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     let wait = 0;
     for (const f of fx) {
       switch (f.type) {
-        case 'attack': for (const id of f.ids) elOf(id)?.classList.add('fx-attack'); wait = Math.max(wait, 450); break;
-        case 'block': for (const id of f.blockers) elOf(id)?.classList.add('fx-block'); wait = Math.max(wait, 450); break;
+        case 'attack': for (const id of f.ids) elOf(id)?.classList.add('fx-attack'); sfx('attack'); wait = Math.max(wait, 450); break;
+        case 'block': for (const id of f.blockers) elOf(id)?.classList.add('fx-block'); sfx('block'); wait = Math.max(wait, 450); break;
         case 'strike':
           for (const id of f.attackers) elOf(id)?.classList.add('fx-lunge');
           for (const ids of Object.values(f.blocks)) for (const id of ids) elOf(id)?.classList.add('fx-lunge');
-          wait = Math.max(wait, 650); break;
+          sfx('hit'); wait = Math.max(wait, 650); break;
         case 'damage': {
           const t = f.player !== undefined ? pboxOf(f.player) : elOf(f.target);
           if (t) { t.classList.add('fx-hit'); floatText(t, `-${f.amount}`, 'fx-dmg'); }
+          if (f.player !== undefined) sfx('hit');
           wait = Math.max(wait, 750); break;
         }
-        case 'cast': { const s = root.querySelector('.stack-item.top'); if (s) s.classList.add('fx-cast'); wait = Math.max(wait, 300); break; }
-        case 'die': { const z = f.controller === 0 ? '.zone.mine .field' : '.zone.opp .field'; floatText(root.querySelector(z), `${f.name} ✝`, 'fx-die'); wait = Math.max(wait, 500); break; }
+        case 'cast': { const s = root.querySelector('.stack-item.top'); if (s) s.classList.add('fx-cast'); sfx('cast'); wait = Math.max(wait, 300); break; }
+        case 'land': sfx('land'); break;
+        case 'die': { const z = f.controller === 0 ? '.zone.mine .field' : '.zone.opp .field'; floatText(root.querySelector(z), `${f.name} ✝`, 'fx-die'); sfx('die'); wait = Math.max(wait, 500); break; }
       }
     }
     return wait;
@@ -251,6 +255,11 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     return `<div class="phases ${duel.active === 0 ? 'mine' : 'theirs'}"><div class="phases-who">${duel.active === 0 ? 'Your turn' : esc(ai.name)}</div>${PHASES.map(([k, label, icon]) => `<div class="phase${k === cur ? ' on' : ''}"><span class="ph-icon">${icon}</span><span class="ph-label">${label}</span></div>`).join('')}<div class="phases-step">${esc(STEP_NAME[duel.step] || duel.step)}</div></div>`;
   }
 
+  function tutor() {
+    if (!tutorial) return '';
+    const h = hintFor(duel, me, ui);
+    return h ? `<div class="tutor"><b>${esc(h.title)}</b><div>${esc(h.text)}</div></div>` : '';
+  }
   function controls() {
     if (duel.winner !== null) return '';
     if (ui.menu) return `<div class="hint">${esc(ui.menu.title)}</div>${ui.menu.items.map((it, i) => `<button class="btn${it.primary ? ' primary' : ''}" data-menu="${i}" ${it.disabled ? 'disabled' : ''}>${esc(it.label)}</button>`).join('')}<button class="btn ghost" data-menu="cancel">Cancel</button>`;
@@ -309,7 +318,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
         <section class="hand">${me.hand.map(handCard).join('')}</section>
       </div>
       <aside class="panel">
-        <div class="controls">${controls()}${ui.message ? `<div class="msg">${esc(ui.message)}</div>` : ''}</div>
+        <div class="controls">${tutor()}${controls()}${ui.message ? `<div class="msg">${esc(ui.message)}</div>` : ''}</div>
         <div class="log">${duel.log.slice(-18).map(l => `<div>${esc(l)}</div>`).join('')}</div>
         <button id="b-concede" class="btn small ghost">Concede</button>
       </aside>

@@ -277,3 +277,28 @@ svg.arrows { position: absolute; left: 0; top: 0; pointer-events: none; z-index:
 .dwrap { background: #050506; border: 6px solid #4a3323; outline: 2px solid #7a5a3a; padding: 4px; }
 #dungeon { display: block; image-rendering: pixelated; image-rendering: crisp-edges; cursor: pointer; margin: 0 auto; }
 .modal .mbtns .btn { max-width: 100%; }
+
+/* ---- learn to play ---------------------------------------------------------------- */
+.title .learn { display: flex; align-items: center; justify-content: space-between; gap: 24px; flex-wrap: wrap; border-color: var(--accent); }
+.title .learn h2 { margin-top: 0; }
+.title .learn p { margin: 0; color: var(--ink2); max-width: 70ch; }
+.title .learn .btnrow { display: flex; gap: 8px; flex-shrink: 0; }
+.lessonscreen { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 16px; align-items: start; max-width: 1100px; margin: 0 auto; }
+@media (max-width: 800px) { .lessonscreen { grid-template-columns: 1fr; } }
+.lessonnav ol { padding-left: 22px; margin: 8px 0 14px; }
+.lessonnav li { margin: 4px 0; color: var(--ink2); }
+.lessonnav li.done { opacity: .7; }
+.lessonnav li.on .linkbtn { color: var(--accent); font-weight: 600; }
+.linkbtn { background: none; border: 0; color: inherit; font: inherit; cursor: pointer; padding: 0; text-align: left; }
+.linkbtn:hover { text-decoration: underline; }
+.lesson { font-size: 15px; line-height: 1.55; }
+.lesson h2 { margin-top: 2px; }
+.lesson ul, .lesson ol { padding-left: 22px; }
+.lesson li { margin: 6px 0; }
+.lesson .example { background: var(--bg2); border-left: 3px solid var(--accent); padding: 8px 12px; margin: 10px 0; border-radius: 0 4px 4px 0; }
+.lessonbtns { display: flex; gap: 8px; margin-top: 18px; flex-wrap: wrap; }
+.tcard { color: #8fd18a; border-bottom: 1px dotted #8fd18a; cursor: help; }
+.tutor { background: #223b26; border: 1px solid #4f8a52; border-radius: 6px; padding: 10px 12px; font-size: 13px; line-height: 1.45; color: #e8f3e6; }
+.tutor b { display: block; color: #b7f0b0; margin-bottom: 3px; font-size: 14px; }
+#topbar .audio { font-size: 15px; padding: 3px 9px; }
+#topbar .audio.solo { margin-left: auto; }
