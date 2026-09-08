@@ -66,6 +66,12 @@ Landmarks: a dozen wells, standing stones, signposts, towers, oases, volcanoes, 
 
 Food: every step on the overworld costs one. At zero you lose a life every other step until you eat. Cities sell food and every won duel yields some.
 
+## Amulets
+
+Coloured amulets are a second currency, in the spirit of the old Shandalar game. You earn them by beating tougher wanderers (a chance per win, better against tier-two foes and guaranteed from dungeon guardians and the Usurper), by claiming city bounties (post one on the bounty board, then defeat the named foe), by buying them at the **Gem Cutter Guild** for 200 gold each, and by finding the **Lost City of El'Arkan**, which gives one amulet of every colour, once. Your amulets show as coloured gems in the top bar.
+
+Spend them at a city's **amulet exchange** (trade a matching-colour amulet for one of that colour's cards), at a **Diamond Mine** (trade any amulet for a random card of its colour), or as **world magic**: with a red amulet in hand the map offers the Staff of Thunder, which scatters every monster within three tiles. The Gem Cutter Guild, the Lost City and the Diamond Mines are special lairs marked as gems on the map and minimap. Amulet state lives in the save alongside gold and food.
+
 ## Learn to play, and sound
 
 The title screen has a **Learn to play** course for people who have never held a Magic card: eight short lessons (the goal, cards and turns, lands and mana, creatures, combat, spells and responding, a turn step by step, and how Fivefold changes things), with hover previews of every card they mention. It ends in a **practice duel**: the green starter deck against the weakest enemy at 20 life each, no ante, nothing saved. A green hint box above the controls reads the table and says what to do next: play a land, what you can afford, which attackers are safe, what blocks are good, when to respond and when to pass. Real duels have no hints. `js/tutorial.js` holds the lessons and the hint logic.

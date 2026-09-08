@@ -2,7 +2,7 @@
 import { parseList, importNames, defOf, forgetDefs, loadArtIndex, artFor, artCount, hasOwnArt, hasServer } from './collection.js';
 import { fetchCards, cacheSize, cached as cachedCard } from './scryfall.js';
 import { COLORS, COLOR_NAME, costString, statusLabel } from './cards.js';
-import { generateWorld, drawWorld, drawMinimap, tileAt, inBounds, cityAt, linkAt, enemyAt, stepEnemies, BIOME, TILE, VIEW, placeDungeons, dungeonAt, placeLandmarks, landmarkAt } from './world.js';
+import { generateWorld, drawWorld, drawMinimap, tileAt, inBounds, cityAt, linkAt, enemyAt, stepEnemies, BIOME, TILE, VIEW, placeDungeons, dungeonAt, placeLandmarks, landmarkAt, placeSpecials, specialAt } from './world.js';
 import { Duel } from './engine.js';
 import { mountDuel, cardHtml } from './duelview.js';
 import { aiHooks } from './ai.js';
@@ -23,6 +23,13 @@ const DIFF = {
 };
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const rnd = a => a[Math.floor(Math.random() * a.length)];
+// ---- amulets: a colored gem currency, earned from tough foes and lairs, spent on cards and world magic
+const AMULET_HEX = { W: '#efe9cf', U: '#5e8cc9', B: '#7a6a95', R: '#d0604a', G: '#6a9a4a' };
+const newAmulets = () => ({ W: 0, U: 0, B: 0, R: 0, G: 0 });
+function giveAmulet(color, n = 1) { const g = S.game; if (!g) return; g.player.amulets ||= newAmulets(); g.player.amulets[color] = (g.player.amulets[color] || 0) + n; }
+const amuletCount = color => (S.game?.player.amulets?.[color] || 0);
+const totalAmulets = () => COLORS.reduce((a, c) => a + amuletCount(c), 0);
+const amuletGems = (sel = '') => COLORS.map(c => `<span class="amu${amuletCount(c) ? '' : ' none'}${sel === c ? ' sel' : ''}" title="${COLOR_NAME[c]} amulet"><i style="background:${AMULET_HEX[c]}"></i>${amuletCount(c)}</span>`).join('');
 
 const app = document.getElementById('app');
 const topbar = document.getElementById('topbar');
@@ -123,10 +130,11 @@ async function newGame({ name, color, difficulty }) {
   const world = generateWorld(Math.random, S.content.enemies, color);
   placeDungeons(world, Math.random, S.dungeons.dungeons);
   placeLandmarks(world, Math.random);
+  placeSpecials(world, Math.random);
   S.game = {
     name: name || 'Wanderer', color, difficulty, deck, world,
-    player: { x: world.start.x, y: world.start.y, life: d.life, maxLife: d.life, gold: d.gold, food: 60, day: 1, steps: 0 },
-    boss: { links: 0 }, status: 'playing', wins: 0, losses: 0, cityStock: {},
+    player: { x: world.start.x, y: world.start.y, life: d.life, maxLife: d.life, gold: d.gold, food: 60, day: 1, steps: 0, amulets: newAmulets() },
+    boss: { links: 0 }, status: 'playing', wins: 0, losses: 0, cityStock: {}, quests: [],
   };
   save(); go('map');
 }
@@ -155,6 +163,8 @@ function move(dx, dy) {
   if (city) { go('city'); return; }
   const lm = landmarkAt(g.world, nx, ny);
   if (lm && !lm.used) { landmarkRiddle(lm); return; }
+  const sp = specialAt(g.world, nx, ny);
+  if (sp) { specialPrompt(sp); return; }
   render();
 }
 // ---- landmark riddles ---------------------------------------------------------------
@@ -194,6 +204,35 @@ function bossLink() {
 }
 function toast(msg) { S.toast = msg; render(); setTimeout(() => { if (S.toast === msg) { S.toast = null; render(); } }, 3500); }
 
+function specialPrompt(sp) {
+  const g = S.game;
+  if (sp.kind === 'gemcutter') {
+    S.modal = {
+      title: 'The Gem Cutter Guild',
+      body: `<p class="taunt">Cut gems for the discerning wanderer. Two hundred gold the stone, any hue.</p><p>You hold ${g.player.gold} gold. Your amulets: <span class="amurow">${amuletGems()}</span></p>`,
+      buttons: [...COLORS.map(c => ({ label: `Buy ${COLOR_NAME[c]} (200)`, disabled: g.player.gold < 200, action: () => { g.player.gold -= 200; giveAmulet(c); sfx('coin'); save(); specialPrompt(sp); } })), { label: 'Leave', primary: true, action: () => { S.modal = null; render(); } }],
+    };
+    render(); return;
+  }
+  if (sp.kind === 'lostcity') {
+    if (!sp.used) {
+      sp.used = true; for (const c of COLORS) giveAmulet(c); sfx('open'); save();
+      S.modal = { title: 'The Lost City of El\u2019Arkan', body: '<p class="taunt">Sand parts over a ring of five altars. On each rests a single perfect amulet.</p><p>You take one amulet of every color.</p>', buttons: [{ label: 'Wondrous', primary: true, action: () => { S.modal = null; render(); } }] };
+    } else {
+      S.modal = { title: 'The Lost City of El\u2019Arkan', body: '<p>The altars are bare. You have already claimed the amulets of El\u2019Arkan.</p>', buttons: [{ label: 'Leave', primary: true, action: () => { S.modal = null; render(); } }] };
+    }
+    render(); return;
+  }
+  if (sp.kind === 'diamondmine') {
+    const have = COLORS.filter(c => amuletCount(c) > 0);
+    S.modal = {
+      title: 'The Diamond Mine',
+      body: `<p class="taunt">The miners trade in gems, not gold. One amulet, one card of its color.</p><p>Your amulets: <span class="amurow">${amuletGems()}</span></p>${have.length ? '' : '<p class="small">You have no amulets to trade.</p>'}`,
+      buttons: [...have.map(c => ({ label: `Trade ${COLOR_NAME[c]} amulet`, action: () => { const pool = cityPool(c).filter(n => { const d = defOf(n); return d && d.kind !== 'unsupported'; }); const card = rnd(pool); if (card) { giveAmulet(c, -1); addCards(S.collection, card, 1); sfx('coin'); save(); toast(`The mine gives you ${card}.`); } S.modal = null; render(); } })), { label: 'Leave', primary: true, action: () => { S.modal = null; render(); } }],
+    };
+    render(); return;
+  }
+}
 function encounter(enemy) {
   const tpl = enemyById(enemy.template); const g = S.game;
   S.modal = {
@@ -332,6 +371,7 @@ function dungeonTreasureDrop() {
   addCards(S.collection, card, 1); lines.push(`The vault holds ${card}.`);
   if (Math.random() < 0.5) { const art = rnd(S.dungeons.artifacts.filter(n => defOf(n) && defOf(n).kind !== 'unsupported')); if (art) { addCards(S.collection, art, 1); lines.push(`A relic: ${art}.`); } }
   const gold = 20 + Math.floor(Math.random() * 21); g.player.gold += gold; lines.push(`${gold} gold in an old chest.`); sfx('coin');
+  giveAmulet(tpl.color); lines.push(`The Guardian's ${COLOR_NAME[tpl.color]} amulet is yours.`);
   dg.cleared = true;
   S.result = { won: true, tpl: { name: tpl.name }, lines, title: 'The vault is yours', flavour: `The Guardian of the ${tpl.name} is dead. The exit is open.`, back: 'dungeon' };
   save(); go('result');
@@ -378,6 +418,10 @@ function finishDuel(winner) {
     if (ante.theirs) { addCards(S.collection, ante.theirs, 1); lines.push(`You take ${ante.theirs} as ante.`); }
     g.player.life = Math.max(duel.players[0].life, Math.ceil(g.player.maxLife / 2));
     if (roamUid != null) { g.world.enemies = g.world.enemies.filter(e => e.uid !== roamUid); if (Math.random() < 0.45) { const clue = revealClue(tpl.color); if (clue) lines.push(clue); } }
+    // Tough foes drop amulets; a matching bounty pays one too.
+    const dropChance = tpl.boss ? 1 : tpl.tier >= 2 ? 0.4 : 0.12;
+    if (Math.random() < dropChance) { const col = tpl.boss ? rnd(COLORS) : tpl.color; giveAmulet(col); lines.push(`You pry a ${COLOR_NAME[col]} amulet from your fallen foe.`); }
+    if (roamUid != null && g.quests?.length) { const q = g.quests.find(q => q.enemyUid === roamUid); if (q) { giveAmulet(q.color); g.quests = g.quests.filter(x => x !== q); lines.push(`Bounty claimed: ${q.city} rewards you a ${COLOR_NAME[q.color]} amulet.`); } }
     if (tpl.boss) { g.status = 'won'; save(); go('end'); return; }
   } else {
     g.losses++;
@@ -413,6 +457,25 @@ function cityStock(city) {
   g.cityStock[key] = { day: g.player.day, items }; save();
   return items;
 }
+// Cards a city offers for amulets of its color (the "named cities for cards" exchange).
+function cityAmuletStock(city) {
+  const g = S.game; const st = g.cityStock[city.color];
+  if (st && st.amu && g.player.day - st.day < 6) return st.amu;
+  const pool = cityPool(city.color).filter(n => { const d = defOf(n); return d && d.kind !== 'unsupported'; });
+  const amu = [];
+  for (let i = 0; i < 2 && pool.length; i++) { const n = pool.splice(Math.floor(Math.random() * pool.length), 1)[0]; amu.push({ name: n, sold: false }); }
+  if (st) st.amu = amu; else g.cityStock[city.color] = { day: g.player.day, items: [], amu };
+  save(); return amu;
+}
+// A bounty: defeat a specific roaming foe near this city for an amulet of its color.
+function postBounty(city) {
+  const g = S.game;
+  const near = g.world.enemies.filter(e => Math.abs(e.x - city.x) <= 7 && Math.abs(e.y - city.y) <= 7 && !g.quests.some(q => q.enemyUid === e.uid));
+  if (!near.length) { toast('No worthy foe roams near this city right now.'); return; }
+  const e = rnd(near); const tpl = enemyById(e.template);
+  g.quests.push({ enemyUid: e.uid, color: tpl.color, city: city.name, enemyName: tpl.name });
+  save(); render();
+}
 
 // ---- import ------------------------------------------------------------------------
 async function doImport(text) {
@@ -438,7 +501,7 @@ function renderTop() {
   const tabs = [['map', 'Map'], ['collection', 'Collection'], ['deck', 'Deck']];
   topbar.innerHTML = `<div class="brand" data-go="title">Fivefold <span>demo</span></div>
     <nav>${tabs.map(([k, l]) => `<button class="tab${S.screen === k ? ' on' : ''}" data-go="${k}" ${inDuel || (k !== 'collection' && !g) ? 'disabled' : ''}>${l}</button>`).join('')}</nav>
-    ${g ? `<div class="stats"><span title="Life">♥ ${g.player.life}/${g.player.maxLife}</span><span title="Gold">◎ ${g.player.gold}</span><span title="Food" class="${g.player.food === 0 ? 'starving' : ''}">✦ ${g.player.food}${g.player.food === 0 ? ' STARVING' : ''}</span><span title="Day">Day ${g.player.day}</span><span title="Usurper's links">Links ${g.boss.links}/3</span></div>` : ''}
+    ${g ? `<div class="stats"><span title="Life">♥ ${g.player.life}/${g.player.maxLife}</span><span title="Gold">◎ ${g.player.gold}</span><span title="Food" class="${g.player.food === 0 ? 'starving' : ''}">✦ ${g.player.food}${g.player.food === 0 ? ' STARVING' : ''}</span><span title="Day">Day ${g.player.day}</span><span title="Usurper's links">Links ${g.boss.links}/3</span></div>${g && totalAmulets() ? `<div class="amurow" title="Amulets">${amuletGems()}</div>` : ''}` : ''}
     <button class="tab audio${g ? '' : ' solo'}" data-audio title="${audioMuted() ? 'Sound is off. Click to turn it on.' : 'Sound is on. Click to mute.'}">${audioMuted() ? '🔇' : '🔊'}</button>`;
 }
 
@@ -588,6 +651,7 @@ function map() {
       <p class="small">Move with WASD or the arrow keys, or click a neighbouring tile. Walking costs food. Blue crystals are mana links (+2 life). Landmarks marked ? ask a riddle about a card: answer right for a card of that region's color, wrong and you lose life, food or, rarely, a card. Pits with a torch are dungeons: revealed by clues from beaten foes, fought room by room with your life carried over. The dark fortress is the Usurper.</p>
       ${(g.world.dungeons || []).some(d => d.revealed) ? `<p class="small">Known dungeons: ${g.world.dungeons.filter(d => d.revealed).map(d => `${dungeonTemplate(d.id).name}${d.cleared ? ' (cleared)' : ''}`).join(', ')}.</p>` : ''}
       <div class="btnrow"><button class="btn" id="b-rest" ${g.player.food < 3 || g.player.life >= g.player.maxLife ? 'disabled' : ''}>Rest (3 food, +5 life)</button><button class="btn ghost" data-go="title">Menu</button></div>
+      ${amuletCount('R') ? `<h3>World magic</h3><p class="small">Staff of Thunder: spend a red amulet to scatter every monster within three tiles.</p><div class="btnrow"><button class="btn" id="b-worldmagic">Staff of Thunder (1 <i class="amu-chip" style="background:${AMULET_HEX.R}"></i>)</button></div>` : ''}
       <h3>Legend</h3>
       <div class="legend">${COLORS.map(c => `<span><i class="sw" style="background:${BIOME[c].fill}"></i>${BIOME[c].name}</span>`).join('')}</div>`;
   let canvas = app.querySelector('.mapscreen #map');
@@ -597,6 +661,8 @@ function map() {
     canvas = document.getElementById('map');
   }
   if (!g.world.landmarks) { placeLandmarks(g.world, Math.random); save(); }
+  if (!g.world.specials) { placeSpecials(g.world, Math.random); save(); }
+  if (!g.player.amulets) { g.player.amulets = newAmulets(); g.quests ||= []; save(); }
   const hl = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dy]) => [g.player.x + dx, g.player.y + dy]).filter(([x, y]) => inBounds(g.world, x, y));
   const cam = drawWorld(canvas, g.world, g.player, { highlight: hl });
   drawMinimap(document.getElementById('minimap'), g.world, g.player, cam);
@@ -622,6 +688,11 @@ function city() {
       <h3>Market</h3>
       <div class="market">${stock.map((it, i) => { const d = defOf(it.name); return `<div class="stall${it.sold ? ' sold' : ''}">${cardHtml(d)}<div class="price">${it.sold ? 'Sold' : `${it.price} gold`}</div><button class="btn small" data-buy="${i}" ${it.sold || g.player.gold < it.price ? 'disabled' : ''}>Buy</button></div>`; }).join('')}</div>
       <p class="small">Stock changes every few days. Artifacts and rare lands pass through now and then. Bought cards go to your collection; add them to your deck from the Deck tab.</p>
+      <h3>Amulet exchange <span class="amurow small">${amuletGems()}</span></h3>
+      <p class="small">This city trades ${COLOR_NAME[c.color]} cards for ${COLOR_NAME[c.color]} amulets, one apiece.</p>
+      <div class="market">${cityAmuletStock(c).map((it, i) => { const d = defOf(it.name); return `<div class="stall${it.sold ? ' sold' : ''}">${cardHtml(d)}<div class="price"><i class="amu-chip" style="background:${AMULET_HEX[c.color]}"></i>${it.sold ? 'Sold' : '1 amulet'}</div><button class="btn small" data-abuy="${i}" ${it.sold || amuletCount(c.color) < 1 ? 'disabled' : ''}>Trade</button></div>`; }).join('')}</div>
+      <h3>Bounty board</h3>
+      ${(() => { const q = g.quests.find(q => q.city === c.name); return q ? `<p class="small">Active bounty: defeat <b>${esc(q.enemyName)}</b> for a ${COLOR_NAME[q.color]} amulet.</p>` : `<p class="small">Post a bounty on a foe roaming near ${esc(c.name)}; beat them for an amulet.</p><div class="btnrow"><button class="btn" id="b-bounty">Post a bounty</button></div>`; })()}
     </div>
   </section>`;
 }
@@ -689,7 +760,7 @@ app.addEventListener('submit', ev => {
 });
 document.addEventListener('click', ev => {
   if (ev.target.closest('.btn, .tab, .linkbtn')) sfx('click');
-  const t = ev.target.closest('[data-go],[data-modal],[data-filter],[data-add],[data-rem],[data-dec],[data-buy],[data-audio],[data-lesson],#b-import,#b-csv,#b-rescan,#b-clear-coll,#b-fill,#b-rest,#b-inn,#b-food,#b-leave,#b-newgame,#b-dleave,#b-practice');
+  const t = ev.target.closest('[data-go],[data-modal],[data-filter],[data-add],[data-rem],[data-dec],[data-buy],[data-abuy],[data-audio],[data-lesson],#b-import,#b-csv,#b-rescan,#b-clear-coll,#b-fill,#b-rest,#b-inn,#b-food,#b-leave,#b-newgame,#b-dleave,#b-practice,#b-bounty,#b-worldmagic');
   if (!t) return;
   const g = S.game;
   if ('audio' in t.dataset) { toggleAudio(); renderTop(); return; }
@@ -701,6 +772,7 @@ document.addEventListener('click', ev => {
   if (t.dataset.rem) { addCards(g.deck, t.dataset.rem, -1); save(); render(); return; }
   if (t.dataset.dec) { addCards(S.collection, t.dataset.dec, -1); if (g && g.deck[t.dataset.dec] > (S.collection[t.dataset.dec] || 0)) addCards(g.deck, t.dataset.dec, -1); save(); render(); return; }
   if (t.dataset.buy != null) { const c = cityAt(g.world, g.player.x, g.player.y); const it = cityStock(c)[Number(t.dataset.buy)]; if (it && !it.sold && g.player.gold >= it.price) { g.player.gold -= it.price; it.sold = true; addCards(S.collection, it.name, 1); sfx('coin'); save(); render(); } return; }
+  if (t.dataset.abuy != null) { const c = cityAt(g.world, g.player.x, g.player.y); const it = cityAmuletStock(c)[Number(t.dataset.abuy)]; if (it && !it.sold && amuletCount(c.color) >= 1) { giveAmulet(c.color, -1); it.sold = true; addCards(S.collection, it.name, 1); sfx('coin'); save(); render(); } return; }
   switch (t.id) {
     case 'b-import': S.importText = document.getElementById('imp').value; doImport(S.importText); break;
     case 'b-csv': fetch('api/collection').then(r => r.ok ? r.text() : Promise.reject(new Error('collection.csv not found next to server.js'))).then(txt => { S.importText = txt; doImport(txt); }).catch(e => { S.report = { error: e.message }; render(); }); break;
@@ -714,6 +786,16 @@ document.addEventListener('click', ev => {
     case 'b-newgame': S.game = null; save(); go('title'); break;
     case 'b-dleave': dungeonExitPrompt(false); break;
     case 'b-practice': startTutorialDuel().catch(e => setBusy('Could not load card data: ' + e.message)); break;
+    case 'b-bounty': { const c = cityAt(g.world, g.player.x, g.player.y); if (c) postBounty(c); break; }
+    case 'b-worldmagic': {
+      if (amuletCount('R') < 1) break;
+      const before = g.world.enemies.length;
+      g.world.enemies = g.world.enemies.filter(e => Math.abs(e.x - g.player.x) > 3 || Math.abs(e.y - g.player.y) > 3);
+      const cleared = before - g.world.enemies.length;
+      giveAmulet('R', -1); sfx('cast'); save();
+      toast(cleared ? `Thunder scatters ${cleared} monster${cleared > 1 ? 's' : ''}.` : 'Thunder rolls, but no monster stood near.');
+      break;
+    }
   }
 });
 document.addEventListener('input', ev => { if (ev.target.id === 'dfilter') { S.deckFilter = ev.target.value; deck(); document.getElementById('dfilter').focus(); const el = document.getElementById('dfilter'); el.setSelectionRange(el.value.length, el.value.length); } });

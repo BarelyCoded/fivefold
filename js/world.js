@@ -119,6 +119,39 @@ export function placeLandmarks(world, rng, count = 12) {
   world.landmarks = out;
   return out;
 }
+// Special amulet lairs: a Gem Cutter Guild, the Lost City of El'Arkan, and a couple of Diamond Mines.
+export const specialAt = (world, x, y) => (world.specials || []).find(l => l.x === x && l.y === y);
+export function placeSpecials(world, rng) {
+  if (world.specials) return world.specials;
+  const taken = new Set([...world.cities.map(c => `${c.x},${c.y}`), ...world.links.map(l => `${l.x},${l.y}`), `${world.castle.x},${world.castle.y}`, ...world.enemies.map(e => `${e.x},${e.y}`), ...(world.dungeons || []).map(d => `${d.x},${d.y}`), ...(world.landmarks || []).map(l => `${l.x},${l.y}`)]);
+  const out = [];
+  const want = [{ kind: 'gemcutter' }, { kind: 'lostcity' }, { kind: 'diamondmine' }, { kind: 'diamondmine' }];
+  for (const spec of want) {
+    for (let i = 0; i < 800; i++) {
+      const x = Math.floor(rng() * world.w), y = Math.floor(rng() * world.h);
+      if (taken.has(`${x},${y}`) || tileAt(world, x, y) === 'U') continue;
+      if (dist({ x, y }, world.start) < 4) continue;
+      if (world.cities.some(c => dist(c, { x, y }) < 2.5) || out.some(l => dist(l, { x, y }) < 4)) continue;
+      out.push({ x, y, kind: spec.kind, color: tileAt(world, x, y), used: false }); taken.add(`${x},${y}`);
+      break;
+    }
+  }
+  world.specials = out;
+  return out;
+}
+function drawSpecial(ctx, cx, cy, sp) {
+  const col = { gemcutter: '#7fe0ff', lostcity: '#ffd76a', diamondmine: '#e6b3ff' }[sp.kind] || '#ffffff';
+  ctx.save();
+  ctx.translate(cx, cy);
+  if (sp.used && sp.kind !== 'gemcutter') ctx.globalAlpha = 0.5;
+  // a faceted gem
+  ctx.fillStyle = col; ctx.strokeStyle = 'rgba(20,20,30,.8)'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(0, -9); ctx.lineTo(7, -2); ctx.lineTo(0, 10); ctx.lineTo(-7, -2); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.beginPath(); ctx.moveTo(0, -9); ctx.lineTo(3, -2); ctx.lineTo(0, 2); ctx.lineTo(-3, -2); ctx.closePath(); ctx.fill();
+  ctx.restore();
+  const tag = { gemcutter: 'Gem', lostcity: 'El\u2019Arkan', diamondmine: 'Mine' }[sp.kind] || '';
+  labels.push({ x: cx, y: cy - 15, text: tag, size: 7, color: '#fff', bg: 'rgba(30,20,40,.85)' });
+}
 function drawLandmark(ctx, cx, cy, lm) {
   const rect = SPRITES[lm.kind];
   if (atlasReady() && rect) { if (lm.used) ctx.globalAlpha = 0.6; blitAt(ctx, rect, cx, cy + PX / 2 - 1, tileFit(rect, { volcano: 1.15, skull: 0.5, bones: 0.5, seaRock: 0.6, lavaVent: 0.6, pond: 0.6 }[lm.kind] || 0.95)); ctx.globalAlpha = 1; }
@@ -655,6 +688,7 @@ export function drawMinimap(canvas, world, player, cam) {
   for (const d of world.dungeons || []) if (d.revealed) dot(d.x, d.y, '#ffb347', 2);
   for (const l of world.links) if (!l.taken) dot(l.x, l.y, '#9fe7ff', 1.5);
   for (const lm of world.landmarks || []) if (!lm.used) dot(lm.x, lm.y, '#ffe9a8', 1.5);
+  for (const sp of world.specials || []) dot(sp.x, sp.y, { gemcutter: '#7fe0ff', lostcity: '#ffd76a', diamondmine: '#e6b3ff' }[sp.kind] || '#fff', 2);
   dot(world.castle.x, world.castle.y, '#ff3b3b', 3);
   dot(player.x, player.y, '#ffffff', 2.5);
   if (cam) { ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 1; ctx.strokeRect(cam.x * k + 0.5, cam.y * k + 0.5, VIEW.w * k - 1, VIEW.h * k - 1); }
@@ -677,6 +711,7 @@ export function drawWorld(canvas, world, player, opts = {}) {
   for (const l of world.links) if (vis(l.x, l.y)) { const [cx, cy] = c(l.x, l.y); objs.push({ y: cy, draw: () => drawCrystal(f, cx, cy, l.taken) }); }
   for (const d of world.dungeons || []) if (d.revealed && vis(d.x, d.y)) { const [cx, cy] = c(d.x, d.y); objs.push({ y: cy, draw: () => drawDungeon(f, cx, cy, d.cleared) }); }
   for (const lm of world.landmarks || []) if (vis(lm.x, lm.y)) { const [cx, cy] = c(lm.x, lm.y); objs.push({ y: cy - 1, draw: () => drawLandmark(f, cx, cy, lm) }); }
+  for (const sp of world.specials || []) if (vis(sp.x, sp.y)) { const [cx, cy] = c(sp.x, sp.y); objs.push({ y: cy - 1, draw: () => drawSpecial(f, cx, cy, sp) }); }
   for (const ct of world.cities) if (vis(ct.x, ct.y)) { const [cx, cy] = c(ct.x, ct.y); objs.push({ y: cy, draw: () => drawCity(f, cx, cy, ct.color, ct.name) }); }
   if (vis(world.castle.x, world.castle.y)) { const [cx, cy] = c(world.castle.x, world.castle.y); objs.push({ y: cy, draw: () => drawFortress(f, cx, cy) }); }
   const robes = { W: ['#d9d2b8', '#f0ead6'], U: ['#2f5f9c', '#5e8cc9'], B: ['#3a2d4a', '#5e4d75'], R: ['#a33a2a', '#d0604a'], G: ['#3f6f2f', '#6a9a4a'] };
