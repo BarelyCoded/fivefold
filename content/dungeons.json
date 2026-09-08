@@ -15,7 +15,7 @@
       "treasure": ["Serra Angel", "Wrath of God", "Armageddon", "Swords to Plowshares", "White Knight", "Savannah Lions"] },
     { "id": "drowned-archive", "name": "Drowned Archive", "color": "U", "rooms": 4, "rule": "gloom",
       "intro": "The Tidewatch flooded its own library to keep its secrets. The secrets learned to swim.",
-      "treasure": ["Ancestral Recall", "Time Walk", "Mahamoti Djinn", "Control Magic", "Counterspell", "Air Elemental"] },
+      "treasure": ["Ancestral Recall", "Time Walk", "Timetwister", "Mahamoti Djinn", "Control Magic", "Counterspell", "Air Elemental"] },
     { "id": "barrow-of-the-keepers", "name": "Barrow of the Keepers", "color": "B", "rooms": 4, "rule": "miasma",
       "intro": "Where the Keepers bury what they cannot use yet. Nothing here is finished dying.",
       "treasure": ["Sengir Vampire", "Royal Assassin", "Hypnotic Specter", "Demonic Tutor", "Mind Twist", "Dark Ritual"] },

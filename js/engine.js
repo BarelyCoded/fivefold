@@ -815,6 +815,16 @@ export class Duel {
       case 'exileGraveyard': { const pls = e.who === 'you' ? [p] : e.who === 'each' ? this.players : subs.filter(s => s.player).map(s => s.player); for (const pl of pls) for (const c of pl.graveyard.slice()) this.moveTo(c, 'exile'); break; }
       case 'poison': for (const s of subs) if (s.player) s.player.poison += n; break;
       case 'noop': break;
+      case 'twister': {
+        // Each player shuffles hand and graveyard into library, then draws seven. The spell itself is still on the stack.
+        for (const pl of this.players) {
+          for (const c of [...pl.hand, ...pl.graveyard]) { if (c === src) continue; this.moveTo(c, 'library'); }
+          shuffle(pl.library, this.rng);
+          this.drawCards(pl, 7);
+          this.say(`${pl.name} shuffles and draws seven.`);
+        }
+        break;
+      }
       case 'delayedDraw': this.delayed.push({ player: p.idx, type: 'draw' }); break;
       case 'unlessPay': {
         const can = this.canPay(p, e.cost);
