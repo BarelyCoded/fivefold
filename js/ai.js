@@ -7,7 +7,7 @@ const cardValue = c => (isCreatureDef(c) ? c.def.power + c.def.toughness + 1 : 2
 
 // ---- targeting -----------------------------------------------------------------------
 const HOSTILE = new Set(['damage', 'damageEqualPower', 'fight', 'destroy', 'exile', 'bounce', 'tap', 'freeze', 'control', 'flag', 'counter', 'lose', 'discard', 'mill', 'sacrifice', 'poison']);
-const FRIENDLY = new Set(['pump', 'grant', 'regenerate', 'untap', 'gain', 'draw', 'fromGraveyard', 'peek']);
+const FRIENDLY = new Set(['pump', 'grant', 'regenerate', 'untap', 'gain', 'draw', 'fromGraveyard', 'peek', 'preventNext']);
 
 function pickTarget(duel, p, e, options, x = 0) {
   const opp = duel.opponentOf(p);
@@ -35,6 +35,7 @@ function pickTarget(duel, p, e, options, x = 0) {
   }
   if (FRIENDLY.has(e.type)) {
     if (e.type === 'gain' || e.type === 'draw' || e.type === 'peek') return players.find(o => o.idx === p.idx) || null;
+    if (e.type === 'preventNext') { const b = best(mine.filter(t => isCreature(t.c))); return b ? b.o : players.find(o => o.idx === p.idx) || null; }
     if (e.type === 'fromGraveyard') { const cards = options.filter(o => o.type === 'card').map(o => ({ o, c: duel.card(o.id) })).filter(t => t.c && t.c.owner === p.idx); const b = cards.sort((a, b) => cardValue(b.c) - cardValue(a.c))[0]; return b ? b.o : null; }
     const b = best(mine.filter(t => isCreature(t.c)));
     return b ? b.o : null;
@@ -189,6 +190,17 @@ function instantAction(duel, p) {
     // Fog when lethal
     if (duel.active !== p.idx) { const incoming = duel.attackers.map(id => duel.card(id)).filter(Boolean).filter(a => !(duel.blocks[a.id] || []).length).reduce((s, a) => s + power(a), 0); if (incoming >= p.life) for (const c of p.hand) if (c.def.spell?.effects[0]?.type === 'fog' && duel.canCast(p, c)) return { type: 'cast', card: c, opts: { targets: [] } }; }
   }
+  // Circles of Protection: shield against each unblocked attacker of the circle's colour
+  if (duel.active !== p.idx && step === 'blockers' && duel.attackers.length) {
+    const unblocked = duel.attackers.map(id => duel.card(id)).filter(a => a && !(duel.blocks[a.id] || []).length && power(a) > 0);
+    for (const c of p.battlefield) {
+      const i = c.def.abilities.findIndex(ab => ab.type === 'activated' && ab.effects[0]?.type === 'copShield');
+      if (i < 0) continue;
+      const from = c.def.abilities[i].effects[0].from;
+      const threats = unblocked.filter(a => from === 'artifact' ? isType(a, 'artifact') : a.def.colors.includes(from));
+      if (threats.length > p.cop.filter(f => f === from).length && duel.canActivate(p, c, i)) return { type: 'activate', card: c, index: i, opts: { targets: [] } };
+    }
+  }
   // Opponent's end step or their attackers step: use tap abilities and instant burn
   if (duel.active !== p.idx && (step === 'end' || step === 'attackers' || step === 'blockers' || step === 'beginCombat')) {
     for (const c of p.battlefield) c.def.abilities.forEach((ab, i) => { if (ab.type !== 'activated' || ab.cost.sacSelf || ab.cost.sacrifice || ab.cost.life) return; const e = ab.effects[0]; if (!e || !['damage', 'tap', 'destroy', 'freeze'].includes(e.type)) return; if (e.type === 'tap' && step !== 'beginCombat' && step !== 'attackers') return; if (!duel.canActivate(p, c, i)) return; const o = abilityOpts(duel, p, c, i); if (o && !found) found = { type: 'activate', card: c, index: i, opts: o }; });
@@ -290,6 +302,8 @@ export const aiHooks = {
       case 'blockers': return chooseBlocks(duel, p);
       case 'yesno': {
         if (req.value === 'upkeep') { const c = duel.card(req.card); return c ? value(c) >= 3.5 : false; }
+        if (req.value === 'payTrigger') { const c = duel.card(req.card); if (!c) return true; if (c.controller === p.idx) return true; const host = c.attachedTo; return host ? value(host) >= 3 : false; }
+        if (req.value === 'untap') { const c = duel.card(req.card); return !c || !duel.permanents().some(x => x.linked?.some(l => l.src === c.id)); }
         if (req.value === 'unlessPay') { const c = duel.card(req.card); return c ? value(c) >= 3 || !isCreature(c) : true; }
         return true;
       }
@@ -305,7 +319,8 @@ export const aiHooks = {
       case 'choose': {
         const cards = req.options.map(o => ({ o, c: duel.card(o.id) })).filter(t => t.c);
         const text = req.text.toLowerCase();
-        if (text.startsWith('discard')) { const lands = p.battlefield.filter(isLand).length; const sorted = cards.sort((a, b) => ((isLand(a.c) && lands >= 5) ? -1 : 0) - ((isLand(b.c) && lands >= 5) ? -1 : 0) || cardValue(a.c) - cardValue(b.c)); return sorted.slice(0, req.min).map(t => t.o.id); }
+        if (text.startsWith('untap')) return cards.sort((a, b) => value(b.c) - value(a.c)).slice(0, req.min).map(t => t.o.id);
+        if (text.startsWith('discard') || text.startsWith('put ')) { const lands = p.battlefield.filter(isLand).length; const sorted = cards.sort((a, b) => ((isLand(a.c) && lands >= 5) ? -1 : 0) - ((isLand(b.c) && lands >= 5) ? -1 : 0) || cardValue(a.c) - cardValue(b.c)); return sorted.slice(0, req.min).map(t => t.o.id); }
         if (text.startsWith('sacrifice')) return cards.sort((a, b) => value(a.c) - value(b.c)).slice(0, req.min).map(t => t.o.id);
         if (text.startsWith('search')) { const lands = p.battlefield.filter(isLand).length; const pick = cards.sort((a, b) => ((isLand(a.c) && lands < 5) ? -1 : 0) - ((isLand(b.c) && lands < 5) ? -1 : 0) || cardValue(b.c) - cardValue(a.c))[0]; return pick ? [pick.o.id] : []; }
         if (text.startsWith('scry')) { const lands = p.battlefield.filter(isLand).length; return cards.filter(t => isLand(t.c) && lands >= 5).map(t => t.o.id); }

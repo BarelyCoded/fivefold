@@ -118,6 +118,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420 }) {
     const counters = Object.entries(c.counters).filter(([k, v]) => v > 0 && k !== 'age').map(([k, v]) => `${v}×${k}`);
     if (counters.length) extra += `<div class="card-counters">${esc(counters.join(' '))}</div>`;
     if (c.regen) extra += `<div class="card-regen">regen</div>`;
+    if (c.shield) extra += `<div class="card-shield">shield ${c.shield}</div>`;
     const attached = duel.permanents().filter(a => a.attachedTo === c);
     if (attached.length) extra += `<div class="card-attach">${attached.map(a => esc(a.def.name)).join(', ')}</div>`;
     if (c.attachedTo) extra += `<div class="card-attachedto">on ${esc(c.attachedTo.def.name)}</div>`;
@@ -145,6 +146,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420 }) {
       <div class="pname">${esc(p.name)}</div>
       <div class="plife">${p.life}</div>
       ${p.poison ? `<div class="ppoison">☠ ${p.poison}</div>` : ''}
+      ${p.shield || p.cop?.length ? `<div class="pshield" title="Damage prevention this turn">🛡 ${[p.shield ? `${p.shield}` : '', ...(p.cop || []).map(f => f === 'artifact' ? 'artifact' : f)].filter(Boolean).join(' ')}</div>` : ''}
       ${gems(p)}
       <div class="pmeta"><span title="Hand">✋ ${p.hand.length}</span><span title="Library">▤ ${p.library.length}</span><span class="link" data-grave="${p.idx}" title="Graveyard">✝ ${p.graveyard.length}</span>${p.exile.length ? `<span title="Exile">◌ ${p.exile.length}</span>` : ''}</div>
     </div>`;
@@ -251,7 +253,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420 }) {
     }
     const req = pend.req;
     switch (req.kind) {
-      case 'attackers': return `<div class="hint">Declare attackers: click your creatures.${req.must.length ? ' Some must attack.' : ''}</div><button id="b-attack" class="btn primary">Confirm ${ui.attackers.size ? `(${ui.attackers.size})` : 'no attack'}</button>`;
+      case 'attackers': return `<div class="hint">Declare attackers: click your creatures.${req.must.length ? ' Some must attack.' : ''}</div><button id="b-attack" class="btn primary">Confirm ${ui.attackers.size ? `(${ui.attackers.size})` : 'no attack'}</button><button id="b-attack-all" class="btn" title="Attack with every creature that can attack">Attack with all (${req.options.length})</button>`;
       case 'blockers': return `<div class="hint">Declare blockers: click one of your creatures, then the attacker it blocks. Click a blocker again to clear it.</div><button id="b-block" class="btn primary">Confirm blocks</button>`;
       case 'yesno': return `<div class="hint">${esc(req.text)}</div><button class="btn primary" data-answer="yes">Yes</button><button class="btn" data-answer="no">No</button>`;
       case 'color': return `<div class="hint">${esc(req.text)}</div>${COLORS.map(c => `<button class="btn" data-color="${c}">${c}</button>`).join('')}`;
@@ -397,6 +399,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420 }) {
       case 'b-pass': duel.humanPass(); run(); return;
       case 'b-endturn': duel.humanEndTurn(); run(); return;
       case 'b-attack': { const ids = [...ui.attackers]; ui.attackers = new Set(); duel.humanAnswer(ids); run(); return; }
+      case 'b-attack-all': { const req = duel.pending?.req; if (req?.kind !== 'attackers') return; ui.attackers = new Set(); duel.humanAnswer(req.options.slice()); run(); return; }
       case 'b-block': { if (!duel.validBlocks(ui.blocks)) { ui.message = 'Those blocks are not legal.'; render(); return; } const b = ui.blocks; ui.blocks = {}; ui.blocker = null; ui.message = ''; duel.humanAnswer(b); run(); return; }
       case 'b-choose': { const ids = [...(ui.choice || [])]; ui.choice = null; duel.humanAnswer(ids); run(); return; }
       case 'b-order': { const ids = (ui.order || []).slice(); ui.order = null; duel.humanAnswer(ids); run(); return; }

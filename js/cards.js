@@ -77,6 +77,7 @@ export function parseTarget(phrase) {
   if (p === 'you' || p === 'yourself') return { sel: 'you', restrict: r };
   if (p === '~' || p === 'it') return { sel: 'self', restrict: r };
   if (p === 'that player' || p === "that player's") return { sel: 'thatPlayer', restrict: r };
+  if (/^(?:that (?:land|creature|permanent)'s|its|the creature's) controller$/.test(p)) return { sel: 'prevController', restrict: r };
   if (/^(that creature|that permanent|it|them|that card|the creature)$/.test(p)) return { sel: 'prev', restrict: r };
   if (/^enchanted (creature|permanent|land|artifact)$/.test(p)) return { sel: 'enchanted', restrict: r };
   if (/^equipped creature$/.test(p)) return { sel: 'enchanted', restrict: r };
@@ -107,6 +108,7 @@ export function parseTarget(phrase) {
   if (/ you control$/.test(body)) { r.control = 'you'; body = body.replace(/ you control$/, ''); }
   else if (/ (?:an opponent controls|you don't control|target opponent controls)$/.test(body)) { r.control = 'opp'; body = body.replace(/ (?:an opponent controls|you don't control|target opponent controls)$/, ''); }
   else if ((m = body.match(/ (?:target player|that player) controls$/))) { r.control = 'targetPlayer'; body = body.replace(m[0], ''); }
+  if (/ that's attacking you$/.test(body)) { r.state = 'attacking'; body = body.replace(/ that's attacking you$/, ''); }
   if (/ with flying$/.test(body)) { r.flying = true; body = body.replace(/ with flying$/, ''); }
   if (/ without flying$/.test(body)) { r.flying = false; body = body.replace(/ without flying$/, ''); }
   if ((m = body.match(/ with power (\d+) or (less|greater)$/))) { r.power = { n: Number(m[1]), op: m[2] }; body = body.replace(m[0], ''); }
@@ -160,6 +162,24 @@ export function needsTarget(e) {
 const T = (p) => parseTarget(p);
 const tgt = (e, p) => { const k = T(p); if (!k) return null; return [{ ...e, ...k }]; };
 const rules = [
+  // Card-count and land-count amounts: Black Vise, The Rack, Ivory Tower, Karma.
+  [/^~ deals x damage to that player, where x is the number of cards in their hand minus (\d+)$/, m => [{ type: 'damage', amount: { calc: 'hand', base: -Number(m[1]), sign: 1, of: 'thatPlayer' }, sel: 'thatPlayer' }]],
+  [/^~ deals x damage to that player, where x is (\d+) minus the number of cards in their hand$/, m => [{ type: 'damage', amount: { calc: 'hand', base: Number(m[1]), sign: -1, of: 'thatPlayer' }, sel: 'thatPlayer' }]],
+  [/^~ deals damage to that player equal to the number of (plains|islands|swamps|mountains|forests) they control$/, m => [{ type: 'damage', amount: { calc: 'lands', land: cap(m[1].replace(/s$/, '')), of: 'thatPlayer' }, sel: 'thatPlayer' }]],
+  [/^you gain x life, where x is the number of cards in your hand minus (\d+)$/, m => [{ type: 'gain', amount: { calc: 'hand', base: -Number(m[1]), sign: 1, of: 'you' }, sel: 'you' }]],
+  // Damage prevention shields and Circles of Protection.
+  [/^prevent the next (\d+) damage that would be dealt to (.+?) this turn$/, m => { const w = m[2]; if (w === 'you') return [{ type: 'preventNext', amount: Number(m[1]), sel: 'you' }]; if (w === '~' || w === 'it') return [{ type: 'preventNext', amount: Number(m[1]), sel: 'self' }]; return tgt({ type: 'preventNext', amount: Number(m[1]) }, w); }],
+  [/^the next time (?:a|an) (white|blue|black|red|green|artifact) source of your choice would deal damage to you this turn, prevent that damage$/, m => [{ type: 'copShield', from: COLOR_WORD[m[1]] || 'artifact', sel: 'you' }]],
+  // Thawing Glaciers, Paralyze, Brainstorm, Pyroblast/Hydroblast, Tawnos's Weaponry, Ice Floe, Spirit Link.
+  [/^return ~ to its owner's hand at the beginning of the next (?:cleanup step|end step)$/, () => [{ type: 'delayedBounceSelf' }]],
+  [/^tap enchanted creature$/, () => [{ type: 'tap', sel: 'enchanted' }]],
+  [/^untap (?:the creature|enchanted creature)$/, () => [{ type: 'untap', sel: 'enchanted' }]],
+  [/^put (\S+) cards? from your hand on top of your library(?: in any order)?$/, m => [{ type: 'putBack', amount: amt(m[1]) }]],
+  [/^counter target spell if it's (white|blue|black|red|green)$/, m => tgt({ type: 'counter', unlessPay: null }, `target ${m[1]} spell`)],
+  [/^destroy target permanent if it's (white|blue|black|red|green)$/, m => tgt({ type: 'destroy' }, `target ${m[1]} permanent`)],
+  [/^(target .+?) gets ([+-]\d+)\/([+-]\d+) for as long as ~ remains tapped$/, m => tgt({ type: 'pump', p: Number(m[2]), t: Number(m[3]), whileTapped: true }, m[1])],
+  [/^(?:it|that creature) doesn't untap during its controller's untap step for as long as ~ remains tapped$/, () => [{ type: 'freeze', sel: 'prev', note: 'the creature skips one untap step instead of staying tapped while Ice Floe is' }]],
+  [/^you gain that much life$/, () => [{ type: 'gainEqualPrev' }]],
   [/^(?:~|it|that creature) deals (\S+) damage to (.+?)(?: and (\S+) damage to (.+))?$/, m => {
     const a = tgt({ type: 'damage', amount: amt(m[1]) }, m[2]); if (!a) return null;
     if (m[3]) { const b = tgt({ type: 'damage', amount: amt(m[3]) }, m[4]); if (!b) return null; a.push(...b); }
@@ -270,7 +290,7 @@ const rules = [
   [/^untap (?:that creature|it)$/, () => [{ type: 'untap', sel: 'prev' }]],
   [/^untap ~$/, () => [{ type: 'untap', sel: 'self' }]],
   [/^tap ~$/, () => [{ type: 'tap', sel: 'self' }]],
-  [/^destroy (?:that creature|it) at end of combat$/, () => [{ type: 'flag', flag: 'destroyAtEndOfCombat', sel: 'prev' }]],
+  [/^destroy (?:that creature|that wall|it) at end of combat$/, () => [{ type: 'flag', flag: 'destroyAtEndOfCombat', sel: 'prev' }]],
   [/^destroy (?:that creature|it)$/, () => [{ type: 'destroy', sel: 'prev' }]],
   [/^exile (?:that creature|it)$/, () => [{ type: 'exile', sel: 'prev' }]],
   [/^(?:that creature|it) deals damage equal to its power to (.+)$/, m => tgt({ type: 'damageEqualPower' }, m[1])],
@@ -281,7 +301,6 @@ const rules = [
   [/^each player discards their hand, then draws seven cards$/, () => [{ type: 'discard', all: true, sel: 'each', restrict: { players: 'all' } }, { type: 'draw', amount: 7, sel: 'each', restrict: { players: 'all' } }]],
   [/^each player shuffles their hand and graveyard into their library, then draws seven cards$/, () => [{ type: 'twister' }]],
   [/^(target .+?) can't be regenerated this turn$/, () => []],
-  [/^prevent the next (\d+) damage[^]*$/, () => null],
   [/^~ can't be countered$/, () => []],
 ];
 
@@ -321,7 +340,8 @@ export function parseEffects(text) {
   for (const s of sentences) {
     if (/^if you do,/i.test(s)) continue;
     const e = parseSentence(s);
-    if (e) out.effects.push(...e); else out.notes.push('Ignored: ' + s.slice(0, 80));
+    if (e) { out.effects.push(...e); for (const x of e) if (x.note) out.notes.push('Approximated: ' + x.note); }
+    else out.notes.push('Ignored: ' + s.slice(0, 80));
   }
   return out;
 }
@@ -339,7 +359,7 @@ function parseAbilityCost(text) {
       if (mana) { const c = parseCost(mana); cost.mana.pips.push(...c.pips); cost.mana.generic += c.generic; cost.mana.x ||= c.x; }
     }
     else if (/^sacrifice ~$/i.test(p)) cost.sacSelf = true;
-    else if ((m = p.match(/^sacrifice (?:a|an|another) (creature|land|artifact|permanent|enchantment)$/i))) cost.sacrifice = m[1].toLowerCase();
+    else if ((m = p.match(/^sacrifice (?:a|an|another) (creature|land|artifact|permanent|enchantment|plains|island|swamp|mountain|forest)$/i))) cost.sacrifice = m[1].toLowerCase();
     else if ((m = p.match(/^discard (a|\w+) cards?(?: at random)?$/i))) cost.discard = amt(m[1].toLowerCase());
     else if (/^discard ~$/i.test(p)) cost.discardSelf = true;
     else if ((m = p.match(/^pay (\d+) life$/i))) cost.life = Number(m[1]);
@@ -382,7 +402,7 @@ function parseKeywordLine(line, def) {
     else if ((m = p.match(/^Buyback (\{.+\})$/))) found.push({ k: 'Buyback', cost: parseCost(m[1]) });
     else if ((m = p.match(/^Echo (\{.+\})$/))) found.push({ k: 'Echo', cost: parseCost(m[1]) });
     else if ((m = p.match(/^Equip (\{.+\}|\d+)$/))) found.push({ k: 'Equip', cost: parseCost(m[1].startsWith('{') ? m[1] : `{${m[1]}}`) });
-    else if ((m = p.match(/^Enchant (creature|permanent|land|artifact|enchantment|creature you control|creature an opponent controls|player|opponent)$/i))) found.push({ k: 'Enchant', what: m[1].toLowerCase() });
+    else if ((m = p.match(/^Enchant (creature|permanent|land|artifact|enchantment|wall|creature you control|creature an opponent controls|player|opponent)$/i))) found.push({ k: 'Enchant', what: m[1].toLowerCase() });
     else if (/^Kicker /.test(p) || /^Flashback /.test(p) || /^Buyback /.test(p)) def.notes.push(`${p} ignored`);
     else return false;
   }
@@ -393,6 +413,14 @@ function parseKeywordLine(line, def) {
 // ---- static abilities ------------------------------------------------------------
 function parseStatic(t) {
   let m;
+  if ((m = t.match(/^as long as ~ is untapped, (.+)$/))) { const inner = parseStatic(m[1]); if (!inner) return null; for (const o of inner) o.condition = { selfUntapped: true }; return inner; }
+  if ((m = t.match(/^players can't untap more than (one|two) (creature|land)s? during their untap steps$/))) return [{ type: 'static', kind: 'untapLimit', what: m[2], n: NUM[m[1]], scope: { who: 'self' } }];
+  if ((m = t.match(/^creatures with power (\d+) or greater don't untap during their controllers' untap steps$/))) return [{ type: 'static', kind: 'doesntUntap', scope: { who: 'all', types: ['creature'], powerGE: Number(m[1]) } }];
+  if ((m = t.match(/^if ~ would enter, sacrifice (?:a|an) (untapped )?(plains|island|swamp|mountain|forest) instead\. if you do, put ~ onto the battlefield\. if you don't, put it into its owner's graveyard$/))) return [{ type: 'static', kind: 'entersSacrifice', land: cap(m[2]), untapped: !!m[1], scope: { who: 'self' } }];
+  if (/^as ~ enters, choose an opponent$/.test(t)) return [{ type: 'static', kind: 'noop', scope: { who: 'self' } }];
+  if ((m = t.match(/^(enchanted wall|enchanted creature) can attack as though it didn't have defender$/))) return [{ type: 'static', kind: 'canAttackWithDefender', scope: { who: 'enchanted' } }];
+  if ((m = t.match(/^whenever enchanted land is tapped for mana, its controller adds an additional \{([wubrg])\}$/))) return [{ type: 'static', kind: 'manaBonus', mana: m[1].toUpperCase(), scope: { who: 'enchanted' } }];
+  if (/^whenever a player taps a land for mana, that player adds one mana of any type that land produced$/.test(t)) return [{ type: 'static', kind: 'manaBonus', mana: 'same', scope: { who: 'all', types: ['land'] } }];
   // "Creatures you control get +1/+1." "Other Goblin creatures get +1/+0." "All Walls get..." "Enchanted creature gets +2/+2 and has flying."
   if ((m = t.match(/^(enchanted creature|equipped creature|~|other (.+?)|all (.+?)|(.+?) you control|(.+?) creatures|.+?) (?:gets?|has|have|gains?) (.+?)(?: as long as (.+))?$/))) {
     const scopeText = m[1], rest = m[6], cond = m[7];
@@ -440,7 +468,7 @@ function parseStatic(t) {
   if ((m = t.match(/^~'s power is equal to the number of creature cards in all graveyards and its toughness is equal to that number plus 1$/))) return [{ type: 'static', kind: 'cda', count: 'creature cards in graveyards', plusT: 1, scope: { who: 'self' } }];
   if (/^~ enters(?: the battlefield)? tapped$/.test(t)) return [{ type: 'static', kind: 'entersTapped', scope: { who: 'self' } }];
   if ((m = t.match(/^~ enters(?: the battlefield)? with (\S+) ([+-]\d+\/[+-]\d+|[a-z]+) counters? on it$/))) return [{ type: 'static', kind: 'entersWithCounters', amount: amt(m[1]), counter: m[2], scope: { who: 'self' } }];
-  if (/^you may choose not to untap ~ during your untap step$/.test(t)) return [{ type: 'static', kind: 'noop', scope: { who: 'self' } }];
+  if (/^you may choose not to untap ~ during your untap step$/.test(t)) return [{ type: 'static', kind: 'mayNotUntap', scope: { who: 'self' } }];
   if ((m = t.match(/^when you control no (plains|islands|swamps|mountains|forests), sacrifice ~$/))) return [{ type: 'static', kind: 'needsLand', land: cap(m[1].replace(/s$/, '')), scope: { who: 'self' } }];
   if ((m = t.match(/^(~|enchanted creature) can't block creatures with power (\d+) or greater$/))) return [{ type: 'static', kind: 'cantBlockPowerGE', n: Number(m[2]), scope: parseScope(m[1]) }];
   if (/^~ can block an additional creature each combat$/.test(t)) return [{ type: 'static', kind: 'noop', scope: { who: 'self' } }];
@@ -460,7 +488,7 @@ function parseCreatureFilter(text) {
 function parseScope(text) {
   const t = text.trim().toLowerCase();
   if (t === '~') return { who: 'self' };
-  if (t === 'enchanted creature' || t === 'enchanted permanent' || t === 'enchanted land' || t === 'equipped creature') return { who: 'enchanted' };
+  if (t === 'enchanted creature' || t === 'enchanted permanent' || t === 'enchanted land' || t === 'enchanted wall' || t === 'equipped creature') return { who: 'enchanted' };
   if (t === 'creatures you control' || t === 'all creatures you control') return { who: 'you', types: ['creature'] };
   if (t === 'all creatures' || t === 'creatures' || t === 'each creature') return { who: 'all', types: ['creature'] };
   let m;
@@ -491,6 +519,8 @@ function parseAbilityLine(line, ctx) {
     if ((mm = body.match(/^add (\S+) mana of any one color\.?$/))) return { type: 'mana', cost, produces: COLORS.slice(), amount: amt(mm[1]), sameColor: true };
     if (/^add one mana of any color\.?$/.test(body)) return { type: 'mana', cost, produces: COLORS.slice(), amount: 1 };
     if (/^add \{c\}\{c\}\.?$/.test(body)) return { type: 'mana', cost, produces: ['C'], amount: 2 };
+    if ((mm = body.match(/^add ((?:\{[wubrgc]\})+|\{[wubrgc]\}(?: or \{[wubrgc]\})+)\. ~ deals (\d+) damage to you\.?$/))) { const cols = [...mm[1].matchAll(/\{(\w)\}/g)].map(x => x[1].toUpperCase()); return { type: 'mana', cost, produces: [...new Set(cols)], amount: mm[1].includes(' or ') ? 1 : cols.length, damage: Number(mm[2]) }; }
+    if (/^add one mana of any color that a land an opponent controls could produce\.?$/.test(body)) return { type: 'mana', cost, produces: COLORS.slice(), amount: 1, notes: ['Approximated: adds any color, whatever lands the opponent controls'] };
     const eff = parseEffects(body);
     if (!eff.effects.length) return null;
     return { type: 'activated', cost, effects: eff.effects, optional: eff.optional, timing, once, notes: eff.notes, text: line };
@@ -499,9 +529,9 @@ function parseAbilityLine(line, ctx) {
   if ((m = t.match(/^(when|whenever) (.+?), (.+)$/))) {
     const ev = parseEvent(m[2]);
     if (ev) {
-      const eff = parseEffects(m[3]);
-      if (!eff.effects.length) return null;
-      return { type: 'triggered', ...ev, effects: eff.effects, optional: eff.optional, notes: eff.notes, text: line };
+      const pay = parsePay(m[3]);
+      const eff = parseEffects(pay.body);
+      if (eff.effects.length) return { type: 'triggered', ...ev, effects: eff.effects, optional: eff.optional, pay: pay.cost, payer: pay.payer, notes: eff.notes, text: line };
     }
   }
   if ((m = t.match(/^at the beginning of (.+?), (.+)$/))) {
@@ -515,8 +545,10 @@ function parseAbilityLine(line, ctx) {
     else if (/^your draw step$/.test(w)) ev = { event: 'drawstep', who: 'you' };
     else if (/^(?:your )?combat on your turn$/.test(w) || /^combat on your turn$/.test(w)) ev = { event: 'beginCombat', who: 'you' };
     else if (/^the upkeep of enchanted (?:creature|land|permanent|artifact|enchantment)'s controller$/.test(w)) ev = { event: 'upkeep', who: 'enchantedController' };
+    else if (/^the chosen player's upkeep$/.test(w)) ev = { event: 'upkeep', who: 'opp' };
     else return null;
-    let body = m[2];
+    const pay = parsePay(m[2]);
+    let body = pay.body;
     let condition = null;
     let cm;
     if ((cm = body.match(/^if ~ is untapped, (.+)$/))) { condition = { selfUntapped: true }; body = cm[1]; }
@@ -524,11 +556,18 @@ function parseAbilityLine(line, ctx) {
     if ((cm = body.match(/^that player (draws an additional card|draws a card)$/))) return { type: 'triggered', ...ev, condition, effects: [{ type: 'draw', amount: 1, sel: 'thatPlayer' }], text: line };
     const eff = parseEffects(body);
     if (!eff.effects.length) return null;
-    return { type: 'triggered', ...ev, condition, effects: eff.effects, optional: eff.optional, notes: eff.notes, text: line };
+    return { type: 'triggered', ...ev, condition, effects: eff.effects, optional: eff.optional, pay: pay.cost, payer: pay.payer, notes: eff.notes, text: line };
   }
   const st = parseStatic(t);
   if (st) return st.length === 1 ? st[0] : { type: 'multi', list: st };
   return null;
+}
+
+// "you may pay {1}. If you do, <effect>" on a trigger: the payment is optional and gates the effect.
+function parsePay(body) {
+  const m = body.match(/^(you|that player|the player) may pay ((?:\{[^}]+\})+)\. if (?:you do|they do|the player does|that player does), (.+)$/);
+  if (!m) return { body, cost: null, payer: null };
+  return { body: m[3], cost: parseCost(m[2].toUpperCase()), payer: m[1] === 'you' ? 'you' : 'thatPlayer' };
 }
 
 function parseEvent(w) {
@@ -543,6 +582,12 @@ function parseEvent(w) {
   if (/^~ attacks or blocks$/.test(w)) return { event: 'attacksOrBlocks' };
   if ((m = w.match(/^~ blocks or becomes blocked by (?:a |an )?(.+?)$/))) return { event: 'blocksOrBlockedBy', filter: parseCreatureFilter(m[1] === 'creature' ? '' : m[1]) };
   if (/^~ becomes blocked by a creature$/.test(w)) return { event: 'becomesBlocked' };
+  if ((m = w.match(/^~ becomes blocked by (?:a |an )?(.+)$/))) return { event: 'becomesBlockedBy', filter: parseCreatureFilter(m[1]) };
+  if (/^enchanted land (?:becomes tapped|is tapped for mana)$/.test(w)) return { event: 'enchantedTapped' };
+  if (/^(?:a|another) land enters(?: the battlefield)?$/.test(w)) return { event: 'anyLandEtb' };
+  if (/^an opponent draws a card$/.test(w)) return { event: 'oppDraws' };
+  if (/^a player taps a land for mana$/.test(w)) return { event: 'manaTap' };
+  if ((m = w.match(/^a player casts a (white|blue|black|red|green) spell$/))) return { event: 'anyCast', color: COLOR_WORD[m[1]] };
   if (/^~ deals combat damage to a player$/.test(w)) return { event: 'combatDamagePlayer' };
   if (/^~ deals damage to (?:a player|an opponent)$/.test(w)) return { event: 'damagePlayer' };
   if (/^~ deals combat damage to an opponent$/.test(w)) return { event: 'combatDamagePlayer' };
@@ -666,6 +711,8 @@ export function compile(c) {
   }
   for (const ma of def.manaAbilities) for (const col of ma.produces) if (!def.produces.includes(col)) def.produces.push(col);
   def.entersTapped = def.abilities.some(a => a.type === 'static' && a.kind === 'entersTapped');
+  const es = def.abilities.find(a => a.type === 'static' && a.kind === 'entersSacrifice');
+  if (es) def.entersSacrifice = { land: es.land, untapped: es.untapped };
 
   if (def.kind === 'instant' || def.kind === 'sorcery') {
     if (!spellEffects.length && !modes.length) return unsupported('No recognisable effect');

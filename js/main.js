@@ -127,7 +127,8 @@ async function newGame({ name, color, difficulty }) {
 
 function move(dx, dy) {
   const g = S.game; if (!g || g.status !== 'playing' || S.modal) return;
-  const probs = deckProblems(g.deck);
+  let probs = deckProblems(g.deck);
+  if (probs.length && probs.every(p => p.startsWith('Deck has'))) { fillBasics(g.deck); save(); probs = deckProblems(g.deck); toast('Your deck was short of 40 cards, so basic lands were added. You can change them in the deck builder.'); }
   if (probs.length) { S.modal = { title: 'Your deck is not ready', body: `<ul>${probs.map(p => `<li>${esc(p)}</li>`).join('')}</ul>`, buttons: [{ label: 'Open deck builder', action: () => { S.modal = null; go('deck'); } }, { label: 'Close', action: () => { S.modal = null; render(); } }] }; render(); return; }
   const nx = g.player.x + dx, ny = g.player.y + dy;
   if (!inBounds(g.world, nx, ny)) return;
@@ -331,7 +332,7 @@ function finishDuel(winner) {
     if (tpl.boss) { g.status = 'won'; save(); go('end'); return; }
   } else {
     g.losses++;
-    if (ante.mine) { addCards(S.collection, ante.mine, -1); addCards(g.deck, ante.mine, -1); lines.push(`You lose ${ante.mine} as ante.`); }
+    if (ante.mine) { addCards(S.collection, ante.mine, -1); addCards(g.deck, ante.mine, -1); lines.push(`You lose ${ante.mine} as ante.`); if (deckSize(g.deck) < 40) { fillBasics(g.deck); lines.push('A basic land fills the gap so your deck stays at 40 cards.'); } }
     const lost = Math.floor(g.player.gold * 0.25); g.player.gold -= lost; if (lost) lines.push(`${lost} gold is taken from you.`);
     g.player.life = g.player.maxLife; lines.push('You wake up some time later, restored but poorer.');
     if (tpl.boss) { bossLink(); if (g.status !== 'playing') return; }
