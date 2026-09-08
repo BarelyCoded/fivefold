@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fivefold duel check</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+<header id="topbar"><span class="brand">Fivefold</span> <span class="small">duel layout check: two AI decks from the Alpha set cache, no Scryfall needed</span></header>
+<main id="app" class="full"></main>
+<script type="module">
+import { compile } from '../js/cards.js';
+import { Duel } from '../js/engine.js';
+import { aiHooks } from '../js/ai.js';
+import { mountDuel } from '../js/duelview.js';
+import { loadAtlas, onAtlas, SPRITES, MONSTERS } from '../js/atlas.js';
+const q = new URLSearchParams(location.search);
+const set = await (await fetch('../tools/.sets/lea.json')).json();
+const byName = new Map(set.map(c => [c.name, c]));
+const D = name => { const c = byName.get(name); const f = c.card_faces?.[0] || c; return compile({ name: c.name, id: c.id, set: c.set, mana_cost: f.mana_cost || '', cmc: c.cmc, type_line: f.type_line || c.type_line, oracle_text: f.oracle_text || c.oracle_text || '', power: f.power, toughness: f.toughness, colors: f.colors || c.colors || [], keywords: c.keywords || [], image: c.image_uris?.normal || null }); };
+const deck = (land, spells) => [...Array(17).fill(land), ...spells].map(D);
+const me = deck('Island', ['Merfolk of the Pearl Trident', 'Merfolk of the Pearl Trident', 'Phantom Monster', 'Phantom Monster', 'Air Elemental', 'Prodigal Sorcerer', 'Prodigal Sorcerer', 'Sea Serpent', 'Counterspell', 'Counterspell', 'Unsummon', 'Unsummon', 'Wall of Air', 'Wall of Air', 'Mahamoti Djinn', 'Water Elemental', 'Phantasmal Forces', 'Phantasmal Forces', 'Jump', 'Jump', 'Psychic Venom', 'Sleight of Mind', 'Twiddle']);
+const foe = deck('Swamp', ['Scathe Zombies', 'Scathe Zombies', 'Scathe Zombies', 'Bog Wraith', 'Bog Wraith', 'Drudge Skeletons', 'Drudge Skeletons', 'Sengir Vampire', 'Hypnotic Specter', 'Hypnotic Specter', 'Terror', 'Terror', 'Raise Dead', 'Dark Ritual', 'Frozen Shade', 'Frozen Shade', 'Nightmare', 'Pestilence', 'Weakness', 'Weakness', 'Will-o\'-the-Wisp', 'Plague Rats', 'Plague Rats'].filter(n => byName.has(n)));
+loadAtlas();
+onAtlas(() => {
+  const duel = new Duel({ player: { name: 'Dia', deck: me, life: 20, ai: true }, ai: { name: 'Necromancer', deck: foe, life: 14, ai: true }, hooks: aiHooks });
+  duel.start();
+  const ph = Math.max(80, Math.min(150, Math.round((window.innerHeight - 700) * 0.2 + 110)));
+  const portrait = frames => { frames = frames.filter(Boolean); return { frames, scale: Math.min(2.6, ph / Math.max(...frames.map(f => f[3]))) }; };
+  const root = document.createElement('div'); root.id = 'duelroot';
+  mountDuel(root, duel, { ante: { mine: 'Counterspell', theirs: 'Sengir Vampire' }, onEnd: () => {}, speed: Number(q.get('speed') || 60), portraits: { me: portrait([SPRITES.hero, SPRITES['hero-alt']]), foe: portrait([SPRITES.mage.B[1], SPRITES['mage-B-2-alt']]) } });
+  const sec = document.createElement('section'); sec.className = 'screen duelscreen'; sec.appendChild(root); document.getElementById('app').appendChild(sec);
+  document.body.dataset.ready = '1';
+});
+</script>
+</body>
+</html>

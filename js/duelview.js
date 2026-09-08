@@ -144,13 +144,15 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     const targetable = targeting() && isLegal({ type: 'player', idx: p.idx }) ? ' targetable' : '';
     const turn = duel.active === p.idx ? ' active' : '';
     return `<div class="pbox${targetable}${turn}${duel.priority === p.idx && !duel.pending ? ' thinking' : ''}" data-player="${p.idx}">
-      <div class="pname">${esc(p.name)}</div>
       ${portraitHtml(p)}
+      <div class="pinfo">
+      <div class="pname">${esc(p.name)}</div>
       <div class="plife">${p.life}</div>
       ${p.poison ? `<div class="ppoison">☠ ${p.poison}</div>` : ''}
       ${p.shield || p.cop?.length ? `<div class="pshield" title="Damage prevention this turn">🛡 ${[p.shield ? `${p.shield}` : '', ...(p.cop || []).map(f => f === 'artifact' ? 'artifact' : f)].filter(Boolean).join(' ')}</div>` : ''}
       ${gems(p)}
       <div class="pmeta"><span title="Hand">✋ ${p.hand.length}</span><span title="Library">▤ ${p.library.length}</span><span class="link" data-grave="${p.idx}" title="Graveyard">✝ ${p.graveyard.length}</span>${p.exile.length ? `<span title="Exile">◌ ${p.exile.length}</span>` : ''}</div>
+      </div>
     </div>`;
   }
   let portraitFrame = 0;
