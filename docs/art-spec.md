@@ -108,3 +108,33 @@ Card frames for the deck builder, one per colour plus artifact, land and a "your
 - A `README.txt` listing anything that deviates from this spec.
 - No text, watermarks, frames or shadows baked into any file.
 - If a generator cannot keep a uniform grid, deliver each sprite as its own PNG instead, named `category-name.png` (for example `scenery-pine.png`), and the game will build the atlas from the files.
+
+## Delivering one image per sprite (the route that works with image generators)
+
+Image generators cannot hold a grid, tile seamlessly, or output transparency, but they are good at one sprite per image on a flat background. That is all the game needs:
+
+1. Generate each sprite as its own image. Any size; the packer scales down with nearest-neighbour. Ask for a **single flat background colour that appears nowhere in the sprite** (magenta `#FF00FF` works), the sprite **centred and fully inside the frame**, no text, no border, no drop shadow, no ground plane under figures.
+2. Save it as `art-src/<category>-<name>.png` using the names in the table below.
+3. Run `python3 tools/pack.py` (needs Pillow: `pip install pillow`). It keys out the background, trims, scales to the category's cell, packs `assets/<category>.png` and writes `assets/atlas.json`. The game loads that index at startup and each packed sprite replaces the matching slot from the Bibliotheca sheet, so you can deliver a few at a time.
+4. Commit `assets/` and push. `art-src/` is ignored by git.
+
+Terrain textures cannot be keyed, so they are only resized to 32×32. Ask for "seamless tileable texture, top-down, no lighting gradient" and check the result by tiling it; the game mirrors alternate cells, which hides most seams.
+
+A prompt that has worked for figures and scenery:
+
+> 16-bit pixel art sprite of a single [pine tree], centred, top-down three-quarter view, light from the upper left, dark outline, flat solid magenta background #FF00FF, nothing else in the image, no text.
+
+### Names the game knows
+
+| Category | Names |
+|---|---|
+| terrain | `grass-1..4`, `sand-1..4`, `sea-1..4`, `shallow-1..4` (beach ring), `darkrock-1..4`, `lava-1..2`, `greyrock-1..4`, `snow-1..4`, `cobbles-1..2` |
+| scenery | `pine`, `pines`, `oak`, `roundTree`, `sapling`, `bush`, `shrub`, `tuft`, `pond`, `peak-1..n`, `rock-1..n`, `dune-1..n` |
+| locations | `city-W`, `city-U`, `city-B`, `city-R`, `city-G`, `fortress`, `town`, `pit`, `pit-cleared`, `crystal`, `crystal-taken`, `compass` |
+| figures | `hero`, `mage-W-1`, `mage-W-2`, … `mage-G-2`, `usurper` |
+| townsfolk | any name; all become city NPCs |
+| monsters | `dragon-idle-1`, `dragon-idle-2`, `dragon-attack-1`, `dragon-hurt`, `dragon-dead`, `dragon-effect`; likewise `golem`, `serpent`, `skeleton`, `lizard`, `spider` |
+| dungeon | `floor-1..n`, `rock-1..n`, `rockcrack-1..n`, `lava-1..n`, `walltop-1..n`, `wallface-1..n`, `grate`, `door`, `gate`, `portal`, `torch`, `chest`, `chestOpen`, `chestSmall`, `scroll`, `potion`, `amulet`, `skull` |
+| ui | any name; stored for the frame work to come |
+
+Anything not delivered keeps its current sprite from the Bibliotheca sheet.

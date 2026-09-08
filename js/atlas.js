@@ -70,12 +70,12 @@ export const DUNGEON_TILES = {
 };
 
 // ---- loading ----------------------------------------------------------------------
-let img = null, ready = false, failed = false, sheetUrl = SHEET;
+// images[0] is the Bibliotheca sheet (keyed at load). Extra sheets come from assets/atlas.json,
+// written by tools/pack.py from one-image-per-sprite sources; their entries replace the slots above.
+// A rectangle's optional fifth element is the index of the image it lives in.
+const images = [];   // { url, img, pixels }
+let ready = false, failed = false;
 const listeners = [];
-// The sheet has no transparency: sprites sit in dark brown cells on a darker panel, both with slight
-// gradients. Inside the sprite panels, every dark unsaturated pixel reachable from the panel edge is
-// flood-filled to transparent; sprite outlines stop the fill, so dark pixels inside a sprite survive.
-// The terrain and dungeon grids are left untouched.
 const KEY_REGIONS = [[388, 112, 600, 548], [975, 112, 1175, 548], [0, 645, 1187, 896]];
 // Background pixels are warm brown: red a little above green, green a little above blue.
 const bgLike = (r, g, b) => r >= 18 && r <= 84 && r - g >= 1 && r - g <= 12 && r - b >= 6 && r - b <= 22 && g - b >= 0 && g - b <= 12;
@@ -94,7 +94,6 @@ function keyOut(image) {
       const x = i % w, y = (i - x) / w;
       if (x > 0) push(x - 1, y); if (x < w - 1) push(x + 1, y); if (y > 0) push(x, y - 1); if (y < h - 1) push(x, y + 1);
     }
-    // sweep the speckles the fill left behind: dark pixels with almost no opaque neighbours
     const alpha = i => d[i * 4 + 3];
     for (let pass = 0; pass < 2; pass++) for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
       const i = y * w + x; if (!alpha(i) || Math.max(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]) > 96) continue;
@@ -120,37 +119,69 @@ function keyTile(ctx, [x0, y0, w, h], tol) {
   while (stack.length) { const i = stack.pop(); d[i * 4 + 3] = 0; const x = i % w, y = (i - x) / w; if (x > 0) push(x - 1, y); if (x < w - 1) push(x + 1, y); if (y > 0) push(x, y - 1); if (y < h - 1) push(x, y + 1); }
   ctx.putImageData(id, x0, y0);
 }
+const loadImage = url => new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => rej(new Error('missing ' + url)); im.src = url; });
+
 export function loadAtlas() {
-  if (img || typeof Image === 'undefined') return;
-  const raw = new Image();
-  raw.onload = () => {
+  if (images.length || typeof Image === 'undefined') return;
+  images.push({ url: SHEET, img: null, pixels: null });
+  const main = loadImage(SHEET).then(raw => {
     try {
-      img = keyOut(raw);
-      const kctx = img.getContext('2d', { willReadFrequently: true });
+      const c = keyOut(raw);
+      const kctx = c.getContext('2d', { willReadFrequently: true });
       for (const list of Object.values(SCENERY)) for (const rect of list) keyTile(kctx, rect, 30);
-      sheetUrl = img.toDataURL('image/png');
-    } catch (e) { img = raw; }
-    ready = true; for (const l of listeners) l();
-  };
-  raw.onerror = () => { failed = true; console.warn('Sprite sheet missing: ' + SHEET + ' (falling back to painted tiles)'); };
-  img = raw; raw.src = SHEET;
+      images[0].img = c; images[0].url = c.toDataURL('image/png');
+    } catch (e) { images[0].img = raw; }
+  }).catch(e => { failed = true; console.warn('Sprite sheet missing: ' + SHEET + ' (falling back to painted tiles)'); });
+  const extra = fetch(new URL('../assets/atlas.json', import.meta.url)).then(r => r.ok ? r.json() : null).catch(() => null).then(async index => {
+    if (!index) return;
+    const files = new Map();
+    for (const [key, e] of Object.entries(index)) {
+      if (!files.has(e.file)) { const url = new URL('../assets/' + e.file, import.meta.url).href; files.set(e.file, { url, idx: images.length }); images.push({ url, img: null, pixels: null }); }
+    }
+    await Promise.all([...files.values()].map(f => loadImage(f.url).then(im => { images[f.idx].img = im; }).catch(() => {})));
+    const lists = new Map();
+    for (const [key, e] of Object.entries(index)) { const f = files.get(e.file); if (images[f.idx].img) applyEntry(key, [...e.rect, f.idx], lists); }
+    for (const [target, list] of lists) { const [obj, prop] = target; obj[prop] = list.sort((a, b) => a.n - b.n).map(x => x.rect); }
+  });
+  Promise.all([main, extra]).then(() => { ready = !failed || images.length > 1; for (const l of listeners) l(); });
+}
+// Route a packed sprite (key from tools/pack.py) into the slot the renderers read.
+const TERRAIN_SLOT = { grass: ['G', 'base'], sand: ['W', 'base'], sea: ['U', 'base'], shallow: [null, 'sand'], darkrock: ['B', 'base'], lava: ['B', 'accent'], greyrock: ['R', 'base'], snow: ['snow', 'base'], cobbles: [null, 'cobble'] };
+function applyEntry(key, rect, lists) {
+  const [cat, rest] = key.split('.', 2); if (!rest) return;
+  const parts = rest.split('-'); const last = parts[parts.length - 1]; const n = /^\d+$/.test(last) ? Number(last) : 0; const name = n ? parts.slice(0, -1).join('-') : rest;
+  const push = (obj, prop) => { const k = [obj, prop]; let found = null; for (const kk of lists.keys()) if (kk[0] === obj && kk[1] === prop) found = kk; if (!found) lists.set(k, []); (lists.get(found || k)).push({ n, rect }); };
+  switch (cat) {
+    case 'terrain': { const slot = TERRAIN_SLOT[name]; if (!slot) return; if (slot[0]) push(TERRAIN[slot[0]], slot[1]); else push(TERRAIN, slot[1]); if (name === 'lava') push(TERRAIN.R, 'accent'); return; }
+    case 'scenery': { if (/^peak/.test(name)) push(SCENERY, 'peaks'); else if (/^(rock|boulder)/.test(name)) push(SCENERY, 'rocks'); else if (/^dune/.test(name)) push(SCENERY, 'dunes'); else SPRITES[name] = rect; return; }
+    case 'locations': { const m = name.match(/^city-([WUBRG])$/); if (m) SPRITES.city[m[1]] = rect; else if (['fortress', 'town', 'compass', 'grand'].includes(name)) SPRITES.city[name] = rect; else if (name === 'pit-cleared') SPRITES.pitCleared = rect; else if (name === 'crystal-taken') SPRITES.crystalTaken = rect; else SPRITES[name] = rect; return; }
+    case 'figures': { const m = rest.match(/^mage-([WUBRG])-(\d)$/); if (m) SPRITES.mage[m[1]][Number(m[2]) - 1] = rect; else if (rest === 'usurper') SPRITES.mage.M = [rect, rect]; else SPRITES[name] = rect; return; }
+    case 'townsfolk': push(SPRITES, 'folk'); return;
+    case 'monsters': { const m = rest.match(/^([a-z]+)-(idle|attack|hurt|dead|effect)(?:-(\d+))?$/); if (!m) return; const mo = (MONSTERS[m[1]] ||= { idle: [], attack: [] }); if (m[2] === 'effect') mo.breath = rect; else if (m[2] === 'hurt' || m[2] === 'dead') mo[m[2]] = rect; else push(mo, m[2]); return; }
+    case 'dungeon': { const lname = name.toLowerCase(); const slot = { floor: 'floor', rock: 'rock', rockcrack: 'rockCrack', lava: 'lava', walltop: 'wallTop', wallface: 'wallFace' }[lname]; if (slot) push(DUNGEON_TILES, slot); else if (lname === 'grate') DUNGEON_TILES.grate = rect; else SPRITES[name] = rect; return; }
+    case 'ui': (SPRITES.ui ||= {})[name] = rect; return;
+  }
 }
 export const atlasReady = () => ready;
 export function onAtlas(fn) { listeners.push(fn); if (ready) fn(); }
 
-// Raw pixels of the keyed sheet, for painters that sample textures per pixel.
-let pixels = null;
-export function sheetPixels() {
-  if (!ready || !img) return null;
-  if (!pixels) { const ctx = img.getContext('2d', { willReadFrequently: true }); pixels = { data: ctx.getImageData(0, 0, img.width, img.height).data, w: img.width }; }
-  return pixels;
+// Raw pixels of the sheet a rectangle lives in, for painters that sample textures per pixel.
+export function sheetPixels(rect) {
+  const im = images[rect?.[4] || 0]; if (!ready || !im?.img) return null;
+  if (!im.pixels) {
+    let src = im.img;
+    if (!(src instanceof HTMLCanvasElement)) { const c = document.createElement('canvas'); c.width = src.width; c.height = src.height; c.getContext('2d').drawImage(src, 0, 0); src = c; }
+    im.pixels = { data: src.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, src.width, src.height).data, w: src.width };
+  }
+  return im.pixels;
 }
 
 // Draw a sprite rectangle into a canvas at dx,dy scaled to dw×dh (defaults to 1:1).
 export function blit(ctx, rect, dx, dy, dw, dh) {
   if (!ready || !rect) return false;
+  const im = images[rect[4] || 0]?.img; if (!im) return false;
   const [x, y, w, h] = rect;
-  ctx.drawImage(img, x, y, w, h, Math.round(dx), Math.round(dy), Math.round(dw ?? w), Math.round(dh ?? h));
+  ctx.drawImage(im, x, y, w, h, Math.round(dx), Math.round(dy), Math.round(dw ?? w), Math.round(dh ?? h));
   return true;
 }
 // Draw a sprite centred on (cx, cy) with its feet at `bottom` (a y coordinate), scaled by `s`.
@@ -164,6 +195,7 @@ export const pick = (list, t) => list[Math.floor(Math.min(0.999999, Math.max(0, 
 
 // Inline style for showing a sprite in the DOM as a CSS background (used by the duel screen).
 export function spriteStyle(rect, s = 2) {
-  const [x, y, w, h] = rect;
-  return `width:${w * s}px;height:${h * s}px;background:url(${sheetUrl}) -${x * s}px -${y * s}px / ${SHEET_W * s}px ${SHEET_H * s}px no-repeat;image-rendering:pixelated;image-rendering:crisp-edges;`;
+  const [x, y, w, h] = rect; const im = images[rect[4] || 0] || { url: SHEET, img: null };
+  const sw = im.img?.width || SHEET_W, sh = im.img?.height || SHEET_H;
+  return `width:${w * s}px;height:${h * s}px;background:url(${im.url}) -${x * s}px -${y * s}px / ${sw * s}px ${sh * s}px no-repeat;image-rendering:pixelated;image-rendering:crisp-edges;`;
 }

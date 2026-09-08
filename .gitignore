@@ -5,3 +5,4 @@ art/*
 node_modules/
 .DS_Store
 Thumbs.db
+art-src/

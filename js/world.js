@@ -158,7 +158,7 @@ function paintTiles(world) {
   const seed = world.seed || 0;
   const h = (x, y, s) => hash(x, y, s + seed);
   const at = (x, y) => inBounds(world, x, y) ? tileAt(world, x, y) : null;
-  const sheet = sheetPixels();
+  const sheetOf = rect => sheetPixels(rect);
   const owner = (x, y) => {
     const tx = Math.floor(x / PX), ty = Math.floor(y / PX);
     let best = at(tx, ty), bd = Infinity;
@@ -191,6 +191,7 @@ function paintTiles(world) {
     const fx = h(tx, ty, 8) < 0.5, fy = h(tx, ty, 9) < 0.5;
     const u = Math.floor((x % PX) * rect[2] / PX), v = Math.floor((y % PX) * rect[3] / PX);
     const sx = rect[0] + (fx ? rect[2] - 1 - u : u), sy = rect[1] + (fy ? rect[3] - 1 - v : v);
+    const sheet = sheetOf(rect); if (!sheet) continue;
     const si = (sy * sheet.w + sx) * 4, di = (y * Wp + x) * 4;
     img[di] = sheet.data[si]; img[di + 1] = sheet.data[si + 1]; img[di + 2] = sheet.data[si + 2]; img[di + 3] = 255;
   }
@@ -502,7 +503,7 @@ function drawFortress(ctx, cx, cy) {
   px(ctx, cx - 2, cy + 4, 4, 6, sd);
 }
 function drawDungeon(ctx, cx, cy, cleared) {
-  if (atlasReady()) { if (cleared) ctx.globalAlpha = 0.55; blitAt(ctx, SPRITES.pit, cx, cy + PX / 2, 0.62); ctx.globalAlpha = 1; if (!cleared) blitAt(ctx, SPRITES.torch, cx + 14, cy + 6, 0.6); return; }
+  if (atlasReady()) { if (cleared && SPRITES.pitCleared) { blitAt(ctx, SPRITES.pitCleared, cx, cy + PX / 2, 0.62); return; } if (cleared) ctx.globalAlpha = 0.55; blitAt(ctx, SPRITES.pit, cx, cy + PX / 2, 0.62); ctx.globalAlpha = 1; if (!cleared) blitAt(ctx, SPRITES.torch, cx + 14, cy + 6, 0.6); return; }
   shade(ctx, cx, cy + 9, 26);
   const rock = '#6f6558', rockL = '#8c8172', rockD = '#4b433a';
   ctx.fillStyle = rock; ctx.beginPath(); ctx.moveTo(cx - 14, cy + 8); ctx.lineTo(cx - 10, cy - 6); ctx.lineTo(cx - 3, cy - 12); ctx.lineTo(cx + 5, cy - 11); ctx.lineTo(cx + 12, cy - 4); ctx.lineTo(cx + 14, cy + 8); ctx.closePath(); ctx.fill();
@@ -513,6 +514,7 @@ function drawDungeon(ctx, cx, cy, cleared) {
   else { px(ctx, cx + 8, cy - 14, 1, 12, '#5a4025'); px(ctx, cx + 9, cy - 14, 5, 3, '#e8dcc2'); }
 }
 function drawCrystal(ctx, cx, cy, taken) {
+  if (atlasReady() && taken && SPRITES.crystalTaken) { blitAt(ctx, SPRITES.crystalTaken, cx, cy + 14, 0.85); return; }
   if (atlasReady()) { if (!taken) { const g = ctx.createRadialGradient(cx, cy, 2, cx, cy, 16); g.addColorStop(0, 'rgba(160,220,255,.6)'); g.addColorStop(1, 'rgba(160,220,255,0)'); ctx.fillStyle = g; ctx.fillRect(cx - 16, cy - 16, 32, 32); } else ctx.globalAlpha = 0.4; blitAt(ctx, SPRITES.crystal, cx, cy + 14, 0.85); ctx.globalAlpha = 1; return; }
   if (!taken) { const g = ctx.createRadialGradient(cx, cy - 2, 1, cx, cy - 2, 14); g.addColorStop(0, 'rgba(255,245,180,.7)'); g.addColorStop(1, 'rgba(255,245,180,0)'); ctx.fillStyle = g; ctx.fillRect(cx - 14, cy - 16, 28, 28); }
   shade(ctx, cx, cy + 4, 12);
