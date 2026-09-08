@@ -1,6 +1,6 @@
 // Fivefold app controller: screens, world loop, persistence.
 import { parseList, importNames, defOf, forgetDefs, loadArtIndex, artFor, artCount, hasOwnArt } from './collection.js';
-import { fetchCards, cacheSize } from './scryfall.js';
+import { fetchCards, cacheSize, cached as cachedCard } from './scryfall.js';
 import { COLORS, COLOR_NAME, costString, statusLabel } from './cards.js';
 import { generateWorld, drawWorld, tileAt, inBounds, cityAt, linkAt, enemyAt, stepEnemies, BIOME, TILE, VIEW } from './world.js';
 import { Duel } from './engine.js';
@@ -45,7 +45,7 @@ async function ensureContent() {
   const names = new Set(Object.values(BASICS));
   for (const e of S.content.enemies) for (const n of Object.keys(e.deck)) names.add(n);
   setBusy('Fetching card data from Scryfall…');
-  await fetchCards([...names], (done, total) => setBusy(`Fetching card data from Scryfall… ${done}/${total}`));
+  await fetchCards([...names], (done, total, phase) => setBusy(phase === 'art' ? `Finding original printings for art… ${done}/${total}` : `Fetching card data from Scryfall… ${done}/${total}`));
   forgetDefs();
   await loadArtIndex();
   S.ready = true; setBusy(null);
@@ -215,7 +215,7 @@ async function doImport(text) {
   if (!entries.length) { S.report = { error: 'No card lines found.' }; render(); return; }
   setBusy(`Looking up ${entries.length} names…`);
   try {
-    const rows = await importNames(entries, (d, t) => setBusy(`Fetching from Scryfall… ${d}/${t}`));
+    const rows = await importNames(entries, (d, t, phase) => setBusy(phase === 'art' ? `Finding original printings for art… ${d}/${t}` : `Fetching from Scryfall… ${d}/${t}`));
     let added = 0;
     for (const r of rows) if (r.def) { addCards(S.collection, r.canonical, r.count); added += r.count; }
     S.report = { rows, added };
@@ -296,8 +296,8 @@ function collection() {
     <div class="box">
       <div class="rowhead"><h2>Collection · ${names.length} distinct, ${Object.values(S.collection).reduce((a, b) => a + b, 0)} total</h2>
         <div class="seg">${['all', 'playable', 'unsupported'].map(f => `<button class="seg-b${S.filter === f ? ' on' : ''}" data-filter="${f}">${f}</button>`).join('')}</div></div>
-      ${rows.length ? `<table class="coll"><tr><th></th><th>Card</th><th>Qty</th><th>Type</th><th>Cost</th><th>Status</th><th>Notes</th><th></th></tr>
-      ${rows.map(r => `<tr class="st-${r.d ? r.d.status : 'missing'}"><td class="thumb">${r.d ? `<div class="mini${hasOwnArt(r.d) ? ' own' : ''}" data-preview="${esc(r.n)}" style="${artFor(r.d) ? `background-image:url('${artFor(r.d)}')` : ''}"></div>` : ''}</td><td data-preview="${esc(r.n)}">${esc(r.n)}</td><td>${r.q}</td><td>${esc(r.d?.typeLine || '')}</td><td>${r.d && r.d.kind !== 'land' ? esc(costString(r.d.cost)) : ''}</td><td>${statusLabel(r.d)}</td><td class="notes">${esc((r.d?.notes || []).join('; '))}</td><td><button class="btn tiny" data-dec="${esc(r.n)}">−1</button></td></tr>`).join('')}</table>` : '<p class="small">Nothing here yet. Import a list above, or start a new journey to receive a starter deck.</p>'}
+      ${rows.length ? `<table class="coll"><tr><th></th><th>Card</th><th>Qty</th><th>Type</th><th>Cost</th><th>Art</th><th>Status</th><th>Notes</th><th></th></tr>
+      ${rows.map(r => { const raw = r.d ? cachedCard(r.n) : null; const art = r.d && hasOwnArt(r.d) ? 'yours' : raw?.art_set ? `${raw.art_set.toUpperCase()} ${raw.art_year || ''}` : ''; return `<tr class="st-${r.d ? r.d.status : 'missing'}"><td class="thumb">${r.d ? `<div class="mini${hasOwnArt(r.d) ? ' own' : ''}" data-preview="${esc(r.n)}" style="${artFor(r.d) ? `background-image:url('${artFor(r.d)}')` : ''}"></div>` : ''}</td><td data-preview="${esc(r.n)}">${esc(r.n)}</td><td>${r.q}</td><td>${esc(r.d?.typeLine || '')}</td><td>${r.d && r.d.kind !== 'land' ? esc(costString(r.d.cost)) : ''}</td><td class="small">${esc(art)}</td><td>${statusLabel(r.d)}</td><td class="notes">${esc((r.d?.notes || []).join('; '))}</td><td><button class="btn tiny" data-dec="${esc(r.n)}">−1</button></td></tr>`; }).join('')}</table>` : '<p class="small">Nothing here yet. Import a list above, or start a new journey to receive a starter deck.</p>'}
     </div>
   </section>`;
 }

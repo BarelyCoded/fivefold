@@ -63,8 +63,8 @@ th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line
 th { color: var(--ink3); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
 td.notes { color: var(--ink3); font-size: 12px; max-width: 320px; }
 tr.st-unsupported td, tr.st-missing td { color: var(--ink3); }
-tr.st-approx td:nth-child(6), tr.st-approx td:nth-child(3) { color: var(--gold); }
-tr.st-unsupported td:nth-child(6), tr.st-unsupported td:nth-child(3), tr.st-missing td:nth-child(3) { color: var(--warn); }
+tr.st-approx td:nth-child(7), tr.st-approx td:nth-child(3) { color: var(--gold); }
+tr.st-unsupported td:nth-child(7), tr.st-unsupported td:nth-child(3), tr.st-missing td:nth-child(3) { color: var(--warn); }
 .report { margin-top: 10px; max-height: 260px; overflow: auto; }
 .coll { display: block; max-height: 60vh; overflow: auto; }
 .coll tr { display: table; width: 100%; table-layout: fixed; }
