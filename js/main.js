@@ -2,7 +2,7 @@
 import { parseList, importNames, defOf, forgetDefs, loadArtIndex, artFor, artCount, hasOwnArt } from './collection.js';
 import { fetchCards, cacheSize, cached as cachedCard } from './scryfall.js';
 import { COLORS, COLOR_NAME, costString, statusLabel } from './cards.js';
-import { generateWorld, drawWorld, tileAt, inBounds, cityAt, linkAt, enemyAt, stepEnemies, BIOME, TILE, VIEW } from './world.js';
+import { generateWorld, drawWorld, tileAt, inBounds, cityAt, linkAt, enemyAt, stepEnemies, BIOME, TILE, VIEW, placeDungeons, dungeonAt } from './world.js';
 import { Duel } from './engine.js';
 import { mountDuel, cardHtml } from './duelview.js';
 import { aiHooks } from './ai.js';
@@ -42,14 +42,22 @@ async function ensureContent() {
   setBusy('Loading enemy roster…');
   const res = await fetch('content/enemies.json');
   S.content = await res.json();
+  S.dungeons = await (await fetch('content/dungeons.json')).json();
   const names = new Set(Object.values(BASICS));
+  for (const d of S.dungeons.dungeons) for (const n of d.treasure) names.add(n);
+  for (const n of S.dungeons.artifacts) names.add(n);
+  for (const n of Object.values(S.dungeons.walls)) names.add(n);
   for (const e of S.content.enemies) for (const n of Object.keys(e.deck)) names.add(n);
+  for (const n of Object.keys(S.collection)) names.add(n);
+  if (S.game) for (const n of Object.keys(S.game.deck)) names.add(n);
   setBusy('Fetching card data from Scryfall…');
   await fetchCards([...names], (done, total, phase) => setBusy(phase === 'art' ? `Finding original printings for art… ${done}/${total}` : `Fetching card data from Scryfall… ${done}/${total}`));
   forgetDefs();
   await loadArtIndex();
   S.ready = true; setBusy(null);
+  if (S.game?.world) placeDungeons(S.game.world, Math.random, S.dungeons.dungeons);
 }
+function dungeonTemplate(id) { return S.dungeons.dungeons.find(d => d.id === id); }
 function setBusy(msg) { S.busy = msg; const el = document.getElementById('status'); if (el) { el.textContent = msg || ''; el.hidden = !msg; } }
 function enemyById(id) { return S.content.enemies.find(e => e.id === id); }
 
@@ -104,9 +112,10 @@ async function newGame({ name, color, difficulty }) {
   const deck = {};
   for (const [n, c] of Object.entries(starter.deck)) { deck[n] = c; if (!BASIC_NAMES.has(n)) addCards(S.collection, n, c); }
   const world = generateWorld(Math.random, S.content.enemies, color);
+  placeDungeons(world, Math.random, S.dungeons.dungeons);
   S.game = {
     name: name || 'Wanderer', color, difficulty, deck, world,
-    player: { x: world.start.x, y: world.start.y, life: d.life, maxLife: d.life, gold: d.gold, food: 40, day: 1, steps: 0 },
+    player: { x: world.start.x, y: world.start.y, life: d.life, maxLife: d.life, gold: d.gold, food: 60, day: 1, steps: 0 },
     boss: { links: 0 }, status: 'playing', wins: 0, losses: 0, cityStock: {},
   };
   save(); go('map');
@@ -121,8 +130,11 @@ function move(dx, dy) {
   const enemy = enemyAt(g.world, nx, ny);
   if (enemy) { encounter(enemy); return; }
   if (g.world.castle.x === nx && g.world.castle.y === ny) { castlePrompt(); return; }
+  const dg = dungeonAt(g.world, nx, ny);
+  if (dg && dg.revealed && !dg.cleared) { g.player.x = nx; g.player.y = ny; save(); dungeonPrompt(dg); return; }
   g.player.x = nx; g.player.y = ny; g.player.steps++;
-  if (g.player.food > 0) g.player.food--; else g.player.life = Math.max(1, g.player.life - 1);
+  if (g.player.food > 0) g.player.food--;
+  else if (g.player.steps % 2 === 0 && g.player.life > 1) { g.player.life--; toast('You are starving: 1 life lost. Buy food in any city.'); }
   if (g.player.steps % 5 === 0) { g.player.day++; if (g.player.day % 30 === 0) bossLink(); }
   const link = linkAt(g.world, nx, ny);
   if (link && !link.taken) { link.taken = true; g.player.maxLife += 2; g.player.life += 2; toast(`Mana link claimed. Maximum life is now ${g.player.maxLife}.`); }
@@ -162,25 +174,79 @@ function castlePrompt() {
   render();
 }
 
-function startDuel(tpl, roamUid) {
+function startDuel(tpl, roamUid, opts = {}) {
   const g = S.game; const d = DIFF[g.difficulty];
-  const ante = { mine: pickAnte(g.deck), theirs: pickAnte(tpl.deck) };
+  const ante = opts.dungeon ? null : { mine: pickAnte(g.deck), theirs: pickAnte(tpl.deck) };
+  const rules = opts.rules || {};
   const duel = new Duel({
     player: { name: g.name, deck: expandDeck(g.deck), life: g.player.life },
-    ai: { name: tpl.name, deck: expandDeck(tpl.deck), life: tpl.life + d.enemyBonus + (tpl.boss ? g.boss.links * 5 : 0), ai: true },
-    hooks: aiHooks,
+    ai: { name: opts.name || tpl.name, deck: expandDeck(tpl.deck), life: tpl.life + d.enemyBonus + (tpl.boss ? g.boss.links * 5 : 0) + (opts.lifeBonus || 0) + (rules.oppLife || 0), ai: true },
+    hooks: aiHooks, rules,
   });
-  S.duel = { duel, tpl, ante, roamUid };
+  S.duel = { duel, tpl, ante, roamUid, dungeon: opts.dungeon || null };
   go('duel');
 }
-function finishDuel(winner) {
-  const g = S.game; const { duel, tpl, ante, roamUid } = S.duel; S.duel = null;
+
+// ---- dungeons ---------------------------------------------------------------------
+function dungeonPrompt(dg) {
+  const t = dungeonTemplate(dg.id); const rule = S.dungeons.rules[t.rule]; const g = S.game;
+  S.modal = {
+    title: t.name,
+    body: `<p class="taunt">${esc(t.intro)}</p><p>${t.rooms} rooms, fought back to back. <b>${esc(rule.label)}:</b> ${esc(rule.text)} Your life carries from room to room. No ante inside; treasure waits at the end. You may retreat between rooms.</p><p>You have ${g.player.life} life.</p>`,
+    buttons: [{ label: 'Enter', primary: true, action: () => { S.modal = null; g.dungeon = { id: dg.id, room: 1, total: t.rooms }; save(); go('dungeon'); } }, { label: 'Not now', action: () => { S.modal = null; render(); } }],
+  };
+  render();
+}
+function dungeonRoom() {
+  const g = S.game; const st = g.dungeon; const t = dungeonTemplate(st.id); const rule = S.dungeons.rules[t.rule];
+  const pool = S.content.enemies.filter(e => e.color === t.color && !e.boss);
+  const last = st.room === st.total;
+  const tpl = (last ? pool.find(e => e.tier === 2) : st.room === 1 ? pool.find(e => e.tier === 1) : pool[Math.floor(Math.random() * pool.length)]) || pool[0];
+  const rules = { handSize: rule.handSize, upkeepDamage: rule.upkeepDamage, oppLife: rule.oppLife };
+  if (rule.wall) { const wd = defOf(S.dungeons.walls[t.color]); if (wd && wd.kind !== 'unsupported') rules.oppStart = [wd]; }
+  startDuel(tpl, null, { dungeon: { id: st.id, room: st.room, total: st.total }, rules, name: last ? `Guardian of the ${t.name}` : `${tpl.name} (room ${st.room})`, lifeBonus: last ? 4 : 0 });
+}
+function dungeonTreasure() {
+  const g = S.game; const st = g.dungeon; const t = dungeonTemplate(st.id);
   const lines = [];
+  const card = rnd(t.treasure.filter(n => defOf(n) && defOf(n).kind !== 'unsupported')) || rnd(t.treasure);
+  addCards(S.collection, card, 1); lines.push(`Treasure: ${card}.`);
+  if (Math.random() < 0.5) { const art = rnd(S.dungeons.artifacts.filter(n => defOf(n) && defOf(n).kind !== 'unsupported')); if (art) { addCards(S.collection, art, 1); lines.push(`A relic: ${art}.`); } }
+  const gold = 20 + Math.floor(Math.random() * 21); g.player.gold += gold; lines.push(`${gold} gold in an old chest.`);
+  const dg = g.world.dungeons.find(d => d.id === st.id); if (dg) dg.cleared = true;
+  g.dungeon = null;
+  S.result = { won: true, tpl: { name: t.name }, lines, title: 'The vault is yours', flavour: `${t.name} is cleared.` };
+  save(); go('result');
+}
+function revealClue(color) {
+  const g = S.game; const hidden = (g.world.dungeons || []).filter(d => !d.revealed);
+  if (!hidden.length) return null;
+  const dg = hidden.find(d => d.color === color) || rnd(hidden);
+  dg.revealed = true;
+  const t = dungeonTemplate(dg.id);
+  const dx = dg.x - g.player.x, dy = dg.y - g.player.y;
+  const dir = (Math.abs(dy) > Math.abs(dx) / 2 ? (dy < 0 ? 'north' : 'south') : '') + (Math.abs(dx) > Math.abs(dy) / 2 ? (dx < 0 ? 'west' : 'east') : '');
+  return `Your beaten foe buys mercy with a clue: the ${t.name} lies to the ${dir}, about ${Math.max(Math.abs(dx), Math.abs(dy))} days' walk. It is marked on your map.`;
+}
+function finishDuel(winner) {
+  const g = S.game; const { duel, tpl, ante, roamUid, dungeon } = S.duel; S.duel = null;
+  const lines = [];
+  if (dungeon) {
+    if (winner === 0) {
+      g.wins++; g.player.life = Math.max(1, duel.players[0].life);
+      if (g.dungeon.room >= g.dungeon.total) { dungeonTreasure(); return; }
+      g.dungeon.room++; save(); go('dungeon'); return;
+    }
+    g.losses++; g.dungeon = null;
+    const lost = Math.floor(g.player.gold * 0.25); g.player.gold -= lost; if (lost) lines.push(`${lost} gold is taken from you.`);
+    g.player.life = g.player.maxLife; lines.push('You are dragged out of the dark and left on the road, restored but poorer.');
+    S.result = { won: false, tpl, lines }; save(); go('result'); return;
+  }
   if (winner === 0) {
-    g.wins++; g.player.gold += tpl.gold; lines.push(`You win ${tpl.gold} gold.`);
+    g.wins++; g.player.gold += tpl.gold; g.player.food += 5; lines.push(`You win ${tpl.gold} gold and take 5 food from their pack.`);
     if (ante.theirs) { addCards(S.collection, ante.theirs, 1); lines.push(`You take ${ante.theirs} as ante.`); }
     g.player.life = Math.max(duel.players[0].life, Math.ceil(g.player.maxLife / 2));
-    if (roamUid != null) g.world.enemies = g.world.enemies.filter(e => e.uid !== roamUid);
+    if (roamUid != null) { g.world.enemies = g.world.enemies.filter(e => e.uid !== roamUid); if (Math.random() < 0.45) { const clue = revealClue(tpl.color); if (clue) lines.push(clue); } }
     if (tpl.boss) { g.status = 'won'; save(); go('end'); return; }
   } else {
     g.losses++;
@@ -232,12 +298,12 @@ function renderTop() {
   const tabs = [['map', 'Map'], ['collection', 'Collection'], ['deck', 'Deck']];
   topbar.innerHTML = `<div class="brand" data-go="title">Fivefold <span>demo</span></div>
     <nav>${tabs.map(([k, l]) => `<button class="tab${S.screen === k ? ' on' : ''}" data-go="${k}" ${inDuel || (k !== 'collection' && !g) ? 'disabled' : ''}>${l}</button>`).join('')}</nav>
-    ${g ? `<div class="stats"><span title="Life">♥ ${g.player.life}/${g.player.maxLife}</span><span title="Gold">◎ ${g.player.gold}</span><span title="Food">✦ ${g.player.food}</span><span title="Day">Day ${g.player.day}</span><span title="Usurper's links">Links ${g.boss.links}/3</span></div>` : ''}`;
+    ${g ? `<div class="stats"><span title="Life">♥ ${g.player.life}/${g.player.maxLife}</span><span title="Gold">◎ ${g.player.gold}</span><span title="Food" class="${g.player.food === 0 ? 'starving' : ''}">✦ ${g.player.food}${g.player.food === 0 ? ' STARVING' : ''}</span><span title="Day">Day ${g.player.day}</span><span title="Usurper's links">Links ${g.boss.links}/3</span></div>` : ''}`;
 }
 
 function render() {
   renderTop();
-  const views = { title, collection, deck, map, city, duel, result, end };
+  const views = { title, collection, deck, map, city, duel, result, end, dungeon };
   app.innerHTML = '';
   (views[S.screen] || title)();
   if (S.modal) app.insertAdjacentHTML('beforeend', `<div class="overlay"><div class="modal"><h3>${S.modal.title}</h3><div class="mbody">${S.modal.body}</div><div class="mbtns">${S.modal.buttons.map((b, i) => `<button class="btn${b.primary ? ' primary' : ''}" data-modal="${i}" ${b.disabled ? 'disabled' : ''}>${esc(b.label)}</button>`).join('')}</div></div></div>`);
@@ -336,7 +402,8 @@ function map() {
     <aside class="mappanel">
       <h2>${esc(g.name)}</h2>
       <p>Standing in the <b>${BIOME[here].name}</b> (${COLOR_NAME[here]}). ${near.length ? `<br>${near.map(e => enemyById(e.template).name).join(', ')} nearby.` : ''}</p>
-      <p class="small">Move with WASD or the arrow keys, or click a neighbouring tile. Walking costs food. Diamonds are mana links (+2 life). Houses are cities. The dark tower is the Usurper.</p>
+      <p class="small">Move with WASD or the arrow keys, or click a neighbouring tile. Walking costs food. Crystals are mana links (+2 life). Cave mouths are dungeons: revealed by clues from beaten foes, fought room by room with your life carried over. The dark fortress is the Usurper.</p>
+      ${(g.world.dungeons || []).some(d => d.revealed) ? `<p class="small">Known dungeons: ${g.world.dungeons.filter(d => d.revealed).map(d => `${dungeonTemplate(d.id).name}${d.cleared ? ' (cleared)' : ''}`).join(', ')}.</p>` : ''}
       <div class="btnrow"><button class="btn" id="b-rest" ${g.player.food < 3 || g.player.life >= g.player.maxLife ? 'disabled' : ''}>Rest (3 food, +5 life)</button><button class="btn ghost" data-go="title">Menu</button></div>
       <h3>Legend</h3>
       <div class="legend">${COLORS.map(c => `<span><i class="sw" style="background:${BIOME[c].fill}"></i>${BIOME[c].name}</span>`).join('')}</div>
@@ -361,7 +428,7 @@ function city() {
       <h2>${esc(c.name)} <span class="small">· a ${COLOR_NAME[c.color].toLowerCase()} city in the ${BIOME[c.color].name.toLowerCase()}</span></h2>
       <div class="btnrow">
         <button class="btn" id="b-inn" ${g.player.life >= g.player.maxLife ? 'disabled' : ''}>Rest at the inn (free, full life)</button>
-        <button class="btn" id="b-food" ${g.player.gold < 2 ? 'disabled' : ''}>Buy 10 food (2 gold)</button>
+        <button class="btn" id="b-food" ${g.player.gold < 2 ? 'disabled' : ''}>Buy 20 food (2 gold)</button>
         <button class="btn primary" id="b-leave">Leave</button>
       </div>
       <h3>Market</h3>
@@ -376,18 +443,30 @@ function duel() {
   // Mount once per duel; a re-render (toast, stats) must not restart the game.
   if (!d.root) {
     d.root = document.createElement('div'); d.root.id = 'duelroot';
-    mountDuel(d.root, d.duel, { ante: { mine: d.ante.mine || '—', theirs: d.ante.theirs || '—' }, onEnd: finishDuel });
+    mountDuel(d.root, d.duel, { ante: d.ante ? { mine: d.ante.mine || '—', theirs: d.ante.theirs || '—' } : null, onEnd: finishDuel });
   }
   app.innerHTML = '';
   const sec = document.createElement('section'); sec.className = 'screen duelscreen';
   sec.appendChild(d.root); app.appendChild(sec);
 }
 
+function dungeon() {
+  const g = S.game; if (!g?.dungeon) return map();
+  const st = g.dungeon; const t = dungeonTemplate(st.id); const rule = S.dungeons.rules[t.rule];
+  app.innerHTML = `<section class="screen resultscreen"><div class="box center dungeonbox">
+    <div class="eyebrow">${esc(t.name)}</div>
+    <h2>Room ${st.room} of ${st.total}</h2>
+    <p class="taunt">${esc(rule.label)}: ${esc(rule.text)}</p>
+    <p>You have <b>${g.player.life}</b> life. ${st.room === st.total ? 'The guardian waits beyond this door.' : 'Something stirs beyond this door.'}</p>
+    <div class="btnrow center"><button class="btn primary" id="b-room">${st.room === 1 ? 'Enter the first room' : 'Press on'}</button><button class="btn" id="b-retreat">Retreat to the surface</button></div>
+  </div></section>`;
+}
+
 function result() {
   const r = S.result; if (!r) return map();
   app.innerHTML = `<section class="screen resultscreen"><div class="box center">
-    <h2>${r.won ? 'Victory' : 'Defeat'}</h2>
-    <p>${r.won ? `${esc(r.tpl.name)} yields.` : `${esc(r.tpl.name)} stands over you.`}</p>
+    <h2>${r.title || (r.won ? 'Victory' : 'Defeat')}</h2>
+    <p>${r.flavour || (r.won ? `${esc(r.tpl.name)} yields.` : `${esc(r.tpl.name)} stands over you.`)}</p>
     <ul class="plain">${r.lines.map(l => `<li>${esc(l)}</li>`).join('')}</ul>
     <button class="btn primary" data-go="map">Back to the map</button>
   </div></section>`;
@@ -406,7 +485,7 @@ app.addEventListener('submit', ev => {
   if (ev.target.id === 'newgame') { ev.preventDefault(); const f = new FormData(ev.target); newGame({ name: f.get('name').trim(), color: f.get('color'), difficulty: f.get('difficulty') }); }
 });
 document.addEventListener('click', ev => {
-  const t = ev.target.closest('[data-go],[data-modal],[data-filter],[data-add],[data-rem],[data-dec],[data-buy],#b-import,#b-csv,#b-rescan,#b-clear-coll,#b-fill,#b-rest,#b-inn,#b-food,#b-leave,#b-newgame');
+  const t = ev.target.closest('[data-go],[data-modal],[data-filter],[data-add],[data-rem],[data-dec],[data-buy],#b-import,#b-csv,#b-rescan,#b-clear-coll,#b-fill,#b-rest,#b-inn,#b-food,#b-leave,#b-newgame,#b-room,#b-retreat');
   if (!t) return;
   const g = S.game;
   if (t.dataset.go) { if (!t.disabled) { if (t.dataset.go === 'map' && g?.status !== 'playing' && g) go('end'); else go(t.dataset.go); } return; }
@@ -424,9 +503,11 @@ document.addEventListener('click', ev => {
     case 'b-fill': fillBasics(g.deck); save(); render(); break;
     case 'b-rest': if (g.player.food >= 3) { g.player.food -= 3; g.player.life = Math.min(g.player.maxLife, g.player.life + 5); g.player.day++; if (g.player.day % 30 === 0) bossLink(); stepEnemies(g.world, Math.random, g.player); save(); render(); } break;
     case 'b-inn': g.player.life = g.player.maxLife; save(); render(); break;
-    case 'b-food': if (g.player.gold >= 2) { g.player.gold -= 2; g.player.food += 10; save(); render(); } break;
+    case 'b-food': if (g.player.gold >= 2) { g.player.gold -= 2; g.player.food += 20; save(); render(); } break;
     case 'b-leave': go('map'); break;
     case 'b-newgame': S.game = null; save(); go('title'); break;
+    case 'b-room': dungeonRoom(); break;
+    case 'b-retreat': g.dungeon = null; save(); go('map'); break;
   }
 });
 document.addEventListener('input', ev => { if (ev.target.id === 'dfilter') { S.deckFilter = ev.target.value; deck(); document.getElementById('dfilter').focus(); const el = document.getElementById('dfilter'); el.setSelectionRange(el.value.length, el.value.length); } });
@@ -443,4 +524,4 @@ window.ff = { S, defOf, save, render, startDuel, enemyById };
 initPreview();
 load();
 render();
-ensureContent().then(() => { if (S.game && S.game.status === 'playing') go('map'); else render(); }).catch(e => { setBusy('Could not load card data: ' + e.message + ' (is the internet reachable?)'); });
+ensureContent().then(() => { if (S.game && S.game.status === 'playing') go(S.game.dungeon ? 'dungeon' : 'map'); else render(); }).catch(e => { setBusy('Could not load card data: ' + e.message + ' (is the internet reachable?)'); });

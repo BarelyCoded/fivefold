@@ -74,6 +74,29 @@ export const inBounds = (world, x, y) => x >= 0 && y >= 0 && x < world.w && y < 
 export const cityAt = (world, x, y) => world.cities.find(c => c.x === x && c.y === y);
 export const linkAt = (world, x, y) => world.links.find(l => l.x === x && l.y === y);
 export const enemyAt = (world, x, y) => world.enemies.find(e => e.x === x && e.y === y);
+export const dungeonAt = (world, x, y) => (world.dungeons || []).find(d => d.x === x && d.y === y);
+
+// Place one hidden dungeon per template in matching terrain. Safe to call on old saves.
+export function placeDungeons(world, rng, templates) {
+  if (world.dungeons) return world.dungeons;
+  const taken = new Set([...world.cities.map(c => `${c.x},${c.y}`), ...world.links.map(l => `${l.x},${l.y}`), `${world.castle.x},${world.castle.y}`, ...world.enemies.map(e => `${e.x},${e.y}`)]);
+  const out = [];
+  for (const t of templates) {
+    let best = null;
+    for (let i = 0; i < 500 && !best; i++) {
+      const x = Math.floor(rng() * world.w), y = Math.floor(rng() * world.h);
+      if (taken.has(`${x},${y}`) || tileAt(world, x, y) !== t.color) continue;
+      if (dist({ x, y }, world.start) < 4) continue;
+      best = { x, y };
+    }
+    if (!best) { for (let i = 0; i < 500 && !best; i++) { const x = Math.floor(rng() * world.w), y = Math.floor(rng() * world.h); if (!taken.has(`${x},${y}`) && dist({ x, y }, world.start) >= 4) best = { x, y }; } }
+    if (!best) continue;
+    taken.add(`${best.x},${best.y}`);
+    out.push({ id: t.id, x: best.x, y: best.y, color: t.color, revealed: false, cleared: false });
+  }
+  world.dungeons = out;
+  return out;
+}
 
 export function stepEnemies(world, rng, player) {
   for (const e of world.enemies) {
@@ -83,6 +106,7 @@ export function stepEnemies(world, rng, player) {
     if (!inBounds(world, nx, ny)) continue;
     if (cityAt(world, nx, ny) || linkAt(world, nx, ny) || enemyAt(world, nx, ny)) continue;
     if (world.castle.x === nx && world.castle.y === ny) continue;
+    if (dungeonAt(world, nx, ny)) continue;
     if (player.x === nx && player.y === ny) continue;
     if (tileAt(world, nx, ny) !== e.color && rng() < 0.7) continue;
     e.x = nx; e.y = ny;
@@ -374,6 +398,16 @@ function drawFortress(ctx, cx, cy) {
   px(ctx, cx, cy - 36, 1, 8, sd); ctx.fillStyle = '#c8323a'; ctx.beginPath(); ctx.moveTo(cx + 1, cy - 36); ctx.lineTo(cx + 8, cy - 33); ctx.lineTo(cx + 1, cy - 30); ctx.closePath(); ctx.fill();
   px(ctx, cx - 2, cy + 4, 4, 6, sd);
 }
+function drawDungeon(ctx, cx, cy, cleared) {
+  shade(ctx, cx, cy + 9, 26);
+  const rock = '#6f6558', rockL = '#8c8172', rockD = '#4b433a';
+  ctx.fillStyle = rock; ctx.beginPath(); ctx.moveTo(cx - 14, cy + 8); ctx.lineTo(cx - 10, cy - 6); ctx.lineTo(cx - 3, cy - 12); ctx.lineTo(cx + 5, cy - 11); ctx.lineTo(cx + 12, cy - 4); ctx.lineTo(cx + 14, cy + 8); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = rockL; ctx.beginPath(); ctx.moveTo(cx - 10, cy - 6); ctx.lineTo(cx - 3, cy - 12); ctx.lineTo(cx + 5, cy - 11); ctx.lineTo(cx + 2, cy - 7); ctx.lineTo(cx - 6, cy - 4); ctx.closePath(); ctx.fill();
+  px(ctx, cx - 14, cy + 6, 28, 2, rockD);
+  ctx.fillStyle = cleared ? '#2c2a30' : '#0b0a0d'; ctx.beginPath(); ctx.moveTo(cx - 5, cy + 8); ctx.lineTo(cx - 5, cy - 1); ctx.arc(cx, cy - 1, 5, Math.PI, 0); ctx.lineTo(cx + 5, cy + 8); ctx.closePath(); ctx.fill();
+  if (!cleared) { px(ctx, cx - 1, cy + 1, 2, 2, '#ffb347'); px(ctx, cx + 7, cy - 2, 1, 6, '#5a4025'); px(ctx, cx + 8, cy - 3, 2, 3, '#ff8a3a'); }
+  else { px(ctx, cx + 8, cy - 14, 1, 12, '#5a4025'); px(ctx, cx + 9, cy - 14, 5, 3, '#e8dcc2'); }
+}
 function drawCrystal(ctx, cx, cy, taken) {
   if (!taken) { const g = ctx.createRadialGradient(cx, cy - 2, 1, cx, cy - 2, 14); g.addColorStop(0, 'rgba(255,245,180,.7)'); g.addColorStop(1, 'rgba(255,245,180,0)'); ctx.fillStyle = g; ctx.fillRect(cx - 14, cy - 16, 28, 28); }
   shade(ctx, cx, cy + 4, 12);
@@ -412,6 +446,7 @@ export function drawWorld(canvas, world, player, opts = {}) {
   if (opts.highlight) { f.strokeStyle = 'rgba(255,255,255,.5)'; f.lineWidth = 1; f.setLineDash([2, 2]); for (const [x, y] of opts.highlight) if (vis(x, y)) f.strokeRect((x - cam.x) * PX + 2.5, (y - cam.y) * PX + 2.5, PX - 5, PX - 5); f.setLineDash([]); }
   const objs = [];
   for (const l of world.links) if (vis(l.x, l.y)) { const [cx, cy] = c(l.x, l.y); objs.push({ y: cy, draw: () => drawCrystal(f, cx, cy, l.taken) }); }
+  for (const d of world.dungeons || []) if (d.revealed && vis(d.x, d.y)) { const [cx, cy] = c(d.x, d.y); objs.push({ y: cy, draw: () => drawDungeon(f, cx, cy, d.cleared) }); }
   for (const ct of world.cities) if (vis(ct.x, ct.y)) { const [cx, cy] = c(ct.x, ct.y); objs.push({ y: cy, draw: () => drawCity(f, cx, cy, ct.color, ct.name) }); }
   if (vis(world.castle.x, world.castle.y)) { const [cx, cy] = c(world.castle.x, world.castle.y); objs.push({ y: cy, draw: () => drawFortress(f, cx, cy) }); }
   const robes = { W: ['#d9d2b8', '#f0ead6'], U: ['#2f5f9c', '#5e8cc9'], B: ['#3a2d4a', '#5e4d75'], R: ['#a33a2a', '#d0604a'], G: ['#3f6f2f', '#6a9a4a'] };

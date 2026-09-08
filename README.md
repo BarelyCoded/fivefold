@@ -50,6 +50,12 @@ node tools/coverage.mjs era --patterns
 
 At the time of writing, 73% of the 1,590 distinct cards from Alpha to Alliances are playable and 40% are implemented exactly; the rest are approximated with a note saying what is ignored. `node tools/inspect.mjs "Card Name"` shows how a card was compiled. `node tools/simulate.mjs 20` plays the enemy roster against itself.
 
+## Dungeons
+
+Five dungeons are hidden on the map, one per color. Beating a roaming mage has a chance to yield a clue that reveals one. Inside, you fight the rooms back to back with your life carried from one to the next, under a per-dungeon rule (six-card hands, a Wall guarding every room, a life drain, tougher guardians). There is no ante inside; the last room's guardian holds a treasure: one card from the dungeon's list in , a chance at a famous artifact, and gold. You can retreat between rooms and keep whatever life you have left.
+
+Food: every step costs one. At zero you lose a life every other step until you eat. Cities sell food and every won duel yields some.
+
 ## Layout
 
 ```

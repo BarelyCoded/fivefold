@@ -26,8 +26,8 @@ export const isType = (c, t) => c.def.types.map(x => x.toLowerCase()).includes(t
 export const hasSubtype = (c, s) => c.def.subtypes.includes(s) || (has(c, 'Changeling') && isCreature(c));
 
 export class Duel {
-  constructor({ player, ai, rng = Math.random, hooks = null }) {
-    this.rng = rng; this.hooks = hooks;
+  constructor({ player, ai, rng = Math.random, hooks = null, rules = {} }) {
+    this.rng = rng; this.hooks = hooks; this.rules = rules;
     this.players = [this.makePlayer(player, 0), this.makePlayer(ai, 1)];
     this.turn = 0; this.active = 0; this.priority = 0; this.passes = 0; this.step = 'setup'; this.stepIndex = -1;
     this.stack = []; this.jobs = []; this.events = []; this.pending = null; this.winner = null;
@@ -61,7 +61,9 @@ export class Duel {
 
   // ---- lifecycle -------------------------------------------------------------
   start() {
-    for (const p of this.players) this.drawCards(p, 7);
+    for (const p of this.players) this.drawCards(p, p.idx === 0 ? (this.rules.handSize || 7) : 7);
+    for (const [idx, defs] of [[0, this.rules.playerStart], [1, this.rules.oppStart]]) for (const def of defs || []) { const c = this.instance(def, idx); c.zone = 'limbo'; this.moveTo(c, 'battlefield', { controller: idx }); c.sick = false; }
+    this.events.length = 0;
     this.active = this.rng() < 0.5 ? 0 : 1; this.firstPlayer = this.active;
     this.turn = 1; this.stepIndex = -1; this.step = 'setup';
     this.say(`${this.activePlayer.name} plays first.`);
@@ -173,6 +175,7 @@ export class Duel {
         case 'upkeep': {
           this.say(`Turn ${this.turn}: ${ap.name}.`);
           for (const d of this.delayed.splice(0)) if (d.type === 'draw') { this.drawCards(this.players[d.player], 1); this.say(`${this.players[d.player].name} draws a card.`); }
+          if (this.rules.upkeepDamage && ap.idx === 0 && this.turn > 1) { ap.life -= this.rules.upkeepDamage; this.say(`The miasma drains ${this.rules.upkeepDamage} life from ${ap.name}.`); }
           this.fireEvent({ type: 'upkeep', player: ap.idx });
           yield* this.upkeepCosts(ap);
           break;

@@ -242,3 +242,10 @@ tr.st-unsupported td:nth-child(7), tr.st-unsupported td:nth-child(3), tr.st-miss
 @keyframes fxFloat { 0% { opacity: 0; transform: translate(-50%, -30%) scale(.6); } 20% { opacity: 1; transform: translate(-50%, -50%) scale(1.15); } 100% { opacity: 0; transform: translate(-50%, -130%) scale(1); } }
 @media (prefers-reduced-motion: reduce) { .fx-attack, .fx-block, .fx-lunge, .fx-hit, .fx-cast, .fx-float, .pbox.fx-hit { animation: none; } }
 
+
+/* dungeons */
+.eyebrow { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--gold); margin-bottom: 4px; }
+.btnrow.center { justify-content: center; }
+.dungeonbox { background: linear-gradient(180deg, #2a2320, #171412); border-color: #6e5637; }
+.dungeonbox h2 { color: #f0e6cf; }
+.stats .starving { color: var(--warn); font-weight: 700; }

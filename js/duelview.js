@@ -384,7 +384,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420 }) {
     if (ev.key === ' ' && duel.pending?.type === 'priority' && !ui.wizard && !ui.menu) { ev.preventDefault(); duel.humanPass(); run(); }
   });
 
-  duel.onChange(() => { ui.message = ''; render(); });
+  duel.onChange(() => { ui.message = ''; render(); if (duel.winner !== null) run(); });
   duel.start();
   run();
 }

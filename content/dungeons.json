@@ -1,0 +1,29 @@
+{
+  "_comment": "Dungeons are hidden until a clue reveals them. Rooms are fought back to back with life carried over. Treasure is one card from the dungeon's list, a chance at an artifact, and gold. All names are card names fetched at runtime.",
+  "rules": {
+    "attrition": { "label": "Attrition", "text": "Your life carries from room to room. Theirs does not." },
+    "gloom": { "label": "Gloom", "text": "Torches gutter here. Your opening hands are six cards.", "handSize": 6 },
+    "warded": { "label": "Warded", "text": "Every room is sealed. Each guardian begins with a Wall in play.", "wall": true },
+    "miasma": { "label": "Miasma", "text": "The air is poison. You lose 1 life at the start of each of your turns.", "upkeepDamage": 1 },
+    "hoard": { "label": "Hoard", "text": "The guardians feed on what they guard. Each has 4 extra life.", "oppLife": 4 }
+  },
+  "walls": { "W": "Wall of Swords", "U": "Wall of Air", "B": "Wall of Bone", "R": "Wall of Stone", "G": "Wall of Wood" },
+  "artifacts": ["Black Lotus", "Sol Ring", "Mox Pearl", "Mox Sapphire", "Mox Jet", "Mox Ruby", "Mox Emerald", "Icy Manipulator", "Nevinyrral's Disk", "Howling Mine", "Jayemdae Tome", "Disrupting Scepter"],
+  "dungeons": [
+    { "id": "sunken-chapel", "name": "Sunken Chapel", "color": "W", "rooms": 3, "rule": "hoard",
+      "intro": "A chapel of the old Court, half swallowed by the plain. Its bells still ring at dusk.",
+      "treasure": ["Serra Angel", "Wrath of God", "Armageddon", "Swords to Plowshares", "White Knight", "Savannah Lions"] },
+    { "id": "drowned-archive", "name": "Drowned Archive", "color": "U", "rooms": 4, "rule": "gloom",
+      "intro": "The Tidewatch flooded its own library to keep its secrets. The secrets learned to swim.",
+      "treasure": ["Ancestral Recall", "Time Walk", "Mahamoti Djinn", "Control Magic", "Counterspell", "Air Elemental"] },
+    { "id": "barrow-of-the-keepers", "name": "Barrow of the Keepers", "color": "B", "rooms": 4, "rule": "miasma",
+      "intro": "Where the Keepers bury what they cannot use yet. Nothing here is finished dying.",
+      "treasure": ["Sengir Vampire", "Royal Assassin", "Hypnotic Specter", "Demonic Tutor", "Mind Twist", "Dark Ritual"] },
+    { "id": "ashfall-foundry", "name": "Ashfall Foundry", "color": "R", "rooms": 3, "rule": "warded",
+      "intro": "A Forge Company furnace abandoned mid-pour. The slag remembers how to burn.",
+      "treasure": ["Shivan Dragon", "Lightning Bolt", "Wheel of Fortune", "Earthquake", "Fireball", "Hurloon Minotaur"] },
+    { "id": "rootbound-hollow", "name": "Rootbound Hollow", "color": "G", "rooms": 3, "rule": "attrition",
+      "intro": "The Circle sealed this hollow before the war. The roots have had thirty years to think about it.",
+      "treasure": ["Force of Nature", "Craw Wurm", "Regrowth", "Giant Growth", "Llanowar Elves", "Ironroot Treefolk"] }
+  ]
+}
