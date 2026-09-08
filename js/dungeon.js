@@ -146,27 +146,27 @@ export function drawDungeon(canvas, layout, tpl, opts = {}) {
     if (!ready) { px(ctx, x, y, T, T, k === 'floor' ? '#4a443e' : k === 'wall' ? '#6b6258' : r < 0.1 ? '#b3401a' : '#1c1816'); continue; }
     if (k === 'floor') blit(ctx, pick(DUNGEON_TILES.floor, r), x, y, T, T);
     else if (k === 'wall') blit(ctx, at(tx, ty + 1) === 'floor' ? pick(DUNGEON_TILES.wallFace, r) : pick(DUNGEON_TILES.wallTop, r), x, y, T, T);
-    else blit(ctx, r < 0.06 ? pick(DUNGEON_TILES.lava, r2) : r < 0.22 ? pick(DUNGEON_TILES.rockCrack, r2) : pick(DUNGEON_TILES.rock, r2), x, y, T, T);
-    if (k === 'wall' && at(tx, ty + 1) === 'floor' && r2 < 0.22) blitAt(ctx, SPRITES.torch, x + T / 2, y + T - 4, 0.7);
+    else blit(ctx, r < 0.035 ? pick(DUNGEON_TILES.lava, r2) : r < 0.18 ? pick(DUNGEON_TILES.rockCrack, r2) : pick(DUNGEON_TILES.rock, r2), x, y, T, T);
+    if (k === 'wall' && at(tx, ty + 1) === 'floor' && r2 < 0.22) blitAt(ctx, SPRITES.torch, x + T / 2, y + T - 4, Math.min(0.7, 26 / SPRITES.torch[3]));
   }
   // reachable cells
   const reach = neighbours(layout.cells, links, playerCell(layout));
   if (opts.showReach !== false) for (const c of reach) { const [cx, cy] = isoPos(c.x, c.y); ctx.strokeStyle = 'rgba(255,255,255,.45)'; ctx.setLineDash([3, 3]); ctx.strokeRect(cx - T / 2 + 2.5, cy - T / 2 + 2.5, T - 5, T - 5); ctx.setLineDash([]); }
   // objects
   const monster = MONSTERS[DUNGEON_MONSTER[tpl?.color] || 'skeleton'];
-  const drawObj = (rect, cx, cy, s) => { if (ready) blitAt(ctx, rect, cx, cy + T / 2 - 3, s); };
+  const drawObj = (rect, cx, cy, s) => { if (ready && rect) blitAt(ctx, rect, cx, cy + T / 2 - 3, Math.min(s, 30 / rect[3])); };
   for (const c of cells) {
     const [cx, cy] = isoPos(c.x, c.y);
     if (c.type === 'monster' && !c.done) {
       const g = c.payload.guardian;
-      if (ready) blitAt(ctx, monster.idle[0], cx, cy + T / 2 - 2, g ? 0.85 : 0.7); else px(ctx, cx - 8, cy - 10, 16, 20, '#c04040');
+      if (ready) { const m = monster.idle[0]; const k = Math.min(g ? 0.85 : 0.7, (g ? 44 : 36) / m[3]); blitAt(ctx, m, cx, cy + T / 2 - 2, k); } else px(ctx, cx - 8, cy - 10, 16, 20, '#c04040');
       px(ctx, cx + 9, cy + 7, 10, 10, '#15120f'); labels.push({ x: cx + 14, y: cy + 12, text: g ? 'G' : String(c.payload.tier), size: 6.5, box: false, color: g ? '#ffd27a' : '#fff' });
     }
     else if (c.type === 'treasure') drawObj(c.done ? SPRITES.chestOpen : SPRITES[TREASURE_SPRITE[c.payload.kind] || 'chest'], cx, cy, 0.8);
     else if (c.type === 'riddle') { if (!c.done) drawObj(SPRITES.scroll, cx, cy, 0.8); }
     else if (c.type === 'exit') { if (ready) blit(ctx, SPRITES.door, cx - T / 2, cy - T / 2, T, T); label(cx, cy + T / 2 + 6, 'Exit'); }
     else if (c.type === 'entrance') { if (ready) blit(ctx, SPRITES.portal, cx - T / 2, cy - T / 2, T, T); label(cx, cy + T / 2 + 6, 'Entrance'); }
-    if (c.x === layout.px && c.y === layout.py) { if (ready) blitAt(ctx, SPRITES.hero, cx, cy + T / 2 - 1, 0.8); else px(ctx, cx - 6, cy - 12, 12, 22, '#e0604a'); }
+    if (c.x === layout.px && c.y === layout.py) { if (ready) blitAt(ctx, SPRITES.hero, cx, cy + T / 2 - 1, Math.min(0.8, 40 / SPRITES.hero[3])); else px(ctx, cx - 6, cy - 12, 12, 22, '#e0604a'); }
   }
   // banner
   const title = tpl?.name || 'Dungeon'; const sub = layout.status || '';

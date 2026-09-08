@@ -1,0 +1,17 @@
+city-W @290,260
+city-U @830,260
+city-B @1420,260
+city-R @1980,280
+city-G @2530,260
+fortress @290,800
+town @840,820
+pit @1410,830
+pit-cleared @1970,830
+crystal @2400,800
+crystal-taken @2670,800
+compass @280,1320
+banner-W @756,1320
+banner-U @1170,1320
+banner-B @1590,1320
+banner-R @2020,1320
+banner-G @2600,1320

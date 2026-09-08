@@ -171,10 +171,12 @@ function paintTiles(world) {
     return best;
   };
   const rectCache = new Map();
-  const tileFor = (b, tx, ty) => {
+  // Ground per cell; accent cells (lava pools, volcano tiles) get an organic noise mask so they do not read as squares.
+  const tileFor = (b, tx, ty, x, y) => {
     const k = b + tx + ',' + ty; let r = rectCache.get(k);
-    if (!r) { const t = TERRAIN[b] || TERRAIN.G; const a = h(tx, ty, 5), pk = h(tx, ty, 6); r = a < (ACCENT_RATE[b] ?? 0.15) && t.accent.length ? pick(t.accent, pk) : pick(t.base, pk); rectCache.set(k, r); }
-    return r;
+    if (!r) { const t = TERRAIN[b] || TERRAIN.G; const a = h(tx, ty, 5), pk = h(tx, ty, 6); r = { base: pick(t.base, pk), accent: a < (ACCENT_RATE[b] ?? 0.15) && t.accent.length ? pick(t.accent, pk) : null }; rectCache.set(k, r); }
+    if (r.accent && x !== undefined && vnoise(x / 9, y / 9, seed + 21) > 0.42) return r.accent;
+    return r.base;
   };
   const image = ctx.createImageData(Wp, Hp); const img = image.data;
   for (let y = 0; y < Hp; y++) for (let x = 0; x < Wp; x++) {
@@ -185,10 +187,10 @@ function paintTiles(world) {
       let dl = 99;
       for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const t = at(tx + dx, ty + dy); if (t && t !== 'U') dl = Math.min(dl, Math.hypot(x - ((tx + dx) * PX + PX / 2), y - ((ty + dy) * PX + PX / 2))); }
       const sandy = dl < PX * 0.9 + (vnoise(x / 7, y / 7, seed + 77) - 0.5) * 16;
-      rect = sandy ? pick(TERRAIN.sand, h(tx, ty, 7)) : tileFor(b, tx, ty);
-    } else rect = tileFor(b, tx, ty);
+      rect = sandy ? pick(TERRAIN.sand, h(tx, ty, 7)) : tileFor(b, tx, ty, x, y);
+    } else rect = tileFor(b, tx, ty, x, y);
     // mirror tiles per cell so repeats are less obvious
-    const fx = h(tx, ty, 8) < 0.5, fy = h(tx, ty, 9) < 0.5;
+    const fx = (tx & 1) === 1, fy = (ty & 1) === 1;
     const u = Math.floor((x % PX) * rect[2] / PX), v = Math.floor((y % PX) * rect[3] / PX);
     const sx = rect[0] + (fx ? rect[2] - 1 - u : u), sy = rect[1] + (fy ? rect[3] - 1 - v : v);
     const sheet = sheetOf(rect); if (!sheet) continue;
@@ -206,24 +208,38 @@ function paintTiles(world) {
     if (reserved.has(`${x},${y}`)) continue;
     const spot = (i) => [X + 6 + Math.floor(h(x, y, 400 + i) * (PX - 12)), Y + 14 + Math.floor(h(x, y, 420 + i) * (PX - 12))];
     const add = (rect, fx, fy, sc) => feats.push({ y: fy, draw: () => blitAt(ctx, rect, fx, fy, sc) });
-    if ((b === 'G' || b === 'W') && nearCity(x, y) && h(x, y, 390) < 0.16) { const [fx, fy] = spot(9); add(SPRITES.city.town, fx, fy + 4, 0.5); continue; }
+    const S = SPRITES, sc = 0.7;
+    const any = (...names) => names.map(n => S[n]).filter(Boolean);
+    const from = (list, t) => list.length ? pick(list, t) : null;
+    if ((b === 'G' || b === 'W') && nearCity(x, y) && h(x, y, 390) < 0.16) { const [fx, fy] = spot(9); const r = h(x, y, 391); const hamlet = from(any('hut', 'huts', 'watchtower', 'well', 'signpost'), r) || S.city.town; add(hamlet, fx, fy + 4, hamlet === S.city.town ? 0.5 : 0.8); continue; }
     if (b === 'G') {
       const n = 1 + Math.floor(h(x, y, 440) * 2.4);
-      for (let i = 0; i < n; i++) { const [fx, fy] = spot(i); const r = h(x, y, 460 + i); add(r < 0.3 ? SPRITES.pines : r < 0.45 ? SPRITES.oak : r < 0.6 ? SPRITES.pine : r < 0.75 ? SPRITES.roundTree : r < 0.88 ? SPRITES.sapling : SPRITES.shrub, fx, fy, r < 0.3 ? 0.65 : 0.7); }
-      if (h(x, y, 470) < 0.035) { const [fx, fy] = spot(3); add(SPRITES.pond, fx, fy, 0.8); }
+      const trees = any('pines', 'pines-2', 'oak', 'pine', 'roundTree', 'sapling', 'bush', 'bush-2', 'shrub', 'bushSmall');
+      for (let i = 0; i < n; i++) { const [fx, fy] = spot(i); const r = h(x, y, 460 + i); const t = from(trees, r * 0.999); if (t) add(t, fx, fy, t === S.pines || t === S['pines-2'] ? 0.8 : sc); }
+      if (h(x, y, 470) < 0.03 && S.pond) { const [fx, fy] = spot(3); add(S.pond, fx, fy, 0.9); }
+      if (h(x, y, 471) < 0.02 && S.tower) { const [fx, fy] = spot(4); add(S.tower, fx, fy, 0.9); }
     } else if (b === 'W') {
       const r = h(x, y, 500);
-      if (r < 0.2) { const [fx, fy] = spot(0); add(pick(SCENERY.dunes, h(x, y, 502)), fx, fy + 6, 0.9); }
-      else if (r < 0.3) { const [fx, fy] = spot(1); add(h(x, y, 501) < 0.5 ? SPRITES.bush : SPRITES.tuft, fx, fy, 0.7); }
+      if (r < 0.2 && SCENERY.dunes.length) { const [fx, fy] = spot(0); add(pick(SCENERY.dunes, h(x, y, 502)), fx, fy + 6, 0.9); }
+      else if (r < 0.28) { const [fx, fy] = spot(1); const t = from(any('cactus', 'palm', 'bush', 'tuft'), h(x, y, 501)); if (t) add(t, fx, fy, sc); }
+      else if (r < 0.31 && S.pond) { const [fx, fy] = spot(2); add(S.pond, fx, fy, 0.9); }
     } else if (b === 'R') {
       const n = 1 + (h(x, y, 540) < 0.55 ? 1 : 0);
-      for (let i = 0; i < n; i++) { const [fx, fy] = spot(i); add(pick(SCENERY.peaks, h(x, y, 550 + i)), fx, fy + 4, 1 + h(x, y, 560 + i) * 0.3); }
+      for (let i = 0; i < n; i++) { const [fx, fy] = spot(i); add(pick(SCENERY.peaks, h(x, y, 550 + i)), fx, fy + 4, 0.9 + h(x, y, 560 + i) * 0.4); }
+      const r = h(x, y, 570);
+      if (r < 0.06 && S.volcano) { const [fx, fy] = spot(2); add(S.volcano, fx, fy + 6, 1.1); }
+      else if (r < 0.14 && S.volcanoSmall) { const [fx, fy] = spot(2); add(S.volcanoSmall, fx, fy + 4, 0.9); }
+      else if (r < 0.2 && S.lavaVent) { const [fx, fy] = spot(3); add(S.lavaVent, fx, fy, 0.8); }
     } else if (b === 'B') {
       const r = h(x, y, 600);
-      if (r < 0.3) { const [fx, fy] = spot(0); add(pick(SCENERY.rocks, r), fx, fy, 0.8 + h(x, y, 601) * 0.3); }
-      else if (r < 0.36) { const [fx, fy] = spot(1); add(SPRITES.skull, fx, fy, 0.5); }
+      if (r < 0.3 && SCENERY.rocks.length) { const [fx, fy] = spot(0); add(pick(SCENERY.rocks, r * 3), fx, fy, 0.7 + h(x, y, 601) * 0.3); }
+      else if (r < 0.42) { const [fx, fy] = spot(1); const t = from(any('deadtree', 'deadtree-2', 'skull', 'bones', 'standingStone'), h(x, y, 602)); if (t) add(t, fx, fy, t === S.skull ? 0.5 : sc); }
+      else if (r < 0.45 && S.cave) { const [fx, fy] = spot(2); add(S.cave, fx, fy + 2, 0.8); }
     } else if (b === 'U') {
-      if (h(x, y, 590) < 0.08 && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => at(x + dx, y + dy) && at(x + dx, y + dy) !== 'U')) { const [fx, fy] = spot(0); add(SPRITES.tuft, fx, fy, 0.8); }
+      const coast = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => at(x + dx, y + dy) && at(x + dx, y + dy) !== 'U');
+      const r = h(x, y, 590);
+      if (coast && r < 0.1) { const [fx, fy] = spot(0); const t = from(any('reeds', 'reeds-2', 'lilypads', 'tuft'), h(x, y, 591)); if (t) add(t, fx, fy, sc); }
+      else if (!coast && r < 0.03) { const [fx, fy] = spot(1); const t = from(any('seaRock', 'wreck', 'serpentCoil'), h(x, y, 592)); if (t) add(t, fx, fy, sc); }
     }
   }
   feats.sort((a, b) => a.y - b.y);
@@ -490,7 +506,7 @@ function drawFortress(ctx, cx, cy) {
   const glow = ctx.createRadialGradient(cx, cy, 3, cx, cy, 30);
   glow.addColorStop(0, 'rgba(160,30,50,.45)'); glow.addColorStop(1, 'rgba(160,30,50,0)');
   ctx.fillStyle = glow; ctx.fillRect(cx - 30, cy - 30, 60, 60);
-  if (atlasReady()) { blitAt(ctx, SPRITES.city.fortress, cx, cy + PX / 2 + 2); blitAt(ctx, MONSTERS.dragon.idle[0], cx + 30, cy + PX / 2 + 6, 0.9); labels.push({ x: cx, y: cy + PX / 2 + 8, text: 'The Usurper' }); return; }
+  if (atlasReady()) { blitAt(ctx, SPRITES.city.fortress, cx, cy + PX / 2 + 2); const dr = MONSTERS.dragon.idle[0]; blitAt(ctx, dr, cx + 34, cy + PX / 2 + 6, Math.min(0.9, 50 / dr[3])); labels.push({ x: cx, y: cy + PX / 2 + 8, text: 'The Usurper' }); return; }
   shade(ctx, cx, cy + 10, 30);
   const s = '#26222c', sl = '#3d3846', sd = '#15121a';
   px(ctx, cx - 15, cy - 4, 30, 14, s); px(ctx, cx - 15, cy + 8, 30, 2, sd); px(ctx, cx - 15, cy - 4, 30, 1, sl);
@@ -503,7 +519,7 @@ function drawFortress(ctx, cx, cy) {
   px(ctx, cx - 2, cy + 4, 4, 6, sd);
 }
 function drawDungeon(ctx, cx, cy, cleared) {
-  if (atlasReady()) { if (cleared && SPRITES.pitCleared) { blitAt(ctx, SPRITES.pitCleared, cx, cy + PX / 2, 0.62); return; } if (cleared) ctx.globalAlpha = 0.55; blitAt(ctx, SPRITES.pit, cx, cy + PX / 2, 0.62); ctx.globalAlpha = 1; if (!cleared) blitAt(ctx, SPRITES.torch, cx + 14, cy + 6, 0.6); return; }
+  if (atlasReady()) { const k = 42 / SPRITES.pit[3]; if (cleared && SPRITES.pitCleared) { blitAt(ctx, SPRITES.pitCleared, cx, cy + PX / 2 + 2, k); return; } if (cleared) ctx.globalAlpha = 0.55; blitAt(ctx, SPRITES.pit, cx, cy + PX / 2 + 2, k); ctx.globalAlpha = 1; if (!cleared && SPRITES.pit[3] < 60) blitAt(ctx, SPRITES.torch, cx + 14, cy + 6, 0.6); return; }
   shade(ctx, cx, cy + 9, 26);
   const rock = '#6f6558', rockL = '#8c8172', rockD = '#4b433a';
   ctx.fillStyle = rock; ctx.beginPath(); ctx.moveTo(cx - 14, cy + 8); ctx.lineTo(cx - 10, cy - 6); ctx.lineTo(cx - 3, cy - 12); ctx.lineTo(cx + 5, cy - 11); ctx.lineTo(cx + 12, cy - 4); ctx.lineTo(cx + 14, cy + 8); ctx.closePath(); ctx.fill();
@@ -514,8 +530,9 @@ function drawDungeon(ctx, cx, cy, cleared) {
   else { px(ctx, cx + 8, cy - 14, 1, 12, '#5a4025'); px(ctx, cx + 9, cy - 14, 5, 3, '#e8dcc2'); }
 }
 function drawCrystal(ctx, cx, cy, taken) {
-  if (atlasReady() && taken && SPRITES.crystalTaken) { blitAt(ctx, SPRITES.crystalTaken, cx, cy + 14, 0.85); return; }
-  if (atlasReady()) { if (!taken) { const g = ctx.createRadialGradient(cx, cy, 2, cx, cy, 16); g.addColorStop(0, 'rgba(160,220,255,.6)'); g.addColorStop(1, 'rgba(160,220,255,0)'); ctx.fillStyle = g; ctx.fillRect(cx - 16, cy - 16, 32, 32); } else ctx.globalAlpha = 0.4; blitAt(ctx, SPRITES.crystal, cx, cy + 14, 0.85); ctx.globalAlpha = 1; return; }
+  const ck = 30 / SPRITES.crystal[3];
+  if (atlasReady() && taken && SPRITES.crystalTaken) { blitAt(ctx, SPRITES.crystalTaken, cx, cy + 15, ck); return; }
+  if (atlasReady()) { if (!taken) { const g = ctx.createRadialGradient(cx, cy, 2, cx, cy, 16); g.addColorStop(0, 'rgba(160,220,255,.6)'); g.addColorStop(1, 'rgba(160,220,255,0)'); ctx.fillStyle = g; ctx.fillRect(cx - 16, cy - 16, 32, 32); } else ctx.globalAlpha = 0.4; blitAt(ctx, SPRITES.crystal, cx, cy + 15, ck); ctx.globalAlpha = 1; return; }
   if (!taken) { const g = ctx.createRadialGradient(cx, cy - 2, 1, cx, cy - 2, 14); g.addColorStop(0, 'rgba(255,245,180,.7)'); g.addColorStop(1, 'rgba(255,245,180,0)'); ctx.fillStyle = g; ctx.fillRect(cx - 14, cy - 16, 28, 28); }
   shade(ctx, cx, cy + 4, 12);
   const a = taken ? '#8d8a80' : '#f6efc2', b = taken ? '#6b6860' : '#d4bd5c', c = taken ? '#55524a' : '#a88c3a';
@@ -528,7 +545,7 @@ function drawCrystal(ctx, cx, cy, taken) {
 function drawFigure(ctx, cx, cy, robe, robeL, hat, opts = {}) {
   if (atlasReady() && opts.sprite) {
     if (opts.ring) { ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(cx, cy + PX / 2 - 3, 12, 4, 0, 0, Math.PI * 2); ctx.stroke(); }
-    blitAt(ctx, opts.sprite, cx, cy + PX / 2 - 1, 0.8);
+    blitAt(ctx, opts.sprite, cx, cy + PX / 2 - 1, Math.min(0.8, 44 / opts.sprite[3]));
     if (opts.tier) labels.push({ x: cx + 13, y: cy + 12, text: String(opts.tier), size: 6, color: '#fff', bg: 'rgba(20,18,16,.85)' });
     return;
   }

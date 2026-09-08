@@ -47,7 +47,7 @@ onAtlas(() => {
   const pb = document.getElementById('portraits');
   const add = (rect, s = 2) => { const d = document.createElement('div'); d.style.cssText = spriteStyle(rect, s); pb.appendChild(d); };
   add(SPRITES.hero, 2.6); for (const col of ['W', 'U', 'B', 'R', 'G']) for (const r of SPRITES.mage[col]) add(r, 2);
-  for (const m of Object.values(MONSTERS)) add(m.idle[0], 2);
+  for (const m of Object.values(MONSTERS)) add(m.idle[0], 1.6);
   for (const n of ['chest', 'chestOpen', 'chestSmall', 'crystal', 'scroll', 'potion', 'amulet', 'torch', 'pit', 'door', 'portal']) add(SPRITES[n], 2);
   document.body.dataset.ready = '1';
 });

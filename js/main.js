@@ -538,8 +538,10 @@ function duel() {
   // Mount once per duel; a re-render (toast, stats) must not restart the game.
   if (!d.root) {
     d.root = document.createElement('div'); d.root.id = 'duelroot';
-    const foe = d.tpl.boss ? { frames: MONSTERS.dragon.idle, scale: 2.6 } : d.dungeon ? { frames: MONSTERS[DUNGEON_MONSTER[d.tpl.color] || 'skeleton'].idle, scale: 2.6 } : { frames: [(SPRITES.mage[d.tpl.color] || SPRITES.mage.M)[d.tpl.tier >= 2 ? 1 : 0]], scale: 2.6 };
-    mountDuel(d.root, d.duel, { ante: d.ante ? { mine: d.ante.mine || '—', theirs: d.ante.theirs || '—' } : null, onEnd: finishDuel, portraits: { me: { frames: [SPRITES.hero], scale: 2.6 }, foe } });
+    const portrait = frames => { frames = frames.filter(Boolean); return { frames, scale: Math.min(2.6, 170 / Math.max(...frames.map(f => f[3]))) }; };
+    const mageFrames = (color, tier) => { const c = SPRITES.mage[color] ? color : 'M'; return [SPRITES.mage[c][tier >= 2 ? 1 : 0], SPRITES[`mage-${c}-${tier >= 2 ? 2 : 1}-alt`]]; };
+    const foe = d.tpl.boss ? portrait(MONSTERS.dragon.idle) : d.dungeon ? portrait(MONSTERS[DUNGEON_MONSTER[d.tpl.color] || 'skeleton'].idle) : portrait(mageFrames(d.tpl.color, d.tpl.tier));
+    mountDuel(d.root, d.duel, { ante: d.ante ? { mine: d.ante.mine || '—', theirs: d.ante.theirs || '—' } : null, onEnd: finishDuel, portraits: { me: portrait([SPRITES.hero, SPRITES['hero-alt']]), foe } });
   }
   app.innerHTML = '';
   const sec = document.createElement('section'); sec.className = 'screen duelscreen';

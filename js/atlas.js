@@ -15,7 +15,7 @@ const CA = (c, r) => [[398, 465, 532][c], [113, 182, 250][r], 60, r === 2 ? 56 :
 
 // Overworld ground by biome colour: common tiles and rarer accents.
 // Share of cells that take an accent tile, per biome.
-export const ACCENT_RATE = { G: 0.18, W: 0.07, U: 0, R: 0.16, B: 0.2 };
+export const ACCENT_RATE = { G: 0.18, W: 0.07, U: 0, R: 0.1, B: 0.11 };
 export const TERRAIN = {
   G: { base: [OW(0, 0), OW(1, 0), OW(2, 0), OW(5, 0), OW(0, 1), OW(4, 1), OW(1, 2), OW(2, 2)], accent: [OW(3, 0), OW(4, 0), OW(1, 1), OW(2, 1), OW(3, 1), OW(0, 2)] },
   W: { base: [OW(5, 1), OW(6, 1), OW(3, 2), OW(7, 0)], accent: [] },
@@ -141,7 +141,10 @@ export function loadAtlas() {
     await Promise.all([...files.values()].map(f => loadImage(f.url).then(im => { images[f.idx].img = im; }).catch(() => {})));
     const lists = new Map();
     for (const [key, e] of Object.entries(index)) { const f = files.get(e.file); if (images[f.idx].img) applyEntry(key, [...e.rect, f.idx], lists); }
-    for (const [target, list] of lists) { const [obj, prop] = target; obj[prop] = list.sort((a, b) => a.n - b.n).map(x => x.rect); }
+    const replaced = new Set();
+    for (const [target, list] of lists) { const [obj, prop] = target; obj[prop] = list.sort((a, b) => a.n - b.n).map(x => x.rect); replaced.add(obj); }
+    // a biome whose ground was replaced drops its old accents unless new ones came with it
+    for (const b of Object.keys(TERRAIN)) if (TERRAIN[b].base && replaced.has(TERRAIN[b]) && !lists.has([TERRAIN[b], 'accent']) && ![...lists.keys()].some(k => k[0] === TERRAIN[b] && k[1] === 'accent')) TERRAIN[b].accent = [];
   });
   Promise.all([main, extra]).then(() => { ready = !failed || images.length > 1; for (const l of listeners) l(); });
 }
@@ -153,12 +156,12 @@ function applyEntry(key, rect, lists) {
   const push = (obj, prop) => { const k = [obj, prop]; let found = null; for (const kk of lists.keys()) if (kk[0] === obj && kk[1] === prop) found = kk; if (!found) lists.set(k, []); (lists.get(found || k)).push({ n, rect }); };
   switch (cat) {
     case 'terrain': { const slot = TERRAIN_SLOT[name]; if (!slot) return; if (slot[0]) push(TERRAIN[slot[0]], slot[1]); else push(TERRAIN, slot[1]); if (name === 'lava') push(TERRAIN.R, 'accent'); return; }
-    case 'scenery': { if (/^peak/.test(name)) push(SCENERY, 'peaks'); else if (/^(rock|boulder)/.test(name)) push(SCENERY, 'rocks'); else if (/^dune/.test(name)) push(SCENERY, 'dunes'); else SPRITES[name] = rect; return; }
+    case 'scenery': { if (/^peak/.test(name)) push(SCENERY, 'peaks'); else if (/^(rock|boulder)/.test(name)) push(SCENERY, 'rocks'); else if (/^dune/.test(name)) push(SCENERY, 'dunes'); else SPRITES[rest] = rect; return; }
     case 'locations': { const m = name.match(/^city-([WUBRG])$/); if (m) SPRITES.city[m[1]] = rect; else if (['fortress', 'town', 'compass', 'grand'].includes(name)) SPRITES.city[name] = rect; else if (name === 'pit-cleared') SPRITES.pitCleared = rect; else if (name === 'crystal-taken') SPRITES.crystalTaken = rect; else SPRITES[name] = rect; return; }
     case 'figures': { const m = rest.match(/^mage-([WUBRG])-(\d)$/); if (m) SPRITES.mage[m[1]][Number(m[2]) - 1] = rect; else if (rest === 'usurper') SPRITES.mage.M = [rect, rect]; else SPRITES[name] = rect; return; }
     case 'townsfolk': push(SPRITES, 'folk'); return;
     case 'monsters': { const m = rest.match(/^([a-z]+)-(idle|attack|hurt|dead|effect)(?:-(\d+))?$/); if (!m) return; const mo = (MONSTERS[m[1]] ||= { idle: [], attack: [] }); if (m[2] === 'effect') mo.breath = rect; else if (m[2] === 'hurt' || m[2] === 'dead') mo[m[2]] = rect; else push(mo, m[2]); return; }
-    case 'dungeon': { const lname = name.toLowerCase(); const slot = { floor: 'floor', rock: 'rock', rockcrack: 'rockCrack', lava: 'lava', walltop: 'wallTop', wallface: 'wallFace' }[lname]; if (slot) push(DUNGEON_TILES, slot); else if (lname === 'grate') DUNGEON_TILES.grate = rect; else SPRITES[name] = rect; return; }
+    case 'dungeon': { const lname = name.toLowerCase(); const slot = { floor: 'floor', rock: 'rock', rockcrack: 'rockCrack', lava: 'lava', walltop: 'wallTop', wallface: 'wallFace' }[lname]; if (slot) push(DUNGEON_TILES, slot); else if (lname === 'grate') DUNGEON_TILES.grate = rect; else SPRITES[{ crystal: 'crystalSmall', bones: 'bonesSmall', skull: 'skullSmall' }[rest] || rest] = rect; return; }
     case 'ui': (SPRITES.ui ||= {})[name] = rect; return;
   }
 }

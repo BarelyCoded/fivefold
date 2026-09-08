@@ -17,10 +17,10 @@ from PIL import Image
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, 'art-src')
 OUT = os.path.join(ROOT, 'assets')
-CELL = { 'terrain': (32, 32), 'scenery': (48, 48), 'locations': (64, 64), 'figures': (48, 64), 'townsfolk': (48, 64),
+CELL = { 'terrain': (64, 64), 'scenery': (48, 48), 'locations': (64, 64), 'figures': (48, 64), 'townsfolk': (48, 64),
          'monsters': (96, 96), 'dungeon': (32, 32), 'ui': (64, 64) }
 OPAQUE = {'terrain'}            # never keyed, only resized (must tile seamlessly)
-DUNGEON_OPAQUE = ('floor', 'rock', 'lava')  # dungeon floors stay opaque too
+DUNGEON_OPAQUE = ('floor', 'rock', 'rockcrack', 'lava')  # dungeon floors stay opaque too
 COLS = 8
 
 def key_background(im, tol=28):
@@ -56,7 +56,8 @@ def fit(im, cell):
     cw, ch = cell; w, h = im.size
     if w <= cw and h <= ch: return im
     k = min(cw / w, ch / h)
-    return im.resize((max(1, round(w * k)), max(1, round(h * k))), Image.NEAREST)
+    # generated sprites are drawn several times larger than their pixel grid: box-filter big reductions
+    return im.resize((max(1, round(w * k)), max(1, round(h * k))), Image.LANCZOS if k < 0.5 else Image.NEAREST)
 
 def main():
     if not os.path.isdir(SRC): sys.exit(f'No {SRC}: put <category>-<name>.png files there first.')
@@ -77,6 +78,7 @@ def main():
             opaque = cat in OPAQUE or (cat == 'dungeon' and name.split('-')[0] in DUNGEON_OPAQUE)
             if opaque:
                 im = im.convert('RGBA').resize((cw, ch), Image.LANCZOS if im.size[0] > cw * 2 else Image.NEAREST)
+                im.putalpha(255)
                 x, y = (i % COLS) * cw, (i // COLS) * ch
             else:
                 im = fit(trim(key_background(im)), (cw, ch))

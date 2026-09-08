@@ -138,3 +138,25 @@ A prompt that has worked for figures and scenery:
 | ui | any name; stored for the frame work to come |
 
 Anything not delivered keeps its current sprite from the Bibliotheca sheet.
+
+## What was actually delivered, and how it was cut
+
+The nine files arrived as opaque 2816×1536 showcase images (grey or fake-checkerboard backgrounds, grid lines,
+one theme per file). They live untouched in `assets/source/`. `tools/slice.py` turns each into per-sprite PNGs:
+
+    python3 tools/slice.py assets/source/scenary.png scenery                      # labelled preview in art-src/
+    python3 tools/slice.py assets/source/scenary.png scenery tools/names/scenery.names --gap 6
+    python3 tools/slice.py assets/source/monsters.png monsters tools/names/monsters.names --tol 20
+    python3 tools/slice.py assets/source/dungeon.png dungeon tools/names/dungeon.names --tol 14 --blank 0,0,1130,512
+    python3 tools/slice.py assets/source/terrain.png terrain tools/names/terrain.names --cells 704x153+140
+    python3 tools/slice.py assets/source/dungeon.png dungeon tools/names/dfloor.names --cells 281x256+200
+    python3 tools/slice.py assets/source/figures.png figures tools/names/figures.names
+    python3 tools/slice.py assets/source/townsfolk.png townsfolk tools/names/townsfolk.names
+    python3 tools/slice.py assets/source/locations.png locations tools/names/locations.names
+    python3 tools/pack.py
+
+It floods the background away from the image border (both checkerboard colours and everything between them),
+treats dark neutral pixels near detected grid lines as background, cuts along the lines so neighbouring cells never
+merge, fills small holes, and names each blob from a `name @x,y` list in `tools/names/`. `--cells` crops fixed
+squares without keying, for textures. The packed results in `assets/*.png` plus `assets/atlas.json` are what the
+game loads. `ui.png` and `card.png` are not used yet.

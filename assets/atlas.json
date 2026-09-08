@@ -1,0 +1,1973 @@
+{
+ "dungeon.amulet": {
+  "file": "dungeon.png",
+  "rect": [
+   3,
+   0,
+   26,
+   32
+  ]
+ },
+ "dungeon.banner-2": {
+  "file": "dungeon.png",
+  "rect": [
+   36,
+   0,
+   23,
+   32
+  ]
+ },
+ "dungeon.banner": {
+  "file": "dungeon.png",
+  "rect": [
+   70,
+   0,
+   20,
+   32
+  ]
+ },
+ "dungeon.bones": {
+  "file": "dungeon.png",
+  "rect": [
+   96,
+   3,
+   32,
+   29
+  ]
+ },
+ "dungeon.chains": {
+  "file": "dungeon.png",
+  "rect": [
+   141,
+   0,
+   5,
+   32
+  ]
+ },
+ "dungeon.chest": {
+  "file": "dungeon.png",
+  "rect": [
+   160,
+   3,
+   32,
+   29
+  ]
+ },
+ "dungeon.chestOpen": {
+  "file": "dungeon.png",
+  "rect": [
+   193,
+   0,
+   29,
+   32
+  ]
+ },
+ "dungeon.chestSmall": {
+  "file": "dungeon.png",
+  "rect": [
+   224,
+   3,
+   32,
+   29
+  ]
+ },
+ "dungeon.crack": {
+  "file": "dungeon.png",
+  "rect": [
+   0,
+   32,
+   31,
+   32
+  ]
+ },
+ "dungeon.crystal": {
+  "file": "dungeon.png",
+  "rect": [
+   32,
+   32,
+   31,
+   32
+  ]
+ },
+ "dungeon.door": {
+  "file": "dungeon.png",
+  "rect": [
+   66,
+   32,
+   27,
+   32
+  ]
+ },
+ "dungeon.doorOpen": {
+  "file": "dungeon.png",
+  "rect": [
+   100,
+   32,
+   24,
+   32
+  ]
+ },
+ "dungeon.doorway": {
+  "file": "dungeon.png",
+  "rect": [
+   130,
+   32,
+   27,
+   32
+  ]
+ },
+ "dungeon.floor-1": {
+  "file": "dungeon.png",
+  "rect": [
+   160,
+   32,
+   32,
+   32
+  ]
+ },
+ "dungeon.floor-2": {
+  "file": "dungeon.png",
+  "rect": [
+   192,
+   32,
+   32,
+   32
+  ]
+ },
+ "dungeon.floor-3": {
+  "file": "dungeon.png",
+  "rect": [
+   224,
+   32,
+   32,
+   32
+  ]
+ },
+ "dungeon.floor-4": {
+  "file": "dungeon.png",
+  "rect": [
+   0,
+   64,
+   32,
+   32
+  ]
+ },
+ "dungeon.gate": {
+  "file": "dungeon.png",
+  "rect": [
+   32,
+   65,
+   32,
+   31
+  ]
+ },
+ "dungeon.gold": {
+  "file": "dungeon.png",
+  "rect": [
+   64,
+   75,
+   32,
+   21
+  ]
+ },
+ "dungeon.grate": {
+  "file": "dungeon.png",
+  "rect": [
+   96,
+   74,
+   32,
+   22
+  ]
+ },
+ "dungeon.keyGold": {
+  "file": "dungeon.png",
+  "rect": [
+   129,
+   64,
+   29,
+   32
+  ]
+ },
+ "dungeon.keySilver": {
+  "file": "dungeon.png",
+  "rect": [
+   161,
+   64,
+   29,
+   32
+  ]
+ },
+ "dungeon.pillar": {
+  "file": "dungeon.png",
+  "rect": [
+   200,
+   64,
+   16,
+   32
+  ]
+ },
+ "dungeon.pitHole": {
+  "file": "dungeon.png",
+  "rect": [
+   224,
+   74,
+   32,
+   22
+  ]
+ },
+ "dungeon.portal": {
+  "file": "dungeon.png",
+  "rect": [
+   2,
+   96,
+   28,
+   32
+  ]
+ },
+ "dungeon.potion": {
+  "file": "dungeon.png",
+  "rect": [
+   37,
+   96,
+   21,
+   32
+  ]
+ },
+ "dungeon.potionBlue": {
+  "file": "dungeon.png",
+  "rect": [
+   69,
+   96,
+   21,
+   32
+  ]
+ },
+ "dungeon.rack": {
+  "file": "dungeon.png",
+  "rect": [
+   96,
+   100,
+   32,
+   28
+  ]
+ },
+ "dungeon.rock-1": {
+  "file": "dungeon.png",
+  "rect": [
+   128,
+   96,
+   32,
+   32
+  ]
+ },
+ "dungeon.rock-2": {
+  "file": "dungeon.png",
+  "rect": [
+   160,
+   96,
+   32,
+   32
+  ]
+ },
+ "dungeon.rockcrack-1": {
+  "file": "dungeon.png",
+  "rect": [
+   192,
+   96,
+   32,
+   32
+  ]
+ },
+ "dungeon.rubble": {
+  "file": "dungeon.png",
+  "rect": [
+   224,
+   98,
+   32,
+   30
+  ]
+ },
+ "dungeon.scroll": {
+  "file": "dungeon.png",
+  "rect": [
+   0,
+   128,
+   32,
+   32
+  ]
+ },
+ "dungeon.skulls": {
+  "file": "dungeon.png",
+  "rect": [
+   32,
+   142,
+   32,
+   18
+  ]
+ },
+ "dungeon.stairsDown": {
+  "file": "dungeon.png",
+  "rect": [
+   64,
+   131,
+   32,
+   29
+  ]
+ },
+ "dungeon.stairsUp": {
+  "file": "dungeon.png",
+  "rect": [
+   96,
+   131,
+   32,
+   29
+  ]
+ },
+ "dungeon.torch": {
+  "file": "dungeon.png",
+  "rect": [
+   132,
+   128,
+   23,
+   32
+  ]
+ },
+ "dungeon.torchOut": {
+  "file": "dungeon.png",
+  "rect": [
+   171,
+   128,
+   9,
+   32
+  ]
+ },
+ "dungeon.wallface-1": {
+  "file": "dungeon.png",
+  "rect": [
+   194,
+   128,
+   28,
+   32
+  ]
+ },
+ "dungeon.walltop-1": {
+  "file": "dungeon.png",
+  "rect": [
+   225,
+   128,
+   30,
+   32
+  ]
+ },
+ "dungeon.walltop-2": {
+  "file": "dungeon.png",
+  "rect": [
+   0,
+   182,
+   32,
+   10
+  ]
+ },
+ "dungeon.walltop-3": {
+  "file": "dungeon.png",
+  "rect": [
+   32,
+   182,
+   32,
+   10
+  ]
+ },
+ "dungeon.web": {
+  "file": "dungeon.png",
+  "rect": [
+   64,
+   160,
+   32,
+   32
+  ]
+ },
+ "figures.hero-alt": {
+  "file": "figures.png",
+  "rect": [
+   4,
+   0,
+   40,
+   64
+  ]
+ },
+ "figures.hero-cast": {
+  "file": "figures.png",
+  "rect": [
+   48,
+   5,
+   48,
+   59
+  ]
+ },
+ "figures.hero-walk": {
+  "file": "figures.png",
+  "rect": [
+   103,
+   0,
+   34,
+   64
+  ]
+ },
+ "figures.hero": {
+  "file": "figures.png",
+  "rect": [
+   148,
+   0,
+   40,
+   64
+  ]
+ },
+ "figures.mage-B-1-alt": {
+  "file": "figures.png",
+  "rect": [
+   193,
+   0,
+   46,
+   64
+  ]
+ },
+ "figures.mage-B-1": {
+  "file": "figures.png",
+  "rect": [
+   242,
+   0,
+   43,
+   64
+  ]
+ },
+ "figures.mage-B-2-alt": {
+  "file": "figures.png",
+  "rect": [
+   288,
+   29,
+   48,
+   35
+  ]
+ },
+ "figures.mage-B-2": {
+  "file": "figures.png",
+  "rect": [
+   342,
+   0,
+   35,
+   64
+  ]
+ },
+ "figures.mage-G-1-alt": {
+  "file": "figures.png",
+  "rect": [
+   4,
+   64,
+   40,
+   64
+  ]
+ },
+ "figures.mage-G-1": {
+  "file": "figures.png",
+  "rect": [
+   52,
+   64,
+   40,
+   64
+  ]
+ },
+ "figures.mage-G-2-alt": {
+  "file": "figures.png",
+  "rect": [
+   96,
+   71,
+   48,
+   57
+  ]
+ },
+ "figures.mage-G-2": {
+  "file": "figures.png",
+  "rect": [
+   144,
+   69,
+   48,
+   59
+  ]
+ },
+ "figures.mage-R-1": {
+  "file": "figures.png",
+  "rect": [
+   192,
+   72,
+   48,
+   56
+  ]
+ },
+ "figures.mage-R-2-alt": {
+  "file": "figures.png",
+  "rect": [
+   247,
+   64,
+   33,
+   64
+  ]
+ },
+ "figures.mage-R-2": {
+  "file": "figures.png",
+  "rect": [
+   288,
+   69,
+   48,
+   59
+  ]
+ },
+ "figures.mage-U-1-alt": {
+  "file": "figures.png",
+  "rect": [
+   337,
+   64,
+   45,
+   64
+  ]
+ },
+ "figures.mage-U-1": {
+  "file": "figures.png",
+  "rect": [
+   2,
+   128,
+   44,
+   64
+  ]
+ },
+ "figures.mage-U-2-alt": {
+  "file": "figures.png",
+  "rect": [
+   57,
+   128,
+   30,
+   64
+  ]
+ },
+ "figures.mage-U-2": {
+  "file": "figures.png",
+  "rect": [
+   97,
+   128,
+   46,
+   64
+  ]
+ },
+ "figures.mage-W-1-alt": {
+  "file": "figures.png",
+  "rect": [
+   150,
+   128,
+   36,
+   64
+  ]
+ },
+ "figures.mage-W-1": {
+  "file": "figures.png",
+  "rect": [
+   195,
+   128,
+   42,
+   64
+  ]
+ },
+ "figures.mage-W-2-alt": {
+  "file": "figures.png",
+  "rect": [
+   240,
+   135,
+   48,
+   57
+  ]
+ },
+ "figures.mage-W-2": {
+  "file": "figures.png",
+  "rect": [
+   290,
+   128,
+   44,
+   64
+  ]
+ },
+ "figures.usurper-alt": {
+  "file": "figures.png",
+  "rect": [
+   344,
+   128,
+   31,
+   64
+  ]
+ },
+ "figures.usurper": {
+  "file": "figures.png",
+  "rect": [
+   7,
+   192,
+   33,
+   64
+  ]
+ },
+ "locations.banner-B": {
+  "file": "locations.png",
+  "rect": [
+   12,
+   0,
+   39,
+   64
+  ]
+ },
+ "locations.banner-G": {
+  "file": "locations.png",
+  "rect": [
+   76,
+   0,
+   40,
+   64
+  ]
+ },
+ "locations.banner-R": {
+  "file": "locations.png",
+  "rect": [
+   140,
+   0,
+   40,
+   64
+  ]
+ },
+ "locations.banner-U": {
+  "file": "locations.png",
+  "rect": [
+   204,
+   0,
+   40,
+   64
+  ]
+ },
+ "locations.banner-W": {
+  "file": "locations.png",
+  "rect": [
+   268,
+   0,
+   40,
+   64
+  ]
+ },
+ "locations.city-B": {
+  "file": "locations.png",
+  "rect": [
+   320,
+   0,
+   64,
+   64
+  ]
+ },
+ "locations.city-G": {
+  "file": "locations.png",
+  "rect": [
+   384,
+   14,
+   64,
+   50
+  ]
+ },
+ "locations.city-R": {
+  "file": "locations.png",
+  "rect": [
+   448,
+   10,
+   64,
+   54
+  ]
+ },
+ "locations.city-U": {
+  "file": "locations.png",
+  "rect": [
+   0,
+   68,
+   64,
+   60
+  ]
+ },
+ "locations.city-W": {
+  "file": "locations.png",
+  "rect": [
+   66,
+   64,
+   60,
+   64
+  ]
+ },
+ "locations.compass": {
+  "file": "locations.png",
+  "rect": [
+   128,
+   64,
+   63,
+   64
+  ]
+ },
+ "locations.crystal-taken": {
+  "file": "locations.png",
+  "rect": [
+   200,
+   64,
+   48,
+   64
+  ]
+ },
+ "locations.crystal": {
+  "file": "locations.png",
+  "rect": [
+   269,
+   64,
+   37,
+   64
+  ]
+ },
+ "locations.fortress": {
+  "file": "locations.png",
+  "rect": [
+   321,
+   64,
+   61,
+   64
+  ]
+ },
+ "locations.pit-cleared": {
+  "file": "locations.png",
+  "rect": [
+   384,
+   82,
+   64,
+   46
+  ]
+ },
+ "locations.pit": {
+  "file": "locations.png",
+  "rect": [
+   448,
+   82,
+   64,
+   46
+  ]
+ },
+ "locations.town": {
+  "file": "locations.png",
+  "rect": [
+   0,
+   141,
+   64,
+   51
+  ]
+ },
+ "monsters.dragon-attack-1": {
+  "file": "monsters.png",
+  "rect": [
+   5,
+   0,
+   86,
+   96
+  ]
+ },
+ "monsters.dragon-attack-2": {
+  "file": "monsters.png",
+  "rect": [
+   96,
+   16,
+   96,
+   80
+  ]
+ },
+ "monsters.dragon-dead": {
+  "file": "monsters.png",
+  "rect": [
+   192,
+   33,
+   96,
+   63
+  ]
+ },
+ "monsters.dragon-effect": {
+  "file": "monsters.png",
+  "rect": [
+   288,
+   34,
+   96,
+   62
+  ]
+ },
+ "monsters.dragon-hurt": {
+  "file": "monsters.png",
+  "rect": [
+   384,
+   31,
+   96,
+   65
+  ]
+ },
+ "monsters.dragon-idle-1": {
+  "file": "monsters.png",
+  "rect": [
+   488,
+   0,
+   80,
+   96
+  ]
+ },
+ "monsters.dragon-idle-2": {
+  "file": "monsters.png",
+  "rect": [
+   576,
+   0,
+   95,
+   96
+  ]
+ },
+ "monsters.golem-attack-1": {
+  "file": "monsters.png",
+  "rect": [
+   681,
+   0,
+   77,
+   96
+  ]
+ },
+ "monsters.golem-attack-2": {
+  "file": "monsters.png",
+  "rect": [
+   1,
+   96,
+   94,
+   96
+  ]
+ },
+ "monsters.golem-dead": {
+  "file": "monsters.png",
+  "rect": [
+   96,
+   130,
+   96,
+   62
+  ]
+ },
+ "monsters.golem-hurt": {
+  "file": "monsters.png",
+  "rect": [
+   193,
+   96,
+   93,
+   96
+  ]
+ },
+ "monsters.golem-idle-1": {
+  "file": "monsters.png",
+  "rect": [
+   294,
+   96,
+   83,
+   96
+  ]
+ },
+ "monsters.golem-idle-2": {
+  "file": "monsters.png",
+  "rect": [
+   388,
+   96,
+   87,
+   96
+  ]
+ },
+ "monsters.lizard-attack-1": {
+  "file": "monsters.png",
+  "rect": [
+   480,
+   107,
+   96,
+   85
+  ]
+ },
+ "monsters.lizard-attack-2": {
+  "file": "monsters.png",
+  "rect": [
+   576,
+   126,
+   96,
+   66
+  ]
+ },
+ "monsters.lizard-dead": {
+  "file": "monsters.png",
+  "rect": [
+   672,
+   138,
+   96,
+   54
+  ]
+ },
+ "monsters.lizard-hurt": {
+  "file": "monsters.png",
+  "rect": [
+   0,
+   212,
+   96,
+   76
+  ]
+ },
+ "monsters.lizard-idle-1": {
+  "file": "monsters.png",
+  "rect": [
+   96,
+   206,
+   96,
+   82
+  ]
+ },
+ "monsters.lizard-idle-2": {
+  "file": "monsters.png",
+  "rect": [
+   192,
+   204,
+   96,
+   84
+  ]
+ },
+ "monsters.serpent-attack-1": {
+  "file": "monsters.png",
+  "rect": [
+   297,
+   192,
+   77,
+   96
+  ]
+ },
+ "monsters.serpent-attack-2": {
+  "file": "monsters.png",
+  "rect": [
+   384,
+   201,
+   96,
+   87
+  ]
+ },
+ "monsters.serpent-dead": {
+  "file": "monsters.png",
+  "rect": [
+   480,
+   238,
+   96,
+   50
+  ]
+ },
+ "monsters.serpent-effect": {
+  "file": "monsters.png",
+  "rect": [
+   576,
+   220,
+   96,
+   68
+  ]
+ },
+ "monsters.serpent-hurt": {
+  "file": "monsters.png",
+  "rect": [
+   673,
+   192,
+   93,
+   96
+  ]
+ },
+ "monsters.serpent-idle-1": {
+  "file": "monsters.png",
+  "rect": [
+   7,
+   288,
+   81,
+   96
+  ]
+ },
+ "monsters.serpent-idle-2": {
+  "file": "monsters.png",
+  "rect": [
+   101,
+   288,
+   86,
+   96
+  ]
+ },
+ "monsters.skeleton-attack-1": {
+  "file": "monsters.png",
+  "rect": [
+   212,
+   288,
+   55,
+   96
+  ]
+ },
+ "monsters.skeleton-dead": {
+  "file": "monsters.png",
+  "rect": [
+   288,
+   338,
+   96,
+   46
+  ]
+ },
+ "monsters.skeleton-effect": {
+  "file": "monsters.png",
+  "rect": [
+   384,
+   293,
+   96,
+   91
+  ]
+ },
+ "monsters.skeleton-hurt": {
+  "file": "monsters.png",
+  "rect": [
+   496,
+   288,
+   63,
+   96
+  ]
+ },
+ "monsters.skeleton-idle-1": {
+  "file": "monsters.png",
+  "rect": [
+   585,
+   288,
+   77,
+   96
+  ]
+ },
+ "monsters.skeleton-idle-2": {
+  "file": "monsters.png",
+  "rect": [
+   681,
+   288,
+   77,
+   96
+  ]
+ },
+ "monsters.spider-attack-1": {
+  "file": "monsters.png",
+  "rect": [
+   0,
+   393,
+   96,
+   87
+  ]
+ },
+ "monsters.spider-attack-2": {
+  "file": "monsters.png",
+  "rect": [
+   96,
+   418,
+   96,
+   62
+  ]
+ },
+ "monsters.spider-dead": {
+  "file": "monsters.png",
+  "rect": [
+   192,
+   400,
+   96,
+   80
+  ]
+ },
+ "monsters.spider-effect": {
+  "file": "monsters.png",
+  "rect": [
+   288,
+   429,
+   96,
+   51
+  ]
+ },
+ "monsters.spider-hurt": {
+  "file": "monsters.png",
+  "rect": [
+   384,
+   406,
+   96,
+   74
+  ]
+ },
+ "monsters.spider-idle-1": {
+  "file": "monsters.png",
+  "rect": [
+   480,
+   396,
+   96,
+   84
+  ]
+ },
+ "monsters.spider-idle-2": {
+  "file": "monsters.png",
+  "rect": [
+   576,
+   389,
+   96,
+   91
+  ]
+ },
+ "monsters.wraith-attack-1": {
+  "file": "monsters.png",
+  "rect": [
+   680,
+   384,
+   80,
+   96
+  ]
+ },
+ "monsters.wraith-attack-2": {
+  "file": "monsters.png",
+  "rect": [
+   0,
+   506,
+   96,
+   70
+  ]
+ },
+ "monsters.wraith-hurt": {
+  "file": "monsters.png",
+  "rect": [
+   100,
+   480,
+   88,
+   96
+  ]
+ },
+ "monsters.wraith-idle-1": {
+  "file": "monsters.png",
+  "rect": [
+   215,
+   480,
+   49,
+   96
+  ]
+ },
+ "monsters.wraith-idle-2": {
+  "file": "monsters.png",
+  "rect": [
+   301,
+   480,
+   70,
+   96
+  ]
+ },
+ "scenery.bones": {
+  "file": "scenery.png",
+  "rect": [
+   0,
+   18,
+   48,
+   30
+  ]
+ },
+ "scenery.bush-2": {
+  "file": "scenery.png",
+  "rect": [
+   48,
+   10,
+   48,
+   38
+  ]
+ },
+ "scenery.bush": {
+  "file": "scenery.png",
+  "rect": [
+   96,
+   18,
+   48,
+   30
+  ]
+ },
+ "scenery.bushSmall": {
+  "file": "scenery.png",
+  "rect": [
+   144,
+   6,
+   48,
+   42
+  ]
+ },
+ "scenery.cactus": {
+  "file": "scenery.png",
+  "rect": [
+   203,
+   0,
+   26,
+   48
+  ]
+ },
+ "scenery.cave": {
+  "file": "scenery.png",
+  "rect": [
+   240,
+   9,
+   48,
+   39
+  ]
+ },
+ "scenery.caveSmall": {
+  "file": "scenery.png",
+  "rect": [
+   288,
+   15,
+   48,
+   33
+  ]
+ },
+ "scenery.deadtree-2": {
+  "file": "scenery.png",
+  "rect": [
+   336,
+   18,
+   48,
+   30
+  ]
+ },
+ "scenery.deadtree": {
+  "file": "scenery.png",
+  "rect": [
+   7,
+   48,
+   34,
+   48
+  ]
+ },
+ "scenery.dune-1": {
+  "file": "scenery.png",
+  "rect": [
+   48,
+   74,
+   48,
+   22
+  ]
+ },
+ "scenery.dune-2": {
+  "file": "scenery.png",
+  "rect": [
+   96,
+   74,
+   48,
+   22
+  ]
+ },
+ "scenery.hut": {
+  "file": "scenery.png",
+  "rect": [
+   144,
+   48,
+   47,
+   48
+  ]
+ },
+ "scenery.huts": {
+  "file": "scenery.png",
+  "rect": [
+   192,
+   70,
+   48,
+   26
+  ]
+ },
+ "scenery.lavaVent": {
+  "file": "scenery.png",
+  "rect": [
+   240,
+   73,
+   48,
+   23
+  ]
+ },
+ "scenery.lilypads": {
+  "file": "scenery.png",
+  "rect": [
+   288,
+   62,
+   48,
+   34
+  ]
+ },
+ "scenery.oak": {
+  "file": "scenery.png",
+  "rect": [
+   336,
+   49,
+   48,
+   47
+  ]
+ },
+ "scenery.palm": {
+  "file": "scenery.png",
+  "rect": [
+   6,
+   96,
+   36,
+   48
+  ]
+ },
+ "scenery.peak-1": {
+  "file": "scenery.png",
+  "rect": [
+   48,
+   111,
+   48,
+   33
+  ]
+ },
+ "scenery.peak-2": {
+  "file": "scenery.png",
+  "rect": [
+   96,
+   122,
+   48,
+   22
+  ]
+ },
+ "scenery.peak-3": {
+  "file": "scenery.png",
+  "rect": [
+   144,
+   115,
+   48,
+   29
+  ]
+ },
+ "scenery.pine": {
+  "file": "scenery.png",
+  "rect": [
+   200,
+   96,
+   31,
+   48
+  ]
+ },
+ "scenery.pines-2": {
+  "file": "scenery.png",
+  "rect": [
+   242,
+   96,
+   44,
+   48
+  ]
+ },
+ "scenery.pines": {
+  "file": "scenery.png",
+  "rect": [
+   289,
+   96,
+   46,
+   48
+  ]
+ },
+ "scenery.pond": {
+  "file": "scenery.png",
+  "rect": [
+   336,
+   114,
+   48,
+   30
+  ]
+ },
+ "scenery.reeds-2": {
+  "file": "scenery.png",
+  "rect": [
+   1,
+   144,
+   46,
+   48
+  ]
+ },
+ "scenery.reeds": {
+  "file": "scenery.png",
+  "rect": [
+   48,
+   144,
+   48,
+   48
+  ]
+ },
+ "scenery.rock-1": {
+  "file": "scenery.png",
+  "rect": [
+   96,
+   158,
+   48,
+   34
+  ]
+ },
+ "scenery.rock-2": {
+  "file": "scenery.png",
+  "rect": [
+   144,
+   151,
+   48,
+   41
+  ]
+ },
+ "scenery.rock-3": {
+  "file": "scenery.png",
+  "rect": [
+   193,
+   144,
+   46,
+   48
+  ]
+ },
+ "scenery.rock-4": {
+  "file": "scenery.png",
+  "rect": [
+   240,
+   155,
+   48,
+   37
+  ]
+ },
+ "scenery.roundTree": {
+  "file": "scenery.png",
+  "rect": [
+   293,
+   144,
+   37,
+   48
+  ]
+ },
+ "scenery.sapling": {
+  "file": "scenery.png",
+  "rect": [
+   336,
+   162,
+   48,
+   30
+  ]
+ },
+ "scenery.seaRock": {
+  "file": "scenery.png",
+  "rect": [
+   0,
+   202,
+   48,
+   38
+  ]
+ },
+ "scenery.serpentCoil": {
+  "file": "scenery.png",
+  "rect": [
+   48,
+   200,
+   48,
+   40
+  ]
+ },
+ "scenery.signpost": {
+  "file": "scenery.png",
+  "rect": [
+   102,
+   192,
+   35,
+   48
+  ]
+ },
+ "scenery.skull": {
+  "file": "scenery.png",
+  "rect": [
+   144,
+   200,
+   48,
+   40
+  ]
+ },
+ "scenery.standingStone": {
+  "file": "scenery.png",
+  "rect": [
+   197,
+   192,
+   37,
+   48
+  ]
+ },
+ "scenery.tower": {
+  "file": "scenery.png",
+  "rect": [
+   245,
+   192,
+   38,
+   48
+  ]
+ },
+ "scenery.volcano": {
+  "file": "scenery.png",
+  "rect": [
+   288,
+   205,
+   48,
+   35
+  ]
+ },
+ "scenery.volcanoSmall": {
+  "file": "scenery.png",
+  "rect": [
+   336,
+   214,
+   48,
+   26
+  ]
+ },
+ "scenery.watchtower": {
+  "file": "scenery.png",
+  "rect": [
+   10,
+   240,
+   28,
+   48
+  ]
+ },
+ "scenery.well": {
+  "file": "scenery.png",
+  "rect": [
+   50,
+   240,
+   43,
+   48
+  ]
+ },
+ "scenery.wreck": {
+  "file": "scenery.png",
+  "rect": [
+   96,
+   246,
+   48,
+   42
+  ]
+ },
+ "terrain.cobbles-1": {
+  "file": "terrain.png",
+  "rect": [
+   0,
+   0,
+   64,
+   64
+  ]
+ },
+ "terrain.cobbles-2": {
+  "file": "terrain.png",
+  "rect": [
+   64,
+   0,
+   64,
+   64
+  ]
+ },
+ "terrain.cobbles-3": {
+  "file": "terrain.png",
+  "rect": [
+   128,
+   0,
+   64,
+   64
+  ]
+ },
+ "terrain.cobbles-4": {
+  "file": "terrain.png",
+  "rect": [
+   192,
+   0,
+   64,
+   64
+  ]
+ },
+ "terrain.darkrock-1": {
+  "file": "terrain.png",
+  "rect": [
+   256,
+   0,
+   64,
+   64
+  ]
+ },
+ "terrain.darkrock-2": {
+  "file": "terrain.png",
+  "rect": [
+   320,
+   0,
+   64,
+   64
+  ]
+ },
+ "terrain.darkrock-3": {
+  "file": "terrain.png",
+  "rect": [
+   384,
+   0,
+   64,
+   64
+  ]
+ },
+ "terrain.darkrock-4": {
+  "file": "terrain.png",
+  "rect": [
+   448,
+   0,
+   64,
+   64
+  ]
+ },
+ "terrain.grass-1": {
+  "file": "terrain.png",
+  "rect": [
+   0,
+   64,
+   64,
+   64
+  ]
+ },
+ "terrain.grass-2": {
+  "file": "terrain.png",
+  "rect": [
+   64,
+   64,
+   64,
+   64
+  ]
+ },
+ "terrain.grass-3": {
+  "file": "terrain.png",
+  "rect": [
+   128,
+   64,
+   64,
+   64
+  ]
+ },
+ "terrain.grass-4": {
+  "file": "terrain.png",
+  "rect": [
+   192,
+   64,
+   64,
+   64
+  ]
+ },
+ "terrain.greyrock-1": {
+  "file": "terrain.png",
+  "rect": [
+   256,
+   64,
+   64,
+   64
+  ]
+ },
+ "terrain.greyrock-2": {
+  "file": "terrain.png",
+  "rect": [
+   320,
+   64,
+   64,
+   64
+  ]
+ },
+ "terrain.greyrock-3": {
+  "file": "terrain.png",
+  "rect": [
+   384,
+   64,
+   64,
+   64
+  ]
+ },
+ "terrain.greyrock-4": {
+  "file": "terrain.png",
+  "rect": [
+   448,
+   64,
+   64,
+   64
+  ]
+ },
+ "terrain.lava-1": {
+  "file": "terrain.png",
+  "rect": [
+   0,
+   128,
+   64,
+   64
+  ]
+ },
+ "terrain.lava-2": {
+  "file": "terrain.png",
+  "rect": [
+   64,
+   128,
+   64,
+   64
+  ]
+ },
+ "terrain.lava-3": {
+  "file": "terrain.png",
+  "rect": [
+   128,
+   128,
+   64,
+   64
+  ]
+ },
+ "terrain.lava-4": {
+  "file": "terrain.png",
+  "rect": [
+   192,
+   128,
+   64,
+   64
+  ]
+ },
+ "terrain.sand-1": {
+  "file": "terrain.png",
+  "rect": [
+   256,
+   128,
+   64,
+   64
+  ]
+ },
+ "terrain.sand-2": {
+  "file": "terrain.png",
+  "rect": [
+   320,
+   128,
+   64,
+   64
+  ]
+ },
+ "terrain.sand-3": {
+  "file": "terrain.png",
+  "rect": [
+   384,
+   128,
+   64,
+   64
+  ]
+ },
+ "terrain.sand-4": {
+  "file": "terrain.png",
+  "rect": [
+   448,
+   128,
+   64,
+   64
+  ]
+ },
+ "terrain.sea-1": {
+  "file": "terrain.png",
+  "rect": [
+   0,
+   192,
+   64,
+   64
+  ]
+ },
+ "terrain.sea-2": {
+  "file": "terrain.png",
+  "rect": [
+   64,
+   192,
+   64,
+   64
+  ]
+ },
+ "terrain.sea-3": {
+  "file": "terrain.png",
+  "rect": [
+   128,
+   192,
+   64,
+   64
+  ]
+ },
+ "terrain.sea-4": {
+  "file": "terrain.png",
+  "rect": [
+   192,
+   192,
+   64,
+   64
+  ]
+ },
+ "terrain.shallow-1": {
+  "file": "terrain.png",
+  "rect": [
+   256,
+   192,
+   64,
+   64
+  ]
+ },
+ "terrain.shallow-2": {
+  "file": "terrain.png",
+  "rect": [
+   320,
+   192,
+   64,
+   64
+  ]
+ },
+ "terrain.shallow-3": {
+  "file": "terrain.png",
+  "rect": [
+   384,
+   192,
+   64,
+   64
+  ]
+ },
+ "terrain.shallow-4": {
+  "file": "terrain.png",
+  "rect": [
+   448,
+   192,
+   64,
+   64
+  ]
+ },
+ "terrain.snow-1": {
+  "file": "terrain.png",
+  "rect": [
+   0,
+   256,
+   64,
+   64
+  ]
+ },
+ "terrain.snow-2": {
+  "file": "terrain.png",
+  "rect": [
+   64,
+   256,
+   64,
+   64
+  ]
+ },
+ "terrain.snow-3": {
+  "file": "terrain.png",
+  "rect": [
+   128,
+   256,
+   64,
+   64
+  ]
+ },
+ "townsfolk.beggar": {
+  "file": "townsfolk.png",
+  "rect": [
+   9,
+   0,
+   29,
+   64
+  ]
+ },
+ "townsfolk.blacksmith": {
+  "file": "townsfolk.png",
+  "rect": [
+   55,
+   0,
+   33,
+   64
+  ]
+ },
+ "townsfolk.child": {
+  "file": "townsfolk.png",
+  "rect": [
+   101,
+   0,
+   38,
+   64
+  ]
+ },
+ "townsfolk.farmer": {
+  "file": "townsfolk.png",
+  "rect": [
+   154,
+   0,
+   28,
+   64
+  ]
+ },
+ "townsfolk.guard": {
+  "file": "townsfolk.png",
+  "rect": [
+   200,
+   0,
+   32,
+   64
+  ]
+ },
+ "townsfolk.innkeeper": {
+  "file": "townsfolk.png",
+  "rect": [
+   246,
+   0,
+   36,
+   64
+  ]
+ },
+ "townsfolk.merchant": {
+  "file": "townsfolk.png",
+  "rect": [
+   294,
+   0,
+   36,
+   64
+  ]
+ },
+ "townsfolk.oldwoman": {
+  "file": "townsfolk.png",
+  "rect": [
+   343,
+   0,
+   34,
+   64
+  ]
+ },
+ "townsfolk.oldwoman2": {
+  "file": "townsfolk.png",
+  "rect": [
+   6,
+   64,
+   36,
+   64
+  ]
+ },
+ "townsfolk.priest": {
+  "file": "townsfolk.png",
+  "rect": [
+   51,
+   64,
+   41,
+   64
+  ]
+ },
+ "townsfolk.sailor": {
+  "file": "townsfolk.png",
+  "rect": [
+   96,
+   74,
+   48,
+   54
+  ]
+ },
+ "townsfolk.scholar": {
+  "file": "townsfolk.png",
+  "rect": [
+   151,
+   64,
+   33,
+   64
+  ]
+ }
+}
