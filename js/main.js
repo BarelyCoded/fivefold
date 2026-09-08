@@ -44,7 +44,10 @@ async function ensureContent() {
   const res = await fetch('content/enemies.json');
   S.content = await res.json();
   S.dungeons = await (await fetch('content/dungeons.json')).json();
+  S.shop = await (await fetch('content/shop.json')).json();
   const names = new Set(Object.values(BASICS));
+  for (const n of S.shop.artifacts) names.add(n);
+  for (const list of Object.values(S.shop.lands)) for (const n of list) names.add(n);
   for (const d of S.dungeons.dungeons) for (const n of d.treasure) names.add(n);
   for (const n of S.dungeons.artifacts) names.add(n);
   for (const n of Object.values(S.dungeons.walls)) names.add(n);
@@ -349,6 +352,14 @@ function cityStock(city) {
   if (st && g.player.day - st.day < 6) return st.items;
   const pool = cityPool(city.color); const items = [];
   for (let i = 0; i < 4 && pool.length; i++) { const n = pool.splice(Math.floor(Math.random() * pool.length), 1)[0]; items.push({ name: n, price: 3 + defOf(n).cmc * 2, sold: false }); }
+  // Occasional artifacts and special lands. Unsupported cards never appear.
+  const ok = n => { const d = defOf(n); return d && d.kind !== 'unsupported'; };
+  if (Math.random() < 0.6) { const a = rnd(S.shop.artifacts.filter(ok)); if (a) items.push({ name: a, price: 6 + defOf(a).cmc * 4 + (S.shop.rareArtifacts.includes(a) ? 12 : 0), sold: false, special: 'artifact' }); }
+  if (Math.random() < 0.55) {
+    const list = [...(S.shop.lands[city.color] || []), ...S.shop.lands.any].filter(ok);
+    const l = rnd(list);
+    if (l) { const d = defOf(l); const dual = d.subtypes.length >= 2; const price = dual ? 30 : d.produces.length >= 2 ? 18 : 14; items.push({ name: l, price, sold: false, special: 'land' }); }
+  }
   g.cityStock[key] = { day: g.player.day, items }; save();
   return items;
 }
@@ -511,7 +522,7 @@ function city() {
       </div>
       <h3>Market</h3>
       <div class="market">${stock.map((it, i) => { const d = defOf(it.name); return `<div class="stall${it.sold ? ' sold' : ''}">${cardHtml(d)}<div class="price">${it.sold ? 'Sold' : `${it.price} gold`}</div><button class="btn small" data-buy="${i}" ${it.sold || g.player.gold < it.price ? 'disabled' : ''}>Buy</button></div>`; }).join('')}</div>
-      <p class="small">Stock changes every few days. Bought cards go to your collection; add them to your deck from the Deck tab.</p>
+      <p class="small">Stock changes every few days. Artifacts and rare lands pass through now and then. Bought cards go to your collection; add them to your deck from the Deck tab.</p>
     </div>
   </section>`;
 }

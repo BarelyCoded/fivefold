@@ -6,6 +6,8 @@ const GW = 9, GH = 7;          // grid cells
 const TW = 48, TH = 24;        // internal iso tile size (drawn at 1x, scaled 2x)
 const WALL_H = 16, PARAPET_H = 6;
 const key = (x, y) => `${x},${y}`;
+import { present } from './world.js';
+let labels = [];
 
 // ---- generation ------------------------------------------------------------------
 export function generateDungeon(rng, tpl, opts = {}) {
@@ -151,7 +153,7 @@ function figure(ctx, cx, cy, robe, robeL, hat, opts = {}) {
   if (opts.legs) px(ctx, cx - 3, cy - 2, 6, 3, opts.legs);
   if (opts.staff) { px(ctx, cx + 4, cy - 15, 1, 16, '#6b4a2a'); px(ctx, cx + 3, cy - 17, 3, 2, '#9fe7ff'); }
   if (opts.guardian) { px(ctx, cx - 5, cy - 16, 2, 4, '#e8dcc2'); px(ctx, cx + 3, cy - 16, 2, 4, '#e8dcc2'); }
-  if (opts.badge) { px(ctx, cx + 4, cy - 4, 7, 7, '#15120f'); ctx.fillStyle = '#fff'; ctx.font = 'bold 6px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(String(opts.badge), cx + 7.5, cy - 0.5); }
+  if (opts.badge) { px(ctx, cx + 4, cy - 4, 7, 7, '#15120f'); labels.push({ x: cx + 7.5, y: cy - 0.5, text: String(opts.badge), size: 5.5, box: false, color: '#fff' }); }
 }
 function treasure(ctx, cx, cy, kind, seed) {
   ctx.fillStyle = 'rgba(0,0,0,.4)'; ctx.beginPath(); ctx.ellipse(cx, cy + 2, 8, 3, 0, 0, Math.PI * 2); ctx.fill();
@@ -172,15 +174,12 @@ function exitArch(ctx, cx, cy) {
   ctx.fillStyle = '#08080a'; ctx.beginPath(); ctx.arc(cx, cy - 16, 6, Math.PI, 0); ctx.fill();
   px(ctx, cx - 2, cy - 4, 4, 1, '#9fe7ff');
 }
-function label(ctx, cx, cy, text) {
-  ctx.font = 'bold 8px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillStyle = 'rgba(0,0,0,.7)'; const w = ctx.measureText(text).width + 6; ctx.fillRect(cx - w / 2, cy - 5, w, 10);
-  ctx.fillStyle = '#f3ecd8'; ctx.fillText(text, cx, cy);
-}
+function label(ctx, cx, cy, text) { labels.push({ x: cx, y: cy, text, size: 7.5, bg: 'rgba(0,0,0,.7)' }); }
 
 let frame = null, bgCache = null;
 export function drawDungeon(canvas, layout, tpl, opts = {}) {
   const W = CANVAS.w, H = CANVAS.h;
+  labels = [];
   if (!frame) frame = document.createElement('canvas');
   frame.width = W; frame.height = H;
   const ctx = frame.getContext('2d'); ctx.imageSmoothingEnabled = false;
@@ -219,13 +218,12 @@ export function drawDungeon(canvas, layout, tpl, opts = {}) {
     if (!open(c, 0, 1)) wall(ctx, cx, cy, 'sw', false, seed);
     if (!open(c, 1, 0)) wall(ctx, cx, cy, 'se', false, seed);
   }
-  // banner
-  ctx.font = 'bold 11px Georgia, serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  // banner box on the frame; its text at full resolution
   const title = tpl?.name || 'Dungeon'; const sub = layout.status || '';
-  const bw = Math.max(ctx.measureText(title).width, 90) + 24;
+  ctx.font = 'bold 11px Georgia, serif';
+  const bw = Math.max(ctx.measureText(title).width, Math.min(200, sub.length * 4.2), 90) + 24;
   px(ctx, W / 2 - bw / 2, 4, bw, 28, '#1d2a1b'); ctx.strokeStyle = '#6fa04a'; ctx.lineWidth = 1; ctx.strokeRect(W / 2 - bw / 2 + 0.5, 4.5, bw - 1, 27);
-  ctx.fillStyle = '#e8ffd0'; ctx.fillText(title, W / 2, 13);
-  ctx.font = '8px sans-serif'; ctx.fillStyle = '#9fe08a'; ctx.fillText(sub, W / 2, 25);
-  canvas.width = W * 2; canvas.height = H * 2;
-  const out = canvas.getContext('2d'); out.imageSmoothingEnabled = false; out.drawImage(frame, 0, 0, W * 2, H * 2);
+  labels.push({ x: W / 2, y: 13, text: title, size: 11, box: false, color: '#e8ffd0', font: 'Georgia, serif' });
+  labels.push({ x: W / 2, y: 25, text: sub, size: 7, box: false, color: '#9fe08a', weight: 'normal' });
+  present(canvas, frame, W, H, labels);
 }

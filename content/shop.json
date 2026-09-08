@@ -1,0 +1,13 @@
+{
+  "_comment": "Occasional market stock beyond a city's color: artifacts and special lands. Unsupported cards are filtered out at runtime.",
+  "artifacts": ["Jayemdae Tome", "Icy Manipulator", "Howling Mine", "Disrupting Scepter", "Millstone", "Rod of Ruin", "Obsianus Golem", "Yotian Soldier", "Ornithopter", "Juggernaut", "Triskelion", "Su-Chi", "Clockwork Beast", "Sol Ring", "Jalum Tome", "Ashnod's Altar", "Fellwar Stone", "Dragon Engine", "Onulet", "Brass Man", "Battering Ram", "Tawnos's Weaponry", "Ivory Guardians"],
+  "rareArtifacts": ["Sol Ring", "Icy Manipulator", "Howling Mine", "Triskelion", "Juggernaut"],
+  "lands": {
+    "W": ["Tundra", "Savannah", "Scrubland", "Plateau", "Adarkar Wastes", "Brushland", "Karakas", "Kjeldoran Outpost"],
+    "U": ["Tundra", "Underground Sea", "Volcanic Island", "Tropical Island", "Adarkar Wastes", "Underground River"],
+    "B": ["Scrubland", "Underground Sea", "Badlands", "Bayou", "Underground River", "Sulfurous Springs", "Lake of the Dead"],
+    "R": ["Plateau", "Volcanic Island", "Badlands", "Taiga", "Sulfurous Springs", "Karplusan Forest", "Balduvian Trading Post"],
+    "G": ["Savannah", "Tropical Island", "Bayou", "Taiga", "Brushland", "Karplusan Forest", "Heart of Yavimaya"],
+    "any": ["City of Brass", "Strip Mine", "Maze of Ith", "Thawing Glaciers", "Ice Floe"]
+  }
+}

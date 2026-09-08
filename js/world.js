@@ -378,10 +378,7 @@ function drawCity(ctx, cx, cy, color, name) {
       break;
     }
   }
-  ctx.font = 'bold 7px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  const tw = ctx.measureText(name).width + 6;
-  px(ctx, cx - tw / 2, cy + 12, tw, 9, 'rgba(20,18,16,.8)');
-  ctx.fillStyle = '#f3ecd8'; ctx.fillText(name, cx, cy + 16.5);
+  labels.push({ x: cx, y: cy + 17, text: name });
 }
 function drawFortress(ctx, cx, cy) {
   const glow = ctx.createRadialGradient(cx, cy, 3, cx, cy, 22);
@@ -427,14 +424,36 @@ function drawFigure(ctx, cx, cy, robe, robeL, hat, opts = {}) {
   if (hat) { px(ctx, cx - 4, cy - 10, 8, 1, hat); ctx.fillStyle = hat; ctx.beginPath(); ctx.moveTo(cx - 3, cy - 10); ctx.lineTo(cx + 1, cy - 16); ctx.lineTo(cx + 3, cy - 10); ctx.closePath(); ctx.fill(); }
   else px(ctx, cx - 2, cy - 11, 4, 2, '#4a2e1a'); // hair
   if (opts.staff) { px(ctx, cx + 4, cy - 12, 1, 15, '#6b4a2a'); px(ctx, cx + 3, cy - 14, 3, 2, '#9fe7ff'); }
-  if (opts.tier) { px(ctx, cx + 3, cy, 6, 6, '#15120f'); ctx.fillStyle = '#fff'; ctx.font = 'bold 6px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(String(opts.tier), cx + 6, cy + 3.5); }
+  if (opts.tier) { px(ctx, cx + 3, cy, 7, 7, '#15120f'); labels.push({ x: cx + 6.5, y: cy + 3.5, text: String(opts.tier), size: 5.5, box: false, color: '#fff' }); }
 }
 
-// ---- frame -----------------------------------------------------------------------
-let frame = null;
+// ---- presenting a low-res frame crisply ------------------------------------------------
+// Chooses the largest scale that fits the container (2, 1.5 or 1 CSS px per frame px), sizes the
+// canvas in real device pixels so nothing is resampled by CSS, and paints labels at full resolution.
+export function present(canvas, frame, fw, fh, labels = [], opts = {}) {
+  const avail = (canvas.parentElement?.clientWidth || fw * 2) - 8;
+  const k = opts.scale || (avail >= fw * 2 ? 2 : avail >= fw * 1.5 ? 1.5 : 1);
+  const dpr = window.devicePixelRatio || 1;
+  const s = k * dpr;
+  canvas.width = Math.round(fw * s); canvas.height = Math.round(fh * s);
+  canvas.style.width = Math.round(fw * k) + 'px'; canvas.style.height = Math.round(fh * k) + 'px';
+  const ctx = canvas.getContext('2d'); ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(frame, 0, 0, canvas.width, canvas.height);
+  for (const l of labels) {
+    const size = Math.round((l.size || 9) * s);
+    ctx.font = `${l.weight || 'bold'} ${size}px ${l.font || '"Segoe UI", system-ui, sans-serif'}`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const x = l.x * s, y = l.y * s;
+    if (l.box !== false) { const tw = ctx.measureText(l.text).width + size * 0.9; ctx.fillStyle = l.bg || 'rgba(20,18,16,.8)'; ctx.fillRect(Math.round(x - tw / 2), Math.round(y - size * 0.7), Math.round(tw), Math.round(size * 1.4)); }
+    ctx.fillStyle = l.color || '#f3ecd8'; ctx.fillText(l.text, x, y);
+  }
+  return { k, s };
+}
+let frame = null, labels = [];
 export function drawWorld(canvas, world, player, opts = {}) {
   let terrain = terrainCache.get(world);
   if (!terrain) { terrain = paintTerrain(world); terrainCache.set(world, terrain); }
+  labels = [];
   const cam = cameraFor(world, player);
   const fw = VIEW.w * PX, fh = VIEW.h * PX;
   if (!frame) { frame = document.createElement('canvas'); }
@@ -458,8 +477,6 @@ export function drawWorld(canvas, world, player, opts = {}) {
   const g = f.createRadialGradient(fw / 2, fh / 2, fh * 0.45, fw / 2, fh / 2, fw * 0.72);
   g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,.35)'); f.fillStyle = g; f.fillRect(0, 0, fw, fh);
 
-  canvas.width = fw * 2; canvas.height = fh * 2;
-  const ctx = canvas.getContext('2d'); ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(frame, 0, 0, fw * 2, fh * 2);
+  present(canvas, frame, fw, fh, labels);
   return cam;
 }
