@@ -663,6 +663,7 @@ export class Duel {
     if (r.subtypes && !r.subtypes.some(s => hasSubtype(c, s))) return false;
     if (r.state === 'attacking' && !this.attackers.includes(c.id)) return false;
     if (r.state === 'blocking' && !Object.values(this.blocks).flat().includes(c.id)) return false;
+    if (r.state === 'combat' && !this.attackers.includes(c.id) && !Object.values(this.blocks).flat().includes(c.id)) return false;
     if (r.state === 'tapped' && !c.tapped) return false;
     if (r.state === 'untapped' && c.tapped) return false;
     if (r.control === 'you' && c.controller !== p.idx) return false;
@@ -1162,7 +1163,7 @@ export function describeTarget(e) {
   const parts = [];
   if (r.not) parts.push(...r.not.map(n => 'non' + ({ W: 'white', U: 'blue', B: 'black', R: 'red', G: 'green' }[n] || n)));
   if (r.colors) parts.push(...r.colors.map(c => ({ W: 'white', U: 'blue', B: 'black', R: 'red', G: 'green' }[c])));
-  if (r.state) parts.push(r.state);
+  if (r.state) parts.push(r.state === 'combat' ? 'attacking or blocking' : r.state);
   if (r.subtypes) parts.push(...r.subtypes);
   const what = e.sel === 'any' ? 'any target' : e.sel === 'creature' ? 'creature' : e.sel === 'permanent' ? (r.types || ['permanent']).join(' or ') : e.sel === 'player' ? 'player' : e.sel === 'opponent' ? 'opponent' : e.sel === 'spell' ? (r.spellKind || 'spell') + ' spell' : e.sel === 'card' ? (r.what || 'card') + ' in graveyard' : e.sel;
   let s = `Target ${parts.join(' ')} ${what}`.replace(/\s+/g, ' ');

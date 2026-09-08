@@ -113,6 +113,7 @@ export function parseTarget(phrase) {
   if ((m = body.match(/ with (?:toughness|converted mana cost|mana value) (\d+) or (less|greater)$/))) { body = body.replace(m[0], ''); r.note = 'condition ignored'; }
   if ((m = body.match(/ that isn't enchanted$/))) { body = body.replace(m[0], ''); }
   if ((m = body.match(/ (?:that|which) is (?:attacking|blocking)$/))) { r.state = m[0].includes('attacking') ? 'attacking' : 'blocking'; body = body.replace(m[0], ''); }
+  if (/\battacking or blocking\b/.test(body)) { r.state = 'combat'; body = body.replace(/\battacking or blocking\b/, ''); }
   const words = body.split(/[\s,]+/).filter(w => w && w !== 'or' && w !== 'and');
   const types = [];
   for (const w of words) {
