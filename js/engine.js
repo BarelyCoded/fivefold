@@ -734,7 +734,11 @@ export class Duel {
       case 'enchanted': return ctx.source.attachedTo ? [{ card: ctx.source.attachedTo }] : [];
       case 'fixed': return ctx.item?.fixed ? [{ card: ctx.item.fixed }] : [];
       case 'thatPlayer': return ctx.thatPlayer !== undefined ? [{ player: this.players[ctx.thatPlayer] }] : [];
-      case 'prev': return ctx.prev ? [this.deref(ctx.prev)].filter(Boolean) : (ctx.item?.fixed ? [{ card: ctx.item.fixed }] : []);
+      case 'prev': {
+        // "that creature" / "its controller": the previous target, even if it has since left the battlefield
+        if (ctx.prev) { if (ctx.prev.type === 'perm') { const c = this.card(ctx.prev.id); return c ? [{ card: c }] : []; } return [this.deref(ctx.prev)].filter(Boolean); }
+        return ctx.item?.fixed ? [{ card: ctx.item.fixed }] : [];
+      }
       case 'each': {
         const r = e.restrict || {}; const out = [];
         if (r.types) for (const pl of this.players) for (const c of pl.battlefield.slice()) if (this.matchesRestrict(c, r, p)) out.push({ card: c });
@@ -770,7 +774,7 @@ export class Duel {
       case 'fight': for (const s of subs) if (s.card) { this.dealDamage(src, s.card, power(src)); this.dealDamage(s.card, src, power(s.card)); } break;
       case 'destroy': for (const s of subs) if (s.card) this.destroy(s.card, !!e.noRegen); break;
       case 'destroyAll': for (const pl of this.players) for (const c of pl.battlefield.slice()) if (this.matchesRestrict(c, e.restrict, p)) this.destroy(c, true); break;
-      case 'exile': for (const s of subs) if (s.card) this.moveTo(s.card, 'exile'); break;
+      case 'exile': for (const s of subs) if (s.card) { this.say(`${s.card.def.name} is exiled.`); this.moveTo(s.card, 'exile'); } break;
       case 'exileAll': for (const pl of this.players) for (const c of pl.battlefield.slice()) if (this.matchesRestrict(c, e.restrict, p)) this.moveTo(c, 'exile'); break;
       case 'bounce': for (const s of subs) if (s.card) this.moveTo(s.card, 'hand'); break;
       case 'bounceSelf': if (src.zone === 'battlefield' || src.zone === 'stack') this.moveTo(src, 'hand'); break;
@@ -782,7 +786,7 @@ export class Duel {
       case 'discard': for (const s of subs) if (s.player) yield* this.discardChoice(s.player, e.all ? s.player.hand.length : n, e.random, p); break;
       case 'gain': for (const s of subs) if (s.player) { s.player.life += n; this.say(`${s.player.name} gains ${n} life.`); } break;
       case 'lose': for (const s of subs) if (s.player) { s.player.life -= n; this.say(`${s.player.name} loses ${n} life.`); } break;
-      case 'gainEqualPower': for (const s of subs) if (s.card) { const pl = this.players[s.card.controller]; pl.life += power(s.card); } break;
+      case 'gainEqualPower': for (const s of subs) if (s.card) { const pl = this.players[s.card.controller]; const n = power(s.card); pl.life += n; this.say(`${pl.name} gains ${n} life.`); } break;
       case 'gainEqualPrev': { const s = ctx.prev ? this.deref(ctx.prev) : null; if (s?.card) p.life += power(s.card); else if (ctx.lastDamage) p.life += ctx.lastDamage; break; }
       case 'mill': for (const s of subs) if (s.player) for (let i = 0; i < n; i++) { const c = s.player.library.pop(); if (c) this.moveTo(c, 'graveyard'); } break;
       case 'counter': for (const s of subs) if (s.item) {
