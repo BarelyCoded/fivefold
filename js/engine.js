@@ -447,7 +447,7 @@ export class Duel {
       c.def.manaAbilities.forEach((ma, i) => {
         if (!(ma.cost.tap && !ma.cost.sacSelf && !ma.cost.sacrifice && !ma.cost.life && !ma.cost.mana.pips.length && !ma.cost.mana.generic)) return;
         let amount = ma.amount || 1;
-        if (ma.cost.removeCounter?.n === 'all') { amount = c.counters[ma.cost.removeCounter.kind] || 0; if (!amount) return; }
+        if (ma.cost.removeCounter?.n === 'all') { const removed = c.counters[ma.cost.removeCounter.kind] || 0; amount = (ma.plus === 'counters' ? 1 : 0) + removed; if (!removed) return; }
         out.push({ card: c, index: i, produces: ma.produces, amount });
       });
     }
@@ -528,7 +528,7 @@ export class Duel {
     if (ma.cost.sacrifice) { const opts = this.sacOptions(p, card, ma.cost); if (!opts.length) return false; this.sacrifice(opts.sort((a, b) => (a.tapped ? 0 : 1) - (b.tapped ? 0 : 1) || a.def.cmc - b.def.cmc)[0]); }
     if (ma.cost.life) p.life -= ma.cost.life;
     let amount = ma.amount || 1;
-    if (ma.cost.removeCounter) { const k = ma.cost.removeCounter.kind; const have = card.counters[k] || 0; if (ma.cost.removeCounter.n === 'all') { if (!have) return false; amount = have; card.counters[k] = 0; } else { if (have < ma.cost.removeCounter.n) return false; card.counters[k] = have - ma.cost.removeCounter.n; } }
+    if (ma.cost.removeCounter) { const k = ma.cost.removeCounter.kind; const have = card.counters[k] || 0; if (ma.cost.removeCounter.n === 'all') { if (!have) return false; amount = (ma.plus === 'counters' ? 1 : 0) + have; card.counters[k] = 0; } else { if (have < ma.cost.removeCounter.n) return false; card.counters[k] = have - ma.cost.removeCounter.n; } }
     if (ma.counter) card.counters[ma.counter] = (card.counters[ma.counter] || 0) + 1;
     const col = ma.produces.includes(color) ? color : ma.produces[0];
     p.pool[col] += amount;

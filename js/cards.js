@@ -698,7 +698,7 @@ function parseAbilityLine(line, ctx) {
     let body = m[2];
     let timing = 'instant', limit = 0;   // limit: activations allowed per turn (0 = unlimited)
     body = body.replace(/\s*activate (?:this ability )?only (as a sorcery|once each turn|during your turn and only once each turn|during your upkeep and only once each turn|during your turn|during combat|if [^.]+|any time you could cast a sorcery)\.?$/i, (s, w) => { if (/sorcery$/.test(w) || /cast a sorcery/.test(w)) timing = 'sorcery'; else if (/^during your upkeep/.test(w)) { timing = 'upkeep'; limit = 1; } else if (/^during your turn and/.test(w)) { timing = 'yourTurn'; limit = 1; } else if (/once each turn/.test(w)) limit = 1; return ''; });
-    body = body.replace(/\s*this ability can't cause the total number of [^.]+\.?$/i, '');
+    body = body.replace(/\s*this ability can't cause the total number of [^.]*\.?/i, ' ').trim();
     body = body.replace(/\s*activate (?:this ability )?no more than (once|twice|\w+) (?:times? )?each turn\.?$/i, (s, w) => { limit = w === 'once' ? 1 : w === 'twice' ? 2 : (NUM[w] ?? Number(w) ?? 1) || 1; return ''; });
     body = body.replace(/\s*activate only during your upkeep\.?$/i, () => { timing = 'upkeep'; return ''; });
     // mana ability
@@ -711,6 +711,7 @@ function parseAbilityLine(line, ctx) {
     if (/^add one mana of any color\.?$/.test(body)) return { type: 'mana', cost, produces: COLORS.slice(), amount: 1 };
     if (/^add one mana of the chosen color\.?$/.test(body)) return { type: 'mana', cost, produces: COLORS.slice(), amount: 1 };
     if (/^add \{c\}\{c\}\.?$/.test(body)) return { type: 'mana', cost, produces: ['C'], amount: 2 };
+    if ((mm = body.match(/^add (\{[wubrgc]\}), then add an additional \1 for each (\w+) counter removed this way\.?$/)) && cost.removeCounter?.n === 'all') return { type: 'mana', cost, produces: [mm[1][1].toUpperCase()], amount: 1, plus: 'counters' };
     if ((mm = body.match(/^add ((?:\{[wubrgc]\})+|\{[wubrgc]\}(?: or \{[wubrgc]\})+)\. ~ deals (\d+) damage to you\.?$/))) { const cols = [...mm[1].matchAll(/\{(\w)\}/g)].map(x => x[1].toUpperCase()); return { type: 'mana', cost, produces: [...new Set(cols)], amount: mm[1].includes(' or ') ? 1 : cols.length, damage: Number(mm[2]) }; }
     if (/^add one mana of any color that a land an opponent controls could produce\.?$/.test(body)) return { type: 'mana', cost, produces: COLORS.slice(), amount: 1, notes: ['Approximated: adds any color, whatever lands the opponent controls'] };
     const eff = parseEffects(body);
@@ -888,7 +889,7 @@ export function compile(c) {
     }
     inModes = false;
     let m;
-    if ((m = lower.match(/^as an additional cost to cast (?:this spell|~), (sacrifice (?:a|an) (creature|land|artifact|permanent)|discard (?:a|\w+) cards?|pay (\d+) life|exile (?:a|an) \w+ card from your graveyard)$/))) {
+    if ((m = lower.match(/^as an additional cost to cast (?:this spell|~), (sacrifice (?:a|an) (creature|land|artifact|permanent|goblin|\w+)|discard (?:a|\w+) cards?|pay (\d+) life|exile (?:a|an) \w+ card from your graveyard)\.?$/))) {
       if (m[2]) additionalCost = { sacrifice: m[2] };
       else if (/^discard/.test(m[1])) additionalCost = { discard: amt(m[1].split(' ')[1]) };
       else if (m[3]) additionalCost = { life: Number(m[3]) };
