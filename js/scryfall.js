@@ -2,10 +2,10 @@
 // Nothing is bundled: card data is fetched at runtime under Scryfall's API guidelines.
 //
 // Rules text comes from the current Oracle wording (the collection endpoint's default printing).
-// Art comes from the card's EARLIEST paper printing, so Alpha cards show Alpha art and
-// Ice Age cards show Ice Age art rather than a modern reprint.
+// Art comes from the card's earliest paper printing from Beta onward (Alpha is skipped to avoid its
+// misprints), so old cards show Beta/Arabian Nights/Ice Age art rather than a modern reprint.
 
-const KEY = 'ff.cardcache.v2';
+const KEY = 'ff.cardcache.v3';
 const HEADERS = { 'Accept': 'application/json', 'User-Agent': 'Fivefold/0.1 (open-source card adventure demo)' };
 const pause = ms => new Promise(r => setTimeout(r, ms));
 let cache = null;
@@ -62,7 +62,7 @@ async function earliestPrintings(names, onProgress) {
   while (todo.length) {
     const batch = todo.splice(0, 8);
     onProgress?.(done, names.length, 'art'); done += batch.length;
-    const q = `(${batch.map(n => `!"${n.replace(/"/g, '')}"`).join(' or ')}) game:paper -is:funny`;
+    const q = `(${batch.map(n => `!"${n.replace(/"/g, '')}"`).join(' or ')}) game:paper -is:funny -set:lea`;
     const url = `https://api.scryfall.com/cards/search?q=${encodeURIComponent(q)}&unique=prints&order=released&dir=asc`;
     let data = null;
     try { data = await getJson(url); } catch (e) { console.warn('art search failed', e); }
@@ -72,7 +72,7 @@ async function earliestPrintings(names, onProgress) {
   // Anything with many printings may have been pushed off the first page: look it up alone.
   for (const n of names) {
     if (out.has(n)) continue;
-    const url = `https://api.scryfall.com/cards/search?q=${encodeURIComponent(`!"${n.replace(/"/g, '')}" game:paper`)}&unique=prints&order=released&dir=asc`;
+    const url = `https://api.scryfall.com/cards/search?q=${encodeURIComponent(`!"${n.replace(/"/g, '')}" game:paper -set:lea`)}&unique=prints&order=released&dir=asc`;
     let data = null;
     try { data = await getJson(url); } catch (e) { console.warn('art search failed', e); }
     const c = (data?.data || []).find(x => imageOf(x));
