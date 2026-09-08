@@ -264,6 +264,11 @@ export class Duel {
         case 'end': {
           this.fireEvent({ type: 'endstep', player: ap.idx });
           for (const c of this.permanents()) if (c.flags.has('sacrificeAtEnd')) this.sacrifice(c);
+          for (const item of this.delayed.filter(d => d.kind === 'scheduled' && d.when === 'end')) {
+            if (item.cond === 'attacked') { const t = this.card(item.targetId); if (!t || !t.attackedThisTurn) continue; }
+            this.runDelayed(item);
+          }
+          this.delayed = this.delayed.filter(d => !(d.kind === 'scheduled' && d.when === 'end'));
           break;
         }
         case 'cleanup': {
@@ -307,6 +312,7 @@ export class Duel {
       for (const f of ['cantBlock', 'cantAttack', 'cantAttackOrBlock', 'unblockable', 'noCombatDamage', 'dealsNoCombatDamage', 'dealsNoDamage', 'noDamage', 'cantBeBlockedByWalls', 'blockableOnlyByWalls']) c.flags.delete(f);
       if (c.controlUntilEot !== null) { const orig = c.controlUntilEot; c.controlUntilEot = null; this.changeControl(c, orig); }
     }
+    this.delayed = this.delayed.filter(d => d.kind !== 'scheduled');
     this.fog = false;
   }
   *upkeepCosts(ap) {
@@ -855,6 +861,12 @@ export class Duel {
     this.afterResolve();
   }
   afterResolve() { this.priority = this.active; this.passes = 0; this.refresh(); this.emit(); }
+  // Run a scheduled delayed effect. Its effects use no interactive choices (destroy / sacrifice self), so drain synchronously.
+  runDelayed(item) {
+    const source = this.card(item.source) || { id: item.source, def: { name: 'a delayed effect' }, zone: 'gone', controller: item.controller, flags: new Set() };
+    const ctx = { p: this.players[item.controller], source, prev: item.targetId ? { type: 'perm', id: item.targetId } : null, targets: [], ti: 0, item: null };
+    for (const e of item.effects) { const g = this.applyEffect(e, ctx); let r = g.next(); while (!r.done) r = g.next(); this.sba(); if (this.winner !== null) return; }
+  }
 
   *runEffects(effects, ctx, optionalAll) {
     if (optionalAll && !ctx.p.ai) { const yes = yield { kind: 'yesno', player: ctx.p.idx, text: `${ctx.source.def.name}: apply the effect?`, value: 'optional' }; if (!yes) return; }
@@ -1038,6 +1050,7 @@ export class Duel {
         break;
       }
       case 'delayedDraw': this.delayed.push({ player: p.idx, type: 'draw' }); break;
+      case 'delayed': { const tid = this.prevCard(ctx)?.id; this.delayed.push({ kind: 'scheduled', when: e.when, effects: e.effects, source: src.id, targetId: tid, controller: p.idx, turn: this.turn, cond: e.cond || null }); break; }
       case 'unlessPay': {
         const who = e.payer === 'thatPlayer' && ctx.thatPlayer !== undefined ? this.players[ctx.thatPlayer] : p;
         const cost = e.cost?.calc ? { pips: [], generic: this.amount(e.cost, ctx), x: false } : e.cost;
@@ -1142,6 +1155,8 @@ export class Duel {
       const counters = { ...c.counters };
       this.fireEvent({ type: zone === 'graveyard' ? 'dies' : 'leaves', card: c, counters, sacrificed: !!opts.sacrificed });
       if (zone === 'graveyard') this.fireEvent({ type: 'leaves', card: c });
+      const onLeave = this.delayed.filter(d => d.kind === 'scheduled' && d.when === 'leaves' && d.targetId === c.id);
+      if (onLeave.length) { this.delayed = this.delayed.filter(d => !onLeave.includes(d)); for (const item of onLeave) this.runDelayed(item); }
     } else if (from === 'hand') removeFrom(owner.hand, c);
     else if (from === 'graveyard') removeFrom(owner.graveyard, c);
     else if (from === 'library') removeFrom(owner.library, c);
