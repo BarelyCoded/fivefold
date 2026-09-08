@@ -15,7 +15,7 @@ const CA = (c, r) => [[398, 465, 532][c], [113, 182, 250][r], 60, r === 2 ? 56 :
 
 // Overworld ground by biome colour: common tiles and rarer accents.
 // Share of cells that take an accent tile, per biome.
-export const ACCENT_RATE = { G: 0.18, W: 0.07, U: 0, R: 0.1, B: 0.11 };
+export const ACCENT_RATE = { G: 0.18, W: 0.07, U: 0, R: 0.07, B: 0.08 };
 export const TERRAIN = {
   G: { base: [OW(0, 0), OW(1, 0), OW(2, 0), OW(5, 0), OW(0, 1), OW(4, 1), OW(1, 2), OW(2, 2)], accent: [OW(3, 0), OW(4, 0), OW(1, 1), OW(2, 1), OW(3, 1), OW(0, 2)] },
   W: { base: [OW(5, 1), OW(6, 1), OW(3, 2), OW(7, 0)], accent: [] },

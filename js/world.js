@@ -175,7 +175,12 @@ function paintTiles(world) {
   const tileFor = (b, tx, ty, x, y) => {
     const k = b + tx + ',' + ty; let r = rectCache.get(k);
     if (!r) { const t = TERRAIN[b] || TERRAIN.G; const a = h(tx, ty, 5), pk = h(tx, ty, 6); r = { base: pick(t.base, pk), accent: a < (ACCENT_RATE[b] ?? 0.15) && t.accent.length ? pick(t.accent, pk) : null }; rectCache.set(k, r); }
-    if (r.accent && x !== undefined && vnoise(x / 9, y / 9, seed + 21) > 0.42) return r.accent;
+    if (r.accent && x !== undefined) {
+      // pools: noise inside a soft disc around the cell centre, so no pool follows a cell edge
+      const nx = x - (tx * PX + PX / 2), ny = y - (ty * PX + PX / 2);
+      const nz = vnoise(x / 9, y / 9, seed + 21);
+      if (nz > 0.4 && Math.hypot(nx, ny) < PX * (0.28 + (nz - 0.4) * 0.9)) return r.accent;
+    }
     return r.base;
   };
   const image = ctx.createImageData(Wp, Hp); const img = image.data;
@@ -208,38 +213,38 @@ function paintTiles(world) {
     if (reserved.has(`${x},${y}`)) continue;
     const spot = (i) => [X + 6 + Math.floor(h(x, y, 400 + i) * (PX - 12)), Y + 14 + Math.floor(h(x, y, 420 + i) * (PX - 12))];
     const add = (rect, fx, fy, sc) => feats.push({ y: fy, draw: () => blitAt(ctx, rect, fx, fy, sc) });
-    const S = SPRITES, sc = 0.7;
+    const S = SPRITES, sc = 0.6;
     const any = (...names) => names.map(n => S[n]).filter(Boolean);
     const from = (list, t) => list.length ? pick(list, t) : null;
-    if ((b === 'G' || b === 'W') && nearCity(x, y) && h(x, y, 390) < 0.16) { const [fx, fy] = spot(9); const r = h(x, y, 391); const hamlet = from(any('hut', 'huts', 'watchtower', 'well', 'signpost'), r) || S.city.town; add(hamlet, fx, fy + 4, hamlet === S.city.town ? 0.5 : 0.8); continue; }
+    if ((b === 'G' || b === 'W') && nearCity(x, y) && h(x, y, 390) < 0.08) { const [fx, fy] = spot(9); const r = h(x, y, 391); const hamlet = from(any('hut', 'huts', 'watchtower', 'well', 'signpost'), r) || S.city.town; add(hamlet, fx, fy + 4, hamlet === S.city.town ? 0.5 : 0.7); continue; }
     if (b === 'G') {
-      const n = 1 + Math.floor(h(x, y, 440) * 2.4);
+      const d = h(x, y, 440); const n = d < 0.3 ? 0 : d < 0.85 ? 1 : 2;
       const trees = any('pines', 'pines-2', 'oak', 'pine', 'roundTree', 'sapling', 'bush', 'bush-2', 'shrub', 'bushSmall');
-      for (let i = 0; i < n; i++) { const [fx, fy] = spot(i); const r = h(x, y, 460 + i); const t = from(trees, r * 0.999); if (t) add(t, fx, fy, t === S.pines || t === S['pines-2'] ? 0.8 : sc); }
-      if (h(x, y, 470) < 0.03 && S.pond) { const [fx, fy] = spot(3); add(S.pond, fx, fy, 0.9); }
-      if (h(x, y, 471) < 0.02 && S.tower) { const [fx, fy] = spot(4); add(S.tower, fx, fy, 0.9); }
+      for (let i = 0; i < n; i++) { const [fx, fy] = spot(i); const r = h(x, y, 460 + i); const t = from(trees, r * 0.999); if (t) add(t, fx, fy, t === S.pines || t === S['pines-2'] ? 0.7 : sc); }
+      if (h(x, y, 470) < 0.02 && S.pond) { const [fx, fy] = spot(3); add(S.pond, fx, fy, 0.9); }
+      if (h(x, y, 471) < 0.012 && S.tower) { const [fx, fy] = spot(4); add(S.tower, fx, fy, 0.9); }
     } else if (b === 'W') {
       const r = h(x, y, 500);
-      if (r < 0.2 && SCENERY.dunes.length) { const [fx, fy] = spot(0); add(pick(SCENERY.dunes, h(x, y, 502)), fx, fy + 6, 0.9); }
-      else if (r < 0.28) { const [fx, fy] = spot(1); const t = from(any('cactus', 'palm', 'bush', 'tuft'), h(x, y, 501)); if (t) add(t, fx, fy, sc); }
-      else if (r < 0.31 && S.pond) { const [fx, fy] = spot(2); add(S.pond, fx, fy, 0.9); }
+      if (r < 0.12 && SCENERY.dunes.length) { const [fx, fy] = spot(0); add(pick(SCENERY.dunes, h(x, y, 502)), fx, fy + 6, 0.8); }
+      else if (r < 0.18) { const [fx, fy] = spot(1); const t = from(any('cactus', 'palm', 'bush', 'tuft'), h(x, y, 501)); if (t) add(t, fx, fy, sc); }
+      else if (r < 0.2 && S.pond) { const [fx, fy] = spot(2); add(S.pond, fx, fy, 0.8); }
     } else if (b === 'R') {
-      const n = 1 + (h(x, y, 540) < 0.55 ? 1 : 0);
-      for (let i = 0; i < n; i++) { const [fx, fy] = spot(i); add(pick(SCENERY.peaks, h(x, y, 550 + i)), fx, fy + 4, 0.9 + h(x, y, 560 + i) * 0.4); }
+      const d = h(x, y, 540); const n = d < 0.35 ? 0 : d < 0.85 ? 1 : 2;
+      for (let i = 0; i < n; i++) { const [fx, fy] = spot(i); add(pick(SCENERY.peaks, h(x, y, 550 + i)), fx, fy + 4, 0.75 + h(x, y, 560 + i) * 0.35); }
       const r = h(x, y, 570);
-      if (r < 0.06 && S.volcano) { const [fx, fy] = spot(2); add(S.volcano, fx, fy + 6, 1.1); }
-      else if (r < 0.14 && S.volcanoSmall) { const [fx, fy] = spot(2); add(S.volcanoSmall, fx, fy + 4, 0.9); }
-      else if (r < 0.2 && S.lavaVent) { const [fx, fy] = spot(3); add(S.lavaVent, fx, fy, 0.8); }
+      if (r < 0.03 && S.volcano) { const [fx, fy] = spot(2); add(S.volcano, fx, fy + 6, 1); }
+      else if (r < 0.07 && S.volcanoSmall) { const [fx, fy] = spot(2); add(S.volcanoSmall, fx, fy + 4, 0.8); }
+      else if (r < 0.1 && S.lavaVent) { const [fx, fy] = spot(3); add(S.lavaVent, fx, fy, 0.7); }
     } else if (b === 'B') {
       const r = h(x, y, 600);
-      if (r < 0.3 && SCENERY.rocks.length) { const [fx, fy] = spot(0); add(pick(SCENERY.rocks, r * 3), fx, fy, 0.7 + h(x, y, 601) * 0.3); }
-      else if (r < 0.42) { const [fx, fy] = spot(1); const t = from(any('deadtree', 'deadtree-2', 'skull', 'bones', 'standingStone'), h(x, y, 602)); if (t) add(t, fx, fy, t === S.skull ? 0.5 : sc); }
-      else if (r < 0.45 && S.cave) { const [fx, fy] = spot(2); add(S.cave, fx, fy + 2, 0.8); }
+      if (r < 0.16 && SCENERY.rocks.length) { const [fx, fy] = spot(0); add(pick(SCENERY.rocks, r * 6), fx, fy, 0.6 + h(x, y, 601) * 0.3); }
+      else if (r < 0.24) { const [fx, fy] = spot(1); const t = from(any('deadtree', 'deadtree-2', 'skull', 'bones', 'standingStone'), h(x, y, 602)); if (t) add(t, fx, fy, t === S.skull ? 0.5 : sc); }
+      else if (r < 0.26 && S.cave) { const [fx, fy] = spot(2); add(S.cave, fx, fy + 2, 0.8); }
     } else if (b === 'U') {
       const coast = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => at(x + dx, y + dy) && at(x + dx, y + dy) !== 'U');
       const r = h(x, y, 590);
-      if (coast && r < 0.1) { const [fx, fy] = spot(0); const t = from(any('reeds', 'reeds-2', 'lilypads', 'tuft'), h(x, y, 591)); if (t) add(t, fx, fy, sc); }
-      else if (!coast && r < 0.03) { const [fx, fy] = spot(1); const t = from(any('seaRock', 'wreck', 'serpentCoil'), h(x, y, 592)); if (t) add(t, fx, fy, sc); }
+      if (coast && r < 0.06) { const [fx, fy] = spot(0); const t = from(any('reeds', 'reeds-2', 'lilypads', 'tuft'), h(x, y, 591)); if (t) add(t, fx, fy, sc); }
+      else if (!coast && r < 0.015) { const [fx, fy] = spot(1); const t = from(any('seaRock', 'wreck', 'serpentCoil'), h(x, y, 592)); if (t) add(t, fx, fy, sc); }
     }
   }
   feats.sort((a, b) => a.y - b.y);
@@ -545,7 +550,7 @@ function drawCrystal(ctx, cx, cy, taken) {
 function drawFigure(ctx, cx, cy, robe, robeL, hat, opts = {}) {
   if (atlasReady() && opts.sprite) {
     if (opts.ring) { ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(cx, cy + PX / 2 - 3, 12, 4, 0, 0, Math.PI * 2); ctx.stroke(); }
-    blitAt(ctx, opts.sprite, cx, cy + PX / 2 - 1, Math.min(0.8, 44 / opts.sprite[3]));
+    blitAt(ctx, opts.sprite, cx, cy + PX / 2 - 1, Math.min(0.8, 38 / opts.sprite[3]));
     if (opts.tier) labels.push({ x: cx + 13, y: cy + 12, text: String(opts.tier), size: 6, color: '#fff', bg: 'rgba(20,18,16,.85)' });
     return;
   }
