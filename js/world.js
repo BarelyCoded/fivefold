@@ -3,15 +3,15 @@
 // gnarled trees in swamps, stone castles and domed keeps. Rendered at half resolution and
 // scaled 2x with smoothing off for chunky pixels. A camera follows the player.
 import { COLORS } from './cards.js';
-import { atlasReady, blit, blitAt, pick, TERRAIN, SPRITES } from './atlas.js';
+import { atlasReady, blit, blitAt, pick, sheetPixels, TERRAIN, ACCENT_RATE, SPRITES, SCENERY, MONSTERS } from './atlas.js';
 
 export const W = 30, H = 20;
 export const PX = 38;          // internal pixels per tile (one sprite-sheet tile)
 export const TILE = PX * 2;    // displayed pixels per tile
-export const VIEW = { w: 16, h: 11 };
+export const VIEW = { w: 24, h: 16 };
 
 export const PAL = {
-  W: { name: 'Snowfields', ground: ['#b9a56a', '#c9b678', '#a99459', '#d3c084'], grass: '#7e9a3c', grassL: '#a6c455', rock: '#8f8779', rockL: '#b5ad9e', wood: '#5a4530', leaf: '#6b8f3a', leafL: '#8fb452' },
+  W: { name: 'Plains', ground: ['#b9a56a', '#c9b678', '#a99459', '#d3c084'], grass: '#7e9a3c', grassL: '#a6c455', rock: '#8f8779', rockL: '#b5ad9e', wood: '#5a4530', leaf: '#6b8f3a', leafL: '#8fb452' },
   U: { name: 'Coast', ground: ['#1f8ea6', '#2199b3', '#1a7f96', '#24a3bd'], deep: '#156f86', ripple: '#5fc7d6', rippleD: '#136a80', sand: ['#dcc78a', '#cdb676', '#e6d39a'], palm: '#2f7a3a', palmL: '#5aa54a', trunk: '#8a6a3a' },
   B: { name: 'Wastes', ground: ['#6a6256', '#5b544a', '#77705f', '#4f4940'], pool: '#2c3c3b', poolL: '#3f5652', wood: '#2a2320', reed: '#6f7e3f', shroom: '#a86a8a' },
   R: { name: 'Mountains', ground: ['#8b7a68', '#9a8977', '#7a6a5a', '#a69584'], faceL: '#bcaa98', faceM: '#8c7b6c', faceD: '#5a4c42', snow: '#f1ede6', rock: '#6f6154' },
@@ -147,21 +147,107 @@ function dither(img, W_, x0, y0, w, h, cols, seed, scale = 6) {
 
 // ---- terrain painter -------------------------------------------------------------
 const terrainCache = new WeakMap();
-// Sprite-sheet ground: one tile per map cell, accents sprinkled by hash, cobbles under cities.
+// Sprite-sheet ground with organic borders: each pixel takes its biome from the nearest tile centre
+// (jittered by noise, like the painted fallback) and samples that biome's sheet tiles as a texture,
+// so regions meet along wobbly edges instead of a checkerboard. Sand beaches ring the water, roads
+// link the cities, and trees, ponds and hamlets are scattered as sprites.
 function paintTiles(world) {
   const Wp = world.w * PX, Hp = world.h * PX;
   const c = document.createElement('canvas'); c.width = Wp; c.height = Hp;
   const ctx = c.getContext('2d'); ctx.imageSmoothingEnabled = false;
   const seed = world.seed || 0;
-  for (let y = 0; y < world.h; y++) for (let x = 0; x < world.w; x++) {
-    const b = tileAt(world, x, y); const t = TERRAIN[b] || TERRAIN.G;
-    const r = hash(x, y, seed + 5), r2 = hash(x, y, seed + 6);
-    let rect = r < 0.2 && t.accent.length ? pick(t.accent, r2) : pick(t.base, r2);
-    if (world.cities.some(ct => ct.x === x && ct.y === y) || (world.castle.x === x && world.castle.y === y)) rect = pick(TERRAIN.cobble, r2);
-    blit(ctx, rect, x * PX, y * PX, PX, PX);
+  const h = (x, y, s) => hash(x, y, s + seed);
+  const at = (x, y) => inBounds(world, x, y) ? tileAt(world, x, y) : null;
+  const sheet = sheetPixels();
+  const owner = (x, y) => {
+    const tx = Math.floor(x / PX), ty = Math.floor(y / PX);
+    let best = at(tx, ty), bd = Infinity;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const t = at(tx + dx, ty + dy); if (!t) continue;
+      const cx = (tx + dx) * PX + PX / 2 + (vnoise(x / 11, y / 11, seed + dx * 3 + dy * 7) - 0.5) * 26;
+      const cy = (ty + dy) * PX + PX / 2 + (vnoise(x / 13, y / 13, seed + dx * 5 + dy * 11) - 0.5) * 26;
+      const d = Math.hypot(x - cx, y - cy); if (d < bd) { bd = d; best = t; }
+    }
+    return best;
+  };
+  const rectCache = new Map();
+  const tileFor = (b, tx, ty) => {
+    const k = b + tx + ',' + ty; let r = rectCache.get(k);
+    if (!r) { const t = TERRAIN[b] || TERRAIN.G; const a = h(tx, ty, 5), pk = h(tx, ty, 6); r = a < (ACCENT_RATE[b] ?? 0.15) && t.accent.length ? pick(t.accent, pk) : pick(t.base, pk); rectCache.set(k, r); }
+    return r;
+  };
+  const image = ctx.createImageData(Wp, Hp); const img = image.data;
+  for (let y = 0; y < Hp; y++) for (let x = 0; x < Wp; x++) {
+    const b = owner(x, y);
+    const tx = Math.floor(x / PX), ty = Math.floor(y / PX);
+    let rect;
+    if (b === 'U') {
+      let dl = 99;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const t = at(tx + dx, ty + dy); if (t && t !== 'U') dl = Math.min(dl, Math.hypot(x - ((tx + dx) * PX + PX / 2), y - ((ty + dy) * PX + PX / 2))); }
+      const sandy = dl < PX * 0.9 + (vnoise(x / 7, y / 7, seed + 77) - 0.5) * 16;
+      rect = sandy ? pick(TERRAIN.sand, h(tx, ty, 7)) : tileFor(b, tx, ty);
+    } else rect = tileFor(b, tx, ty);
+    // mirror tiles per cell so repeats are less obvious
+    const fx = h(tx, ty, 8) < 0.5, fy = h(tx, ty, 9) < 0.5;
+    const u = Math.floor((x % PX) * rect[2] / PX), v = Math.floor((y % PX) * rect[3] / PX);
+    const sx = rect[0] + (fx ? rect[2] - 1 - u : u), sy = rect[1] + (fy ? rect[3] - 1 - v : v);
+    const si = (sy * sheet.w + sx) * 4, di = (y * Wp + x) * 4;
+    img[di] = sheet.data[si]; img[di + 1] = sheet.data[si + 1]; img[di + 2] = sheet.data[si + 2]; img[di + 3] = 255;
   }
+  ctx.putImageData(image, 0, 0);
+  paintRoads(ctx, world, seed);
+  // scenery, back to front
+  const reserved = new Set([...world.cities.map(ct => `${ct.x},${ct.y}`), `${world.castle.x},${world.castle.y}`, ...world.links.map(l => `${l.x},${l.y}`), ...(world.dungeons || []).map(d => `${d.x},${d.y}`)]);
+  const feats = [];
+  const nearCity = (x, y) => world.cities.some(ct => Math.abs(ct.x - x) <= 3 && Math.abs(ct.y - y) <= 3 && (Math.abs(ct.x - x) + Math.abs(ct.y - y)) >= 2);
+  for (let y = 0; y < world.h; y++) for (let x = 0; x < world.w; x++) {
+    const b = at(x, y), X = x * PX, Y = y * PX;
+    if (reserved.has(`${x},${y}`)) continue;
+    const spot = (i) => [X + 6 + Math.floor(h(x, y, 400 + i) * (PX - 12)), Y + 14 + Math.floor(h(x, y, 420 + i) * (PX - 12))];
+    const add = (rect, fx, fy, sc) => feats.push({ y: fy, draw: () => blitAt(ctx, rect, fx, fy, sc) });
+    if ((b === 'G' || b === 'W') && nearCity(x, y) && h(x, y, 390) < 0.16) { const [fx, fy] = spot(9); add(SPRITES.city.town, fx, fy + 4, 0.5); continue; }
+    if (b === 'G') {
+      const n = 1 + Math.floor(h(x, y, 440) * 2.4);
+      for (let i = 0; i < n; i++) { const [fx, fy] = spot(i); const r = h(x, y, 460 + i); add(r < 0.3 ? SPRITES.pines : r < 0.45 ? SPRITES.oak : r < 0.6 ? SPRITES.pine : r < 0.75 ? SPRITES.roundTree : r < 0.88 ? SPRITES.sapling : SPRITES.shrub, fx, fy, r < 0.3 ? 0.65 : 0.7); }
+      if (h(x, y, 470) < 0.035) { const [fx, fy] = spot(3); add(SPRITES.pond, fx, fy, 0.8); }
+    } else if (b === 'W') {
+      const r = h(x, y, 500);
+      if (r < 0.2) { const [fx, fy] = spot(0); add(pick(SCENERY.dunes, h(x, y, 502)), fx, fy + 6, 0.9); }
+      else if (r < 0.3) { const [fx, fy] = spot(1); add(h(x, y, 501) < 0.5 ? SPRITES.bush : SPRITES.tuft, fx, fy, 0.7); }
+    } else if (b === 'R') {
+      const n = 1 + (h(x, y, 540) < 0.55 ? 1 : 0);
+      for (let i = 0; i < n; i++) { const [fx, fy] = spot(i); add(pick(SCENERY.peaks, h(x, y, 550 + i)), fx, fy + 4, 1 + h(x, y, 560 + i) * 0.3); }
+    } else if (b === 'B') {
+      const r = h(x, y, 600);
+      if (r < 0.3) { const [fx, fy] = spot(0); add(pick(SCENERY.rocks, r), fx, fy, 0.8 + h(x, y, 601) * 0.3); }
+      else if (r < 0.36) { const [fx, fy] = spot(1); add(SPRITES.skull, fx, fy, 0.5); }
+    } else if (b === 'U') {
+      if (h(x, y, 590) < 0.08 && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => at(x + dx, y + dy) && at(x + dx, y + dy) !== 'U')) { const [fx, fy] = spot(0); add(SPRITES.tuft, fx, fy, 0.8); }
+    }
+  }
+  feats.sort((a, b) => a.y - b.y);
+  for (const f of feats) f.draw();
   c.atlas = true;
   return c;
+}
+function paintRoads(ctx, world, seed) {
+  const roads = [];
+  for (const a of world.cities) {
+    const near = world.cities.filter(b => b !== a).sort((p1, p2) => dist(a, p1) - dist(a, p2)).slice(0, 2);
+    for (const b of near) if (!roads.some(r => (r[0] === b && r[1] === a))) roads.push([a, b]);
+  }
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  roads.forEach(([a, b], ri) => {
+    const pts = []; const n = Math.ceil(dist(a, b) * 3);
+    for (let i = 0; i <= n; i++) {
+      const t = i / n; const bx = a.x + (b.x - a.x) * t, by = a.y + (b.y - a.y) * t;
+      const perp = Math.atan2(b.y - a.y, b.x - a.x) + Math.PI / 2;
+      const wob = (vnoise(t * 6, ri + 1, seed + 500 + a.x) - 0.5) * 1.6 * Math.sin(t * Math.PI);
+      pts.push([bx * PX + PX / 2 + Math.cos(perp) * wob * PX, by * PX + PX / 2 + Math.sin(perp) * wob * PX]);
+    }
+    const stroke = (col, w, dash) => { ctx.strokeStyle = col; ctx.lineWidth = w; ctx.setLineDash(dash || []); ctx.beginPath(); pts.forEach((pt, i) => (i ? ctx.lineTo(pt[0], pt[1]) : ctx.moveTo(pt[0], pt[1]))); ctx.stroke(); ctx.setLineDash([]); };
+    stroke('rgba(70,48,28,.75)', 7); stroke('#a5804e', 4); stroke('#c9a367', 1.5, [3, 4]);
+  });
 }
 function paintTerrain(world) {
   if (atlasReady()) return paintTiles(world);
@@ -403,7 +489,7 @@ function drawFortress(ctx, cx, cy) {
   const glow = ctx.createRadialGradient(cx, cy, 3, cx, cy, 30);
   glow.addColorStop(0, 'rgba(160,30,50,.45)'); glow.addColorStop(1, 'rgba(160,30,50,0)');
   ctx.fillStyle = glow; ctx.fillRect(cx - 30, cy - 30, 60, 60);
-  if (atlasReady()) { blitAt(ctx, SPRITES.city.fortress, cx, cy + PX / 2 + 2); labels.push({ x: cx, y: cy + PX / 2 + 8, text: 'The Usurper' }); return; }
+  if (atlasReady()) { blitAt(ctx, SPRITES.city.fortress, cx, cy + PX / 2 + 2); blitAt(ctx, MONSTERS.dragon.idle[0], cx + 30, cy + PX / 2 + 6, 0.9); labels.push({ x: cx, y: cy + PX / 2 + 8, text: 'The Usurper' }); return; }
   shade(ctx, cx, cy + 10, 30);
   const s = '#26222c', sl = '#3d3846', sd = '#15121a';
   px(ctx, cx - 15, cy - 4, 30, 14, s); px(ctx, cx - 15, cy + 8, 30, 2, sd); px(ctx, cx - 15, cy - 4, 30, 1, sl);
@@ -441,7 +527,7 @@ function drawFigure(ctx, cx, cy, robe, robeL, hat, opts = {}) {
   if (atlasReady() && opts.sprite) {
     if (opts.ring) { ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(cx, cy + PX / 2 - 3, 12, 4, 0, 0, Math.PI * 2); ctx.stroke(); }
     blitAt(ctx, opts.sprite, cx, cy + PX / 2 - 1, 0.8);
-    if (opts.tier) { px(ctx, cx + 8, cy + 6, 9, 9, '#15120f'); labels.push({ x: cx + 12.5, y: cy + 10.5, text: String(opts.tier), size: 6, box: false, color: '#fff' }); }
+    if (opts.tier) labels.push({ x: cx + 13, y: cy + 12, text: String(opts.tier), size: 6, color: '#fff', bg: 'rgba(20,18,16,.85)' });
     return;
   }
   shade(ctx, cx, cy + 3, 8);
@@ -476,6 +562,22 @@ export function present(canvas, frame, fw, fh, labels = [], opts = {}) {
     ctx.fillStyle = l.color || '#f3ecd8'; ctx.fillText(l.text, x, y);
   }
   return { k, s };
+}
+// Whole-world overview for the side panel: the painted terrain scaled down, with markers.
+export function drawMinimap(canvas, world, player, cam) {
+  let terrain = terrainCache.get(world);
+  if (!terrain || !!terrain.atlas !== atlasReady()) { terrain = paintTerrain(world); terrainCache.set(world, terrain); }
+  const k = Math.max(1, Math.floor(240 / world.w));
+  canvas.width = world.w * k; canvas.height = world.h * k;
+  const ctx = canvas.getContext('2d'); ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(terrain, 0, 0, canvas.width, canvas.height);
+  const dot = (x, y, col, r = 2) => { ctx.fillStyle = col; ctx.fillRect(x * k + k / 2 - r, y * k + k / 2 - r, r * 2, r * 2); };
+  for (const ct of world.cities) dot(ct.x, ct.y, '#f3ecd8', 2.5);
+  for (const d of world.dungeons || []) if (d.revealed) dot(d.x, d.y, '#ffb347', 2);
+  for (const l of world.links) if (!l.taken) dot(l.x, l.y, '#9fe7ff', 1.5);
+  dot(world.castle.x, world.castle.y, '#ff3b3b', 3);
+  dot(player.x, player.y, '#ffffff', 2.5);
+  if (cam) { ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 1; ctx.strokeRect(cam.x * k + 0.5, cam.y * k + 0.5, VIEW.w * k - 1, VIEW.h * k - 1); }
 }
 let frame = null, labels = [];
 export function drawWorld(canvas, world, player, opts = {}) {

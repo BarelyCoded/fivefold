@@ -4,7 +4,7 @@
 export const SHEET = new URL('../assets/tileset.png', import.meta.url).href;
 export const SHEET_W = 1187, SHEET_H = 896;
 
-const OW = (c, r) => [Math.round(25 + 39.55 * c) + 2, Math.round(114 + 38.9 * r) + 2, 36, 35]; // inside the 3px grid seams
+const OW = (c, r) => [Math.round(25 + 39.55 * c) + 4, Math.round(114 + 38.9 * r) + 4, 32, 31]; // inside the grid seams and the tiles' lighter rims
 const DG = (c, r) => [Math.round(630 + 38.14 * c) + 2, Math.round(115 + 38.9 * r) + 2, 34, 35];
 const EL = (c, r) => [Math.round(92 + 54.6 * c), 655 + 57 * r, 52, 52];   // left battle block: dragon, skeleton, serpent
 const ER = (c, r) => [Math.round(447 + 54.5 * c), 655 + 57 * r, 50, 52];  // right battle block: golem, skeleton, spider, lizard
@@ -14,18 +14,30 @@ const NP = (c, r) => [935 + 40 * c, [797, 839][r], 40, 38];              // town
 const CA = (c, r) => [[398, 465, 532][c], [113, 182, 250][r], 60, r === 2 ? 56 : 66]; // castles and towns
 
 // Overworld ground by biome colour: common tiles and rarer accents.
+// Share of cells that take an accent tile, per biome.
+export const ACCENT_RATE = { G: 0.18, W: 0.07, U: 0, R: 0.16, B: 0.2 };
 export const TERRAIN = {
   G: { base: [OW(0, 0), OW(1, 0), OW(2, 0), OW(5, 0), OW(0, 1), OW(4, 1), OW(1, 2), OW(2, 2)], accent: [OW(3, 0), OW(4, 0), OW(1, 1), OW(2, 1), OW(3, 1), OW(0, 2)] },
-  W: { base: [OW(7, 5), OW(8, 5), OW(2, 6), OW(3, 6), OW(4, 6), OW(5, 6), OW(0, 7), OW(1, 7), OW(2, 7)], accent: [OW(6, 6), OW(6, 5)] },
-  U: { base: [OW(4, 8), OW(5, 8), OW(0, 8), OW(1, 8), OW(2, 8), OW(3, 8), OW(6, 7), OW(7, 7), OW(8, 7)], accent: [] },
-  R: { base: [OW(2, 3), OW(3, 3), OW(4, 3), OW(5, 3), OW(6, 3), OW(7, 3), OW(0, 4), OW(1, 4)], accent: [OW(0, 3), OW(1, 3), OW(8, 3), OW(2, 4), OW(3, 4), OW(4, 4), OW(1, 5)] },
-  B: { base: [OW(5, 4), OW(8, 4), OW(2, 5), OW(3, 5), OW(4, 5), OW(0, 6), OW(1, 6)], accent: [OW(6, 4), OW(7, 4), OW(0, 5), OW(5, 5)] },
+  W: { base: [OW(5, 1), OW(6, 1), OW(3, 2), OW(7, 0)], accent: [] },
+  snow: { base: [OW(7, 5), OW(8, 5), OW(2, 6), OW(3, 6), OW(4, 6), OW(5, 6), OW(0, 7), OW(1, 7), OW(2, 7)], accent: [OW(6, 6), OW(6, 5)] },
+  U: { base: [OW(0, 8), OW(1, 8), OW(2, 8), OW(3, 8), OW(4, 8), OW(5, 8)], accent: [] },
+  // mountains: dark rock ground with volcanoes and lava as accents; the peaks themselves are scattered sprites
+  R: { base: [OW(5, 4), OW(8, 4), OW(2, 5), OW(3, 5), OW(4, 5)], accent: [OW(2, 4), OW(3, 4), OW(4, 4), OW(1, 5), OW(0, 4), OW(1, 4), OW(8, 3)] },
+  // wastes: cracked rock veined with lava
+  B: { base: [OW(5, 4), OW(8, 4), OW(2, 5), OW(0, 6), OW(1, 6), OW(6, 4), OW(7, 4)], accent: [OW(0, 5), OW(5, 5), OW(3, 5)] },
   cobble: [OW(6, 10), OW(7, 10), OW(8, 10)],
   sand: [OW(5, 1), OW(6, 1), OW(3, 2)],
 };
 
+// Scenery cut out of terrain tiles at load time (flood-keyed against each tile's own background).
+const OWS = (c, r) => [Math.round(25 + 39.55 * c) + 2, Math.round(114 + 38.9 * r) + 2, 36, 35]; // wider crop so the tile's own background rims the sprite
+export const SCENERY = { peaks: [OWS(3, 3), OWS(4, 3)], rocks: [OWS(6, 5)], dunes: [OWS(7, 1), OWS(8, 1), OWS(4, 2), OWS(5, 2), OWS(6, 2)] };
+
 export const SPRITES = {
-  city: { W: CA(0, 0), U: CA(0, 1), B: CA(1, 1), R: CA(2, 1), G: CA(0, 2), fortress: CA(1, 0), town: CA(1, 2), compass: CA(2, 2) },
+  city: { W: [410, 116, 38, 61], U: [401, 184, 57, 60], B: [466, 184, 62, 62], R: [536, 192, 53, 46], G: [401, 254, 57, 48], fortress: [471, 121, 49, 59], grand: [533, 114, 59, 75], town: [469, 253, 55, 49], compass: [532, 254, 61, 49] },
+  // scenery for the overworld
+  pines: [390, 388, 76, 64], oak: [538, 386, 51, 61], sapling: [474, 419, 30, 31], bush: [506, 426, 35, 30], pine: [392, 464, 42, 70], bushSmall: [439, 476, 29, 22], roundTree: [474, 464, 31, 35], shrub: [434, 505, 38, 33], tuft: [480, 520, 18, 12],
+  pond: [465, 348, 62, 35], riverBend: [538, 310, 47, 70],
   pit: [979, 270, 61, 63], lavaPool: [1052, 270, 60, 63],
   gate: [979, 118, 61, 68], door: [979, 196, 61, 66], doorArch: [1052, 117, 60, 69], portal: [1052, 194, 60, 68],
   torch: [984, 469, 12, 33], keyGold: [1011, 464, 26, 48], keySilver: [1085, 464, 27, 50],
@@ -93,11 +105,31 @@ function keyOut(image) {
   }
   return c;
 }
+// Key one tile against its own border colour (for peaks and rocks that sit on flat tile backgrounds).
+function keyTile(ctx, [x0, y0, w, h], tol) {
+  const id = ctx.getImageData(x0, y0, w, h); const d = id.data;
+  const border = [];
+  for (let x = 0; x < w; x++) border.push(0 + x, (h - 1) * w + x);
+  for (let y = 0; y < h; y++) border.push(y * w, y * w + w - 1);
+  const med = ch => { const v = border.map(i => d[i * 4 + ch]).sort((a, b) => a - b); return v[v.length >> 1]; };
+  const bg = [med(0), med(1), med(2)];
+  const seen = new Uint8Array(w * h); const stack = [];
+  const push = (x, y) => { const i = y * w + x; if (seen[i]) return; seen[i] = 1; if (Math.abs(d[i * 4] - bg[0]) <= tol && Math.abs(d[i * 4 + 1] - bg[1]) <= tol && Math.abs(d[i * 4 + 2] - bg[2]) <= tol) stack.push(i); };
+  for (let x = 0; x < w; x++) { push(x, 0); push(x, h - 1); }
+  for (let y = 0; y < h; y++) { push(0, y); push(w - 1, y); }
+  while (stack.length) { const i = stack.pop(); d[i * 4 + 3] = 0; const x = i % w, y = (i - x) / w; if (x > 0) push(x - 1, y); if (x < w - 1) push(x + 1, y); if (y > 0) push(x, y - 1); if (y < h - 1) push(x, y + 1); }
+  ctx.putImageData(id, x0, y0);
+}
 export function loadAtlas() {
   if (img || typeof Image === 'undefined') return;
   const raw = new Image();
   raw.onload = () => {
-    try { img = keyOut(raw); sheetUrl = img.toDataURL('image/png'); } catch (e) { img = raw; }
+    try {
+      img = keyOut(raw);
+      const kctx = img.getContext('2d', { willReadFrequently: true });
+      for (const list of Object.values(SCENERY)) for (const rect of list) keyTile(kctx, rect, 30);
+      sheetUrl = img.toDataURL('image/png');
+    } catch (e) { img = raw; }
     ready = true; for (const l of listeners) l();
   };
   raw.onerror = () => { failed = true; console.warn('Sprite sheet missing: ' + SHEET + ' (falling back to painted tiles)'); };
@@ -105,6 +137,14 @@ export function loadAtlas() {
 }
 export const atlasReady = () => ready;
 export function onAtlas(fn) { listeners.push(fn); if (ready) fn(); }
+
+// Raw pixels of the keyed sheet, for painters that sample textures per pixel.
+let pixels = null;
+export function sheetPixels() {
+  if (!ready || !img) return null;
+  if (!pixels) { const ctx = img.getContext('2d', { willReadFrequently: true }); pixels = { data: ctx.getImageData(0, 0, img.width, img.height).data, w: img.width }; }
+  return pixels;
+}
 
 // Draw a sprite rectangle into a canvas at dx,dy scaled to dw×dh (defaults to 1:1).
 export function blit(ctx, rect, dx, dy, dw, dh) {
