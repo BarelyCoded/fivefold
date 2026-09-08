@@ -1,5 +1,5 @@
 // Opponent AI for the rules core: priority decisions and choice answers. Greedy, no lookahead.
-import { has, power, toughness, isCreature, isLand, isType, has0, isCreatureDef } from './engine.js';
+import { has, power, toughness, isCreature, isLand, isType, has0, isCreatureDef, abilitiesOf } from './engine.js';
 import { needsTarget } from './cards.js';
 
 const value = c => power(c) + toughness(c) + (has(c, 'Flying') ? 1.5 : 0) + (has(c, 'First strike') ? 1 : 0) + (has(c, 'Trample') ? 0.5 : 0) + c.def.cmc * 0.25 + (c.def.abilities.length ? 0.75 : 0);
@@ -128,14 +128,14 @@ function mainPhaseAction(duel, p) {
   cands.sort((a, b) => b.score - a.score);
   if (cands.length) return { type: 'cast', card: cands[0].c, opts: cands[0].opts };
   // sorcery-speed abilities: equip, tutor-ish, token makers
-  for (const c of p.battlefield) c.def.abilities.forEach((ab, i) => { if (cands.length) return; if (ab.type !== 'activated') return; if (!['token', 'tutor', 'draw', 'counters'].includes(ab.effects[0]?.type)) return; if (ab.cost.sacSelf || ab.cost.sacrifice) return; if (!duel.canActivate(p, c, i)) return; const o = abilityOpts(duel, p, c, i); if (o) cands.push({ act: { type: 'activate', card: c, index: i, opts: o } }); });
+  for (const c of p.battlefield) abilitiesOf(c).forEach((ab, i) => { if (cands.length) return; if (ab.type !== 'activated') return; if (!['token', 'tutor', 'draw', 'counters'].includes(ab.effects[0]?.type)) return; if (ab.cost.sacSelf || ab.cost.sacrifice) return; if (!duel.canActivate(p, c, i)) return; const o = abilityOpts(duel, p, c, i); if (o) cands.push({ act: { type: 'activate', card: c, index: i, opts: o } }); });
   if (cands.length) return cands[0].act;
   // cycling dead cards
   for (const c of p.hand) if (c.def.keywords.some(k => k.k === 'Cycling') && c.def.kind === 'land' && p.battlefield.filter(isLand).length >= 6 && duel.canCast(p, c, { cycling: true })) return { type: 'cast', card: c, opts: { cycling: true } };
   return null;
 }
 function abilityOpts(duel, p, c, i) {
-  const ab = c.def.abilities[i]; const info = duel.activateOptions(p, c, i);
+  const ab = abilitiesOf(c)[i]; const info = duel.activateOptions(p, c, i);
   const opts = { targets: [] };
   if (info.x) { opts.x = maxX(duel, p, ab.cost.mana); if (!opts.x) return null; }
   if (info.sacrifice) { const s = info.sacrifice.map(id => duel.card(id)).sort((a, b) => value(a) - value(b))[0]; if (!s) return null; opts.sacrifice = s.id; }
@@ -159,7 +159,7 @@ function instantAction(duel, p) {
     // regenerate a creature targeted by destruction
     const victims = (top.targets || []).filter(t => t.type === 'perm').map(t => duel.card(t.id)).filter(c => c && c.controller === p.idx);
     if (victims.length && (top.effects || []).some(e => e.type === 'destroy' || e.type === 'damage')) {
-      for (const v of victims) { const i = v.def.abilities.findIndex(ab => ab.type === 'activated' && ab.effects[0]?.type === 'regenerate'); if (i >= 0 && v.regen === 0 && duel.canActivate(p, v, i)) return { type: 'activate', card: v, index: i, opts: { targets: [] } }; }
+      for (const v of victims) { const i = abilitiesOf(v).findIndex(ab => ab.type === 'activated' && ab.effects[0]?.type === 'regenerate'); if (i >= 0 && v.regen === 0 && duel.canActivate(p, v, i)) return { type: 'activate', card: v, index: i, opts: { targets: [] } }; }
       for (const c of p.hand) { const e = c.def.spell?.effects[0]; if (e?.type === 'pump' && e.t > 0 && duel.canCast(p, c)) { const dmg = top.effects.find(x => x.type === 'damage'); if (dmg && victims.some(v => toughness(v) - v.damage <= dmg.amount && toughness(v) - v.damage + e.t > dmg.amount)) { const v = victims[0]; return { type: 'cast', card: c, opts: { targets: [{ type: 'perm', id: v.id }] } }; } } }
     }
     return null;
@@ -186,7 +186,7 @@ function instantAction(duel, p) {
       }
     }
     // Regenerate a blocked/blocking creature about to die
-    for (const f of fights) { const mine = f.a.controller === p.idx ? f.a : f.b.controller === p.idx ? f.b : null; if (!mine) continue; const other = mine === f.a ? f.b : f.a; if (power(other) >= toughness(mine) - mine.damage && mine.regen === 0) { const i = mine.def.abilities.findIndex(ab => ab.type === 'activated' && ab.effects[0]?.type === 'regenerate'); if (i >= 0 && duel.canActivate(p, mine, i)) return { type: 'activate', card: mine, index: i, opts: { targets: [] } }; } }
+    for (const f of fights) { const mine = f.a.controller === p.idx ? f.a : f.b.controller === p.idx ? f.b : null; if (!mine) continue; const other = mine === f.a ? f.b : f.a; if (power(other) >= toughness(mine) - mine.damage && mine.regen === 0) { const i = abilitiesOf(mine).findIndex(ab => ab.type === 'activated' && ab.effects[0]?.type === 'regenerate'); if (i >= 0 && duel.canActivate(p, mine, i)) return { type: 'activate', card: mine, index: i, opts: { targets: [] } }; } }
     // Fog when lethal
     if (duel.active !== p.idx) { const incoming = duel.attackers.map(id => duel.card(id)).filter(Boolean).filter(a => !(duel.blocks[a.id] || []).length).reduce((s, a) => s + power(a), 0); if (incoming >= p.life) for (const c of p.hand) if (c.def.spell?.effects[0]?.type === 'fog' && duel.canCast(p, c)) return { type: 'cast', card: c, opts: { targets: [] } }; }
   }
@@ -194,16 +194,16 @@ function instantAction(duel, p) {
   if (duel.active !== p.idx && step === 'blockers' && duel.attackers.length) {
     const unblocked = duel.attackers.map(id => duel.card(id)).filter(a => a && !(duel.blocks[a.id] || []).length && power(a) > 0);
     for (const c of p.battlefield) {
-      const i = c.def.abilities.findIndex(ab => ab.type === 'activated' && ab.effects[0]?.type === 'copShield');
+      const i = abilitiesOf(c).findIndex(ab => ab.type === 'activated' && ab.effects[0]?.type === 'copShield');
       if (i < 0) continue;
-      const from = c.def.abilities[i].effects[0].from;
+      const from = abilitiesOf(c)[i].effects[0].from;
       const threats = unblocked.filter(a => from === 'artifact' ? isType(a, 'artifact') : a.def.colors.includes(from));
       if (threats.length > p.cop.filter(f => f === from).length && duel.canActivate(p, c, i)) return { type: 'activate', card: c, index: i, opts: { targets: [] } };
     }
   }
   // Opponent's end step or their attackers step: use tap abilities and instant burn
   if (duel.active !== p.idx && (step === 'end' || step === 'attackers' || step === 'blockers' || step === 'beginCombat')) {
-    for (const c of p.battlefield) c.def.abilities.forEach((ab, i) => { if (ab.type !== 'activated' || ab.cost.sacSelf || ab.cost.sacrifice || ab.cost.life) return; const e = ab.effects[0]; if (!e || !['damage', 'tap', 'destroy', 'freeze'].includes(e.type)) return; if (e.type === 'tap' && step !== 'beginCombat' && step !== 'attackers') return; if (!duel.canActivate(p, c, i)) return; const o = abilityOpts(duel, p, c, i); if (o && !found) found = { type: 'activate', card: c, index: i, opts: o }; });
+    for (const c of p.battlefield) abilitiesOf(c).forEach((ab, i) => { if (ab.type !== 'activated' || ab.cost.sacSelf || ab.cost.sacrifice || ab.cost.life) return; const e = ab.effects[0]; if (!e || !['damage', 'tap', 'destroy', 'freeze'].includes(e.type)) return; if (e.type === 'tap' && step !== 'beginCombat' && step !== 'attackers') return; if (!duel.canActivate(p, c, i)) return; const o = abilityOpts(duel, p, c, i); if (o && !found) found = { type: 'activate', card: c, index: i, opts: o }; });
     var found; if (found) return found;
     if (step === 'end') for (const c of p.hand) { const e = c.def.spell?.effects[0]; if (!e || c.def.kind !== 'instant' || !['damage', 'destroy', 'draw', 'bounce'].includes(e.type) || !duel.canCast(p, c)) continue; const opts = buildCastOpts(duel, p, c); if (!opts || !duel.canCast(p, c, opts)) continue; if (e.type === 'draw' && p.hand.length > 5) continue; if (e.type === 'damage' && opts.targets[0]?.type === 'player' && opp.life > (e.amount === 'X' ? opts.x : e.amount) && opp.life > 8) continue; return { type: 'cast', card: c, opts }; }
   }

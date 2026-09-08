@@ -1,6 +1,6 @@
 // Duel screen for the rules core: renders state, drives the engine loop, collects human decisions,
 // and plays the engine's visual-effect events (attacks, blocks, strikes, damage).
-import { has, power, toughness, isCreature, isLand, isType, STEP_NAME, costText } from './engine.js';
+import { has, power, toughness, isCreature, isLand, isType, STEP_NAME, costText, abilitiesOf } from './engine.js';
 import { artFor, hasOwnArt } from './collection.js';
 import { costString, COLORS } from './cards.js';
 import { spriteStyle, atlasReady } from './atlas.js';
@@ -115,7 +115,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     const req = duel.pending?.req;
     if (req?.kind === 'attackers' && owner === me && req.options.includes(c.id)) classes.push('can-attack');
     if (req?.kind === 'blockers' && owner === me && isCreature(c) && !c.tapped) classes.push('can-block');
-    if (owner === me && duel.pending?.type === 'priority' && (c.def.abilities.some((ab, i) => ab.type === 'activated' && duel.canActivate(me, c, i)) || c.def.manaAbilities.length)) classes.push('usable');
+    if (owner === me && duel.pending?.type === 'priority' && (abilitiesOf(c).some((ab, i) => ab.type === 'activated' && duel.canActivate(me, c, i)) || c.def.manaAbilities.length)) classes.push('usable');
     let pt = '', ptClass = '';
     if (isCreature(c)) { pt = `${power(c)}/${toughness(c) - c.damage}`; if (c.damage || power(c) !== c.def.power || toughness(c) !== c.def.toughness) ptClass = 'mod'; }
     const kws = [...c.cur.kw].filter(k => typeof k === 'string' ? !['Changeling'].includes(k) : true);
@@ -370,7 +370,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
   }
   function startActivate(card, i) {
     const info = duel.activateOptions(me, card, i);
-    const ab = card.def.abilities[i];
+    const ab = abilitiesOf(card)[i];
     const w = { card, ability: i, info, opts: { targets: [] }, targets: [], specs: info.targets, stage: null };
     ui.wizard = w;
     const step = () => {
@@ -396,7 +396,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
   function permMenu(card) {
     const items = [];
     card.def.manaAbilities.forEach((ma, i) => { const ok = !card.tapped || !ma.cost.tap; for (const col of (ma.produces.length > 1 ? ma.produces : [ma.produces[0]])) items.push({ label: `Add ${ma.amount || 1} ${col} mana (${costText(ma.cost)})`, disabled: !ok, action: () => { ui.menu = null; duel.humanMana(card, i, col); render(); } }); });
-    card.def.abilities.forEach((ab, i) => { if (ab.type !== 'activated') return; items.push({ label: `${costText(ab.cost)}: ${ab.text.split(': ').slice(1).join(': ').slice(0, 60) || 'ability'}`, disabled: !duel.canActivate(me, card, i), action: () => { ui.menu = null; startActivate(card, i); } }); });
+    abilitiesOf(card).forEach((ab, i) => { if (ab.type !== 'activated') return; items.push({ label: `${costText(ab.cost)}: ${ab.text.split(': ').slice(1).join(': ').slice(0, 60) || 'ability'}`, disabled: !duel.canActivate(me, card, i), action: () => { ui.menu = null; startActivate(card, i); } }); });
     if (!items.length) return;
     ui.menu = { title: card.def.name, items }; render();
   }

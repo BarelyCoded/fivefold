@@ -52,7 +52,7 @@ Run the coverage report to see exactly which cards work:
 node tools/coverage.mjs era --patterns
 ```
 
-At the time of writing, 76% of the 1,590 distinct cards from Alpha to Alliances are playable and 45% are implemented exactly; the rest are approximated with a note saying what is ignored. `node tools/inspect.mjs "Card Name"` shows how a card was compiled. `node tools/simulate.mjs 20` plays the enemy roster against itself.
+At the time of writing, 86% of the 1,590 distinct cards from Alpha to Alliances are playable and 55% are implemented exactly; the rest are approximated with a note saying what is ignored. The engine understands combat-wide pumps (Army of Allah, Piety), attack and blocking restrictions (Moat, Orgg, the landwalk-cancelling lands), damage prevention on a creature or a source (Warning, Gaseous Form, Kry Shield), counts of permanents in amounts and power/toughness (Typhoon, An-Havva Inn, Aysen Crusader), spell-cost changes (Feroz's Ban, Planar Gate), taxes on casting (Nether Void, Soul Barrier), coin flips, life swaps, Balance, abilities granted to other permanents (Farmstead, The Tabernacle), storage and depletion lands, sacrifice costs that name a creature type or count (Goblin Warrens), and aura triggers on the enchanted creature's blocks, taps and death (Venom, Seizures, False Demise). `node tools/inspect.mjs "Card Name"` shows how a card was compiled. `node tools/simulate.mjs 20` plays the enemy roster against itself.
 
 ## Dungeons
 
