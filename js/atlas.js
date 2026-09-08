@@ -150,12 +150,14 @@ export function loadAtlas() {
 }
 // Route a packed sprite (key from tools/pack.py) into the slot the renderers read.
 const TERRAIN_SLOT = { grass: ['G', 'base'], sand: ['W', 'base'], sea: ['U', 'base'], shallow: [null, 'sand'], darkrock: ['B', 'base'], lava: ['B', 'accent'], greyrock: ['R', 'base'], snow: ['snow', 'base'], cobbles: [null, 'cobble'] };
+// Textures whose variants differ too much to sit side by side: keep only these variant numbers.
+const TERRAIN_KEEP = { darkrock: [2], greyrock: [2], cobbles: [1] };
 function applyEntry(key, rect, lists) {
   const [cat, rest] = key.split('.', 2); if (!rest) return;
   const parts = rest.split('-'); const last = parts[parts.length - 1]; const n = /^\d+$/.test(last) ? Number(last) : 0; const name = n ? parts.slice(0, -1).join('-') : rest;
   const push = (obj, prop) => { const k = [obj, prop]; let found = null; for (const kk of lists.keys()) if (kk[0] === obj && kk[1] === prop) found = kk; if (!found) lists.set(k, []); (lists.get(found || k)).push({ n, rect }); };
   switch (cat) {
-    case 'terrain': { const slot = TERRAIN_SLOT[name]; if (!slot) return; if (slot[0]) push(TERRAIN[slot[0]], slot[1]); else push(TERRAIN, slot[1]); if (name === 'lava') push(TERRAIN.R, 'accent'); return; }
+    case 'terrain': { const slot = TERRAIN_SLOT[name]; if (!slot) return; if (TERRAIN_KEEP[name] && !TERRAIN_KEEP[name].includes(n)) return; if (slot[0]) push(TERRAIN[slot[0]], slot[1]); else push(TERRAIN, slot[1]); if (name === 'lava') push(TERRAIN.R, 'accent'); return; }
     case 'scenery': { if (/^peak/.test(name)) push(SCENERY, 'peaks'); else if (/^(rock|boulder)/.test(name)) push(SCENERY, 'rocks'); else if (/^dune/.test(name)) push(SCENERY, 'dunes'); else SPRITES[rest] = rect; return; }
     case 'locations': { const m = name.match(/^city-([WUBRG])$/); if (m) SPRITES.city[m[1]] = rect; else if (['fortress', 'town', 'compass', 'grand'].includes(name)) SPRITES.city[name] = rect; else if (name === 'pit-cleared') SPRITES.pitCleared = rect; else if (name === 'crystal-taken') SPRITES.crystalTaken = rect; else SPRITES[name] = rect; return; }
     case 'figures': { const m = rest.match(/^mage-([WUBRG])-(\d)$/); if (m) SPRITES.mage[m[1]][Number(m[2]) - 1] = rect; else if (rest === 'usurper') SPRITES.mage.M = [rect, rect]; else SPRITES[name] = rect; return; }
