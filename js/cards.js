@@ -197,7 +197,7 @@ const rules = [
     return out;
   }],
   [/^(target .+?|it|that creature) can't (block|attack|attack or block|be blocked) this turn$/, m => tgt({ type: 'flag', flag: { block: 'cantBlock', attack: 'cantAttack', 'attack or block': 'cantAttackOrBlock', 'be blocked': 'unblockable' }[m[2]] }, m[1])],
-  [/^(?:you )?draw (\S+) cards?(?:, then discard (\S+) cards?)?$/, m => { const e = [{ type: 'draw', amount: amt(m[1]), who: 'you' }]; if (m[2]) e.push({ type: 'discard', amount: amt(m[2]), who: 'you' }); return e; }],
+  [/^(?:you )?draw (\S+) cards?(?:, then discard (\S+) cards?)?$/, m => { const e = [{ type: 'draw', amount: amt(m[1]), sel: 'you' }]; if (m[2]) e.push({ type: 'discard', amount: amt(m[2]), sel: 'you' }); return e; }],
   [/^(target player|target opponent|each player|each opponent) draws (\S+) cards?$/, m => { const k = T(m[1]); return k ? [{ type: 'draw', amount: amt(m[2]), ...k }] : null; }],
   [/^(target player|target opponent|each player|each opponent|you|that player) discards? (\S+) cards?( at random)?$/, m => { const k = T(m[1]); return k ? [{ type: 'discard', amount: amt(m[2]), random: !!m[3], ...k }] : null; }],
   [/^(target player|target opponent|each player|each opponent|you|that player) discards? (?:their|your) hand$/, m => { const k = T(m[1]); return k ? [{ type: 'discard', all: true, ...k }] : null; }],
