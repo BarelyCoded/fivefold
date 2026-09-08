@@ -2,9 +2,10 @@
 import { parseList, importNames, defOf, forgetDefs, loadArtIndex, artFor, artCount, hasOwnArt } from './collection.js';
 import { fetchCards, cacheSize } from './scryfall.js';
 import { COLORS, COLOR_NAME, costString, statusLabel } from './cards.js';
-import { generateWorld, drawWorld, tileAt, inBounds, cityAt, linkAt, enemyAt, stepEnemies, BIOME, TILE } from './world.js';
+import { generateWorld, drawWorld, tileAt, inBounds, cityAt, linkAt, enemyAt, stepEnemies, BIOME, TILE, VIEW } from './world.js';
 import { Duel } from './engine.js';
 import { mountDuel, cardHtml } from './duelview.js';
+import { aiHooks } from './ai.js';
 import { initPreview, hide as hidePreview } from './preview.js';
 
 const SAVE_KEY = 'ff.save.v1', COLL_KEY = 'ff.collection.v1';
@@ -167,6 +168,7 @@ function startDuel(tpl, roamUid) {
   const duel = new Duel({
     player: { name: g.name, deck: expandDeck(g.deck), life: g.player.life },
     ai: { name: tpl.name, deck: expandDeck(tpl.deck), life: tpl.life + d.enemyBonus + (tpl.boss ? g.boss.links * 5 : 0), ai: true },
+    hooks: aiHooks,
   });
   S.duel = { duel, tpl, ante, roamUid };
   go('duel');
@@ -247,7 +249,8 @@ function title() {
   const g = S.game;
   app.innerHTML = `<section class="screen title">
     <h1>Fivefold</h1>
-    <p class="lede">A Shandalar-inspired card adventure, built to be played with the cards you actually own. Walk a world where geography is color, duel the mages who roam it, wager cards you cannot buy back, and reach the Usurper's castle before the mana links are bound.</p>
+    <p class="lede">A generation ago a wandering mage with a weak deck broke five corrupt guilds and drove a planeswalker back beyond the barrier. The barrier healed crooked. Mana pools and drains in tides now, the five Orders hoard the links that pin the cracks shut, and something that came through before the seal closed has spent thirty years whispering to their Wardens. The old Wanderer is dying. The letter, and the title, are yours.</p>
+    <p class="lede small">Walk a world where geography is color. Duel the mages who roam it with the cards you actually own. Wager cards you cannot buy back. Find which Warden the Usurper is wearing before the Sealing completes.</p>
     <div class="cols">
       <form id="newgame" class="box">
         <h2>New journey</h2>
@@ -341,10 +344,10 @@ function map() {
   </section>`;
   const canvas = document.getElementById('map');
   const hl = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dy]) => [g.player.x + dx, g.player.y + dy]).filter(([x, y]) => inBounds(g.world, x, y));
-  drawWorld(canvas, g.world, g.player, { highlight: hl });
+  const cam = drawWorld(canvas, g.world, g.player, { highlight: hl });
   canvas.onclick = ev => {
     const r = canvas.getBoundingClientRect();
-    const x = Math.floor((ev.clientX - r.left) / r.width * g.world.w), y = Math.floor((ev.clientY - r.top) / r.height * g.world.h);
+    const x = cam.x + Math.floor((ev.clientX - r.left) / r.width * VIEW.w), y = cam.y + Math.floor((ev.clientY - r.top) / r.height * VIEW.h);
     const dx = x - g.player.x, dy = y - g.player.y;
     if (Math.abs(dx) + Math.abs(dy) === 1) move(dx, dy);
   };

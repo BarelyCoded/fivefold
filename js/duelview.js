@@ -1,11 +1,11 @@
-// Duel screen: renders engine state, handles human input, drives the AI.
-import { aiMain1, aiMain2, chooseBlocks } from './ai.js';
-import { has, power, toughness, isCreature, isLand } from './engine.js';
+// Duel screen for the rules core: renders state, drives the engine loop, collects human decisions.
+import { has, power, toughness, isCreature, isLand, isType, STEP_NAME, describeTarget, costText } from './engine.js';
 import { artFor, hasOwnArt } from './collection.js';
-import { costString, COLORS } from './cards.js';
+import { costString, needsTarget, COLORS } from './cards.js';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const KW_ABBR = k => (typeof k === 'string' ? k : k.k === 'Protection' ? 'Pro ' + k.from : k.k === 'Landwalk' ? k.land + 'walk' : k.k).split(' ').map(w => w[0]).join('');
 
 export function cardHtml(def, opts = {}) {
   const art = artFor(def);
@@ -15,29 +15,46 @@ export function cardHtml(def, opts = {}) {
   cls.push(colorClass);
   const style = art ? ` style="background-image:url('${art}')"` : '';
   const pt = opts.pt ?? (def.kind === 'creature' ? `${def.power}/${def.toughness}` : '');
-  const ownArt = hasOwnArt(def);
   return `<div class="${cls.join(' ')}"${style} data-id="${opts.id ?? ''}" data-zone="${opts.zone ?? ''}" data-name="${esc(def.name)}" title="${esc(def.name)}">
     <div class="card-top"><span class="card-name">${esc(def.name)}</span>${def.kind !== 'land' ? `<span class="card-cost">${esc(costString(def.cost))}</span>` : ''}</div>
     ${!art ? `<div class="card-body"><span class="card-type">${esc(def.typeLine)}</span></div>` : ''}
-    ${ownArt ? '<span class="card-own" title="Your art">★</span>' : ''}
+    ${hasOwnArt(def) ? '<span class="card-own" title="Your art">★</span>' : ''}
     ${pt ? `<div class="card-pt${opts.ptClass ? ' ' + opts.ptClass : ''}">${pt}</div>` : ''}
-    ${opts.badge ? `<div class="card-badge">${opts.badge}</div>` : ''}
+    ${opts.badge ? `<div class="card-badge">${esc(opts.badge)}</div>` : ''}
+    ${opts.extra || ''}
   </div>`;
 }
 
-export function mountDuel(root, duel, { onEnd, ante, speed = 450 }) {
+export function mountDuel(root, duel, { onEnd, ante, speed = 420 }) {
   const me = duel.players[0], ai = duel.players[1];
-  const ui = { targeting: null, attackers: new Set(), blocks: {}, blocker: null, message: '' };
-  const aiKeys = new Set();
-  let finished = false;
+  const ui = { wizard: null, attackers: new Set(), blocks: {}, blocker: null, message: '', menu: null, viewer: null };
+  let finished = false, running = false;
 
-  function cardOf(id) { return duel.find(Number(id))?.card || null; }
-  function legalNow() {
-    if (!ui.targeting) return [];
-    const e = ui.targeting.card.def.effects[ui.targeting.need[ui.targeting.targets.length]];
-    return duel.legalTargets(me, e);
+  // ---- engine driver ----------------------------------------------------------------
+  async function run() {
+    if (running) return; running = true;
+    try {
+      for (let guard = 0; guard < 5000; guard++) {
+        const r = duel.tick();
+        if (r === 'over') { render(); if (!finished) { finished = true; await sleep(900); onEnd(duel.winner); } return; }
+        if (r === 'wait') { render(); return; }
+        // Background tabs throttle timers to one per second; skip the pacing delays there.
+        if (r === 'ai') { render(); if (!document.hidden) await sleep(speed); }
+        else if (r === 'job') { render(); if (!document.hidden) await sleep(60); }
+      }
+      console.warn('engine loop guard hit');
+    } finally { running = false; }
   }
-  function isLegal(t) { return legalNow().some(l => l.type === t.type && l.id === t.id && l.idx === t.idx); }
+
+  // ---- rendering ---------------------------------------------------------------------
+  const cardOf = id => duel.card(Number(id));
+  const targeting = () => ui.wizard?.stage === 'targets' || duel.pending?.req?.kind === 'target';
+  function legalNow() {
+    if (ui.wizard?.stage === 'targets') return ui.wizard.specs[ui.wizard.targets.length].options;
+    if (duel.pending?.req?.kind === 'target') return duel.pending.req.options;
+    return [];
+  }
+  const isLegal = ref => legalNow().some(l => l.type === ref.type && l.id === ref.id && l.idx === ref.idx);
 
   function bfCard(c, owner) {
     const classes = [];
@@ -46,181 +63,272 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 450 }) {
     if (duel.attackers.includes(c.id) || ui.attackers.has(c.id)) classes.push('attacking');
     if (Object.values(duel.blocks).flat().includes(c.id) || Object.values(ui.blocks).flat().includes(c.id)) classes.push('blocking');
     if (ui.blocker === c.id) classes.push('selected');
-    if (ui.targeting && isLegal({ type: 'creature', id: c.id })) classes.push('targetable');
-    if (duel.phase === 'attack' && duel.active === 0 && owner === me && duel.canAttack(c)) classes.push('can-attack');
-    if (duel.phase === 'block' && duel.active === 1 && owner === me && isCreature(c) && !c.tapped) classes.push('can-block');
+    if (targeting() && isLegal({ type: 'perm', id: c.id })) classes.push('targetable');
+    const req = duel.pending?.req;
+    if (req?.kind === 'attackers' && owner === me && req.options.includes(c.id)) classes.push('can-attack');
+    if (req?.kind === 'blockers' && owner === me && isCreature(c) && !c.tapped) classes.push('can-block');
+    if (owner === me && duel.pending?.type === 'priority' && (c.def.abilities.some((ab, i) => ab.type === 'activated' && duel.canActivate(me, c, i)) || c.def.manaAbilities.length)) classes.push('usable');
     let pt = '', ptClass = '';
-    if (isCreature(c)) { pt = `${power(c)}/${toughness(c) - c.damage}`; if (c.damage || c.pump.p || c.pump.t) ptClass = 'mod'; }
-    const kws = [...(c.def.keywords || []), ...c.granted];
-    const badge = kws.length ? kws.map(k => k.split(' ').map(w => w[0]).join('')).join(' ') : '';
-    let blockTag = '';
+    if (isCreature(c)) { pt = `${power(c)}/${toughness(c) - c.damage}`; if (c.damage || power(c) !== c.def.power || toughness(c) !== c.def.toughness) ptClass = 'mod'; }
+    const kws = [...c.cur.kw].filter(k => typeof k === 'string' ? !['Changeling'].includes(k) : true);
+    const badge = kws.length ? kws.map(KW_ABBR).join(' ') : '';
+    let extra = '';
+    const counters = Object.entries(c.counters).filter(([k, v]) => v > 0 && k !== 'age').map(([k, v]) => `${v}×${k}`);
+    if (counters.length) extra += `<div class="card-counters">${esc(counters.join(' '))}</div>`;
+    if (c.regen) extra += `<div class="card-regen">regen</div>`;
+    const attached = duel.permanents().filter(a => a.attachedTo === c);
+    if (attached.length) extra += `<div class="card-attach">${attached.map(a => esc(a.def.name)).join(', ')}</div>`;
+    if (c.attachedTo) extra += `<div class="card-attachedto">on ${esc(c.attachedTo.def.name)}</div>`;
     const blockedBy = ui.blocks[c.id] || duel.blocks[c.id];
-    if (blockedBy && blockedBy.length) blockTag = `<div class="card-blocked">blocked</div>`;
-    return cardHtml(c.def, { id: c.id, zone: 'bf', classes, pt, ptClass, badge }).replace('</div>\n  </div>', '</div>' + blockTag + '</div>');
+    if (blockedBy && blockedBy.length) extra += `<div class="card-blocked">blocked</div>`;
+    return cardHtml(c.def, { id: c.id, zone: 'bf', classes, pt, ptClass, badge, extra });
   }
   function handCard(c) {
     const classes = [];
-    if (duel.canCast(me, c) && !ui.targeting) classes.push('castable');
+    if (duel.pending?.type === 'priority' && !ui.wizard && (duel.canCast(me, c) || duel.canCast(me, c, { cycling: true }))) classes.push('castable');
     if (c.def.kind === 'unsupported') classes.push('dead');
+    if (ui.wizard?.stage === 'targets' && ui.wizard.card === c) classes.push('selected');
     return cardHtml(c.def, { id: c.id, zone: 'hand', classes });
   }
-  function playerBox(p, isMe) {
-    const targetable = ui.targeting && isLegal({ type: 'player', idx: p.idx }) ? ' targetable' : '';
+  function playerBox(p) {
+    const targetable = targeting() && isLegal({ type: 'player', idx: p.idx }) ? ' targetable' : '';
     const turn = duel.active === p.idx ? ' active' : '';
-    return `<div class="pbox${targetable}${turn}" data-player="${p.idx}">
+    const pool = Object.entries(p.pool).filter(([, n]) => n > 0).map(([c, n]) => `${n}${c}`).join(' ');
+    return `<div class="pbox${targetable}${turn}${duel.priority === p.idx && !duel.pending ? ' thinking' : ''}" data-player="${p.idx}">
       <div class="pname">${esc(p.name)}</div>
       <div class="plife">${p.life}</div>
-      <div class="pmeta">Hand ${p.hand.length} · Library ${p.library.length} · Grave ${p.graveyard.length}</div>
+      ${p.poison ? `<div class="ppoison">☠ ${p.poison}</div>` : ''}
+      <div class="pmeta">Hand ${p.hand.length} · Library ${p.library.length} · <span class="link" data-grave="${p.idx}">Grave ${p.graveyard.length}</span>${p.exile.length ? ` · Exile ${p.exile.length}` : ''}</div>
+      ${pool ? `<div class="ppool">Mana: ${pool}</div>` : ''}
     </div>`;
   }
-  function zone(p, pred) { return p.battlefield.filter(pred).map(c => bfCard(c, p)).join(''); }
+  const zone = (p, pred) => p.battlefield.filter(pred).map(c => bfCard(c, p)).join('');
+  const nonCreature = c => !isCreature(c);
 
-  function buttons() {
+  function stackHtml() {
+    if (!duel.stack.length) return '';
+    return `<div class="stack"><div class="stack-title">Stack</div>${duel.stack.slice().reverse().map(it => {
+      const tgts = (it.targets || []).map(t => t.type === 'player' ? duel.players[t.idx].name : (duel.card(t.id)?.def.name || duel.stack.find(s => s.id === t.id)?.card.def.name || '?')).join(', ');
+      const targetable = targeting() && isLegal({ type: 'spell', id: it.id }) ? ' targetable' : '';
+      return `<div class="stack-item${targetable}" data-stack="${it.id}"><b>${esc(it.card.def.name)}</b> <span>${it.kind === 'spell' ? '' : it.kind === 'trigger' ? 'trigger' : 'ability'} · ${esc(duel.players[it.controller].name)}</span>${tgts ? `<div class="stack-tgt">→ ${esc(tgts)}</div>` : ''}</div>`;
+    }).join('')}</div>`;
+  }
+
+  function controls() {
     if (duel.winner !== null) return '';
-    if (ui.targeting) return `<div class="hint">Choose a target for <b>${esc(ui.targeting.card.def.name)}</b></div><button id="b-cancel" class="btn">Cancel</button>`;
-    if (duel.active === 0) {
-      if (duel.phase === 'main1') {
-        const can = me.battlefield.some(c => duel.canAttack(c));
-        return `<button id="b-combat" class="btn primary" ${can ? '' : 'disabled'}>Attack…</button><button id="b-end" class="btn">End turn</button>`;
-      }
-      if (duel.phase === 'attack') return `<div class="hint">Click creatures to attack with.</div><button id="b-attack" class="btn primary">Confirm ${ui.attackers.size ? `(${ui.attackers.size})` : 'no attack'}</button>`;
-      if (duel.phase === 'main2') return `<button id="b-end" class="btn primary">End turn</button>`;
-    } else if (duel.phase === 'block') {
-      return `<div class="hint">Click one of your creatures, then the attacker it blocks. Click a blocker again to clear it.</div><button id="b-block" class="btn primary">Confirm blocks</button>`;
+    if (ui.menu) return `<div class="hint">${esc(ui.menu.title)}</div>${ui.menu.items.map((it, i) => `<button class="btn${it.primary ? ' primary' : ''}" data-menu="${i}" ${it.disabled ? 'disabled' : ''}>${esc(it.label)}</button>`).join('')}<button class="btn ghost" data-menu="cancel">Cancel</button>`;
+    if (ui.wizard) {
+      const w = ui.wizard;
+      if (w.stage === 'x') return `<div class="hint">Choose X for <b>${esc(w.card.def.name)}</b> (max ${w.maxX})</div><div class="xrow"><input id="xval" type="number" min="0" max="${w.maxX}" value="${w.maxX}"><button class="btn primary" data-wiz="x">OK</button></div><button class="btn ghost" data-wiz="cancel">Cancel</button>`;
+      if (w.stage === 'targets') { const spec = w.specs[w.targets.length]; return `<div class="hint">${esc(spec.text)} for <b>${esc(w.card.def.name)}</b>. Click it on the table.</div>${spec.options.some(o => o.type === 'card') ? spec.options.map(o => `<button class="btn small" data-wizref="${o.type}:${o.id}">${esc(o.label)}</button>`).join('') : ''}<button class="btn ghost" data-wiz="cancel">Cancel</button>`; }
     }
-    return `<div class="hint">${esc(ai.name)} is thinking…</div>`;
+    const pend = duel.pending;
+    if (!pend) return `<div class="hint">${esc(duel.players[duel.priority].name)} is thinking…</div>`;
+    if (pend.type === 'priority') {
+      const stackTop = duel.stack.length;
+      const mine = duel.active === 0;
+      const canAtk = mine && duel.step === 'main1' && me.battlefield.some(c => duel.canAttack(c));
+      const passLabel = stackTop ? 'Pass (let it resolve)' : mine && duel.step === 'main1' ? (canAtk ? 'Go to combat' : 'Next phase') : mine && duel.step === 'main2' ? 'End turn' : 'Pass';
+      return `<div class="hint">You have priority${stackTop ? ' — respond or pass' : ''}. Click a card in hand to cast it, or a permanent to use its abilities.</div>
+        <button id="b-pass" class="btn primary">${passLabel}</button><button id="b-endturn" class="btn" title="Pass priority automatically until the next turn begins">${mine ? 'Skip to end of turn' : 'Stop asking this turn'}</button>`;
+    }
+    const req = pend.req;
+    switch (req.kind) {
+      case 'attackers': return `<div class="hint">Declare attackers: click your creatures.${req.must.length ? ' Some must attack.' : ''}</div><button id="b-attack" class="btn primary">Confirm ${ui.attackers.size ? `(${ui.attackers.size})` : 'no attack'}</button>`;
+      case 'blockers': return `<div class="hint">Declare blockers: click one of your creatures, then the attacker it blocks. Click a blocker again to clear it.</div><button id="b-block" class="btn primary">Confirm blocks</button>`;
+      case 'yesno': return `<div class="hint">${esc(req.text)}</div><button class="btn primary" data-answer="yes">Yes</button><button class="btn" data-answer="no">No</button>`;
+      case 'color': return `<div class="hint">${esc(req.text)}</div>${COLORS.map(c => `<button class="btn" data-color="${c}">${c}</button>`).join('')}`;
+      case 'target': return `<div class="hint">${esc(req.text)} — click it on the table.</div>${req.options.filter(o => o.type === 'card').map(o => `<button class="btn small" data-reqref="${o.type}:${o.id}">${esc(o.label)}</button>`).join('')}`;
+      case 'choose': {
+        const sel = ui.choice || new Set();
+        return `<div class="hint">${esc(req.text)}${req.min === req.max ? '' : ` (${req.min}–${req.max})`}</div><div class="choices">${req.options.map(o => `<label class="choice"><input type="checkbox" data-choice="${o.id}" ${sel.has(o.id) ? 'checked' : ''}> ${esc(o.label)}</label>`).join('')}</div><button class="btn primary" id="b-choose" ${sel.size < req.min || sel.size > req.max ? 'disabled' : ''}>OK</button>`;
+      }
+    }
+    return '';
   }
 
   function template() {
-    const phaseName = { main1: 'Main phase', attack: 'Declare attackers', block: 'Declare blockers', damage: 'Combat damage', main2: 'Second main', over: 'Duel over' }[duel.phase] || duel.phase;
+    const stepName = STEP_NAME[duel.step] || duel.step;
     return `
     <div class="duel">
       <div class="table">
         <section class="side opp">
-          ${playerBox(ai, false)}
+          ${playerBox(ai)}
           <div class="rows">
-            <div class="row lands">${zone(ai, isLand)}</div>
+            <div class="row lands">${zone(ai, nonCreature)}</div>
             <div class="row creatures">${zone(ai, isCreature)}</div>
           </div>
         </section>
-        <div class="midline"><span>Turn ${duel.turn} · ${duel.activePlayer.name} · ${phaseName}</span>${ante ? `<span class="ante">Ante: ${esc(ante.mine)} vs ${esc(ante.theirs)}</span>` : ''}</div>
+        <div class="midline"><span>Turn ${duel.turn} · ${esc(duel.activePlayer.name)} · ${stepName}</span>${ante ? `<span class="ante">Ante: ${esc(ante.mine)} vs ${esc(ante.theirs)}</span>` : ''}</div>
+        ${stackHtml()}
         <section class="side mine">
           <div class="rows">
             <div class="row creatures">${zone(me, isCreature)}</div>
-            <div class="row lands">${zone(me, isLand)}</div>
+            <div class="row lands">${zone(me, nonCreature)}</div>
           </div>
-          ${playerBox(me, true)}
+          ${playerBox(me)}
         </section>
         <section class="hand">${me.hand.map(handCard).join('')}</section>
       </div>
       <aside class="panel">
-        <div class="controls">${buttons()}${ui.message ? `<div class="msg">${esc(ui.message)}</div>` : ''}</div>
-        <div class="log">${duel.log.slice(-14).map(l => `<div>${esc(l)}</div>`).join('')}</div>
-        <div id="preview" class="preview"></div>
+        <div class="controls">${controls()}${ui.message ? `<div class="msg">${esc(ui.message)}</div>` : ''}</div>
+        <div class="log">${duel.log.slice(-16).map(l => `<div>${esc(l)}</div>`).join('')}</div>
         <button id="b-concede" class="btn small ghost">Concede</button>
       </aside>
+      ${ui.viewer ? viewerHtml() : ''}
     </div>`;
   }
-
-  function showPreview(def, inst) {
-    const el = root.querySelector('#preview'); if (!el || !def) return;
-    const kws = inst ? [...(def.keywords || []), ...inst.granted] : (def.keywords || []);
-    el.innerHTML = `<div class="pv-name">${esc(def.name)} <span class="pv-cost">${def.kind === 'land' ? '' : esc(costString(def.cost))}</span></div>
-      <div class="pv-type">${esc(def.typeLine)}</div>
-      <div class="pv-text">${esc(def.oracle || '').replace(/\n/g, '<br>')}</div>
-      ${def.kind === 'creature' ? `<div class="pv-pt">${def.power}/${def.toughness}${kws.length ? ' · ' + kws.join(', ') : ''}</div>` : ''}
-      ${def.notes?.length ? `<div class="pv-notes">Demo engine: ${def.notes.map(esc).join('; ')}</div>` : ''}`;
+  function viewerHtml() {
+    const p = duel.players[ui.viewer];
+    return `<div class="overlay" data-close-viewer><div class="modal wide"><h3>${esc(p.name)}'s graveyard</h3><div class="viewer">${p.graveyard.length ? p.graveyard.slice().reverse().map(c => cardHtml(c.def, { id: c.id, zone: 'grave', classes: p === me && duel.canCast(me, c) ? ['castable'] : [] })).join('') : '<p class="small">Empty.</p>'}</div><button class="btn" data-close-viewer>Close</button></div></div>`;
   }
-
   function render() { root.innerHTML = template(); }
 
-  function tryCast(card) {
-    if (!duel.canCast(me, card)) { ui.message = card.def.kind === 'unsupported' ? 'This card is not supported by the demo engine.' : 'Cannot cast that now.'; render(); return; }
-    const need = duel.targetsNeeded(card);
-    ui.message = '';
-    if (!need.length) { duel.cast(me, card); return; }
-    ui.targeting = { card, need, targets: [] };
-    render();
+  // ---- cast wizard -------------------------------------------------------------------
+  function startCast(card, base = {}) {
+    const info = duel.castOptions(me, card);
+    const w = { card, opts: { ...base }, info, stage: null, targets: [], specs: [] };
+    ui.wizard = w; ui.message = '';
+    next(w);
   }
-  function pickTarget(t) {
-    if (!ui.targeting || !isLegal(t)) return;
-    ui.targeting.targets.push(t);
-    if (ui.targeting.targets.length === ui.targeting.need.length) {
-      const { card, targets } = ui.targeting; ui.targeting = null;
-      if (!duel.cast(me, card, targets)) { ui.message = 'That spell could not be cast.'; render(); }
-    } else render();
-  }
-
-  root.addEventListener('click', ev => {
-    const btn = ev.target.closest('button');
-    if (btn) {
-      switch (btn.id) {
-        case 'b-combat': ui.attackers = new Set(); duel.goToCombat(me); break;
-        case 'b-attack': { const ids = [...ui.attackers]; ui.attackers = new Set(); duel.declareAttackers(me, ids); break; }
-        case 'b-end': ui.attackers = new Set(); duel.finishTurn(me); break;
-        case 'b-block': {
-          if (!duel.validBlocks(ui.blocks)) { ui.message = 'Those blocks are not legal (menace needs two blockers; flyers need flying or reach).'; render(); return; }
-          const b = ui.blocks; ui.blocks = {}; ui.blocker = null; ui.message = ''; duel.declareBlockers(b); break;
-        }
-        case 'b-cancel': ui.targeting = null; ui.message = ''; render(); break;
-        case 'b-concede': if (confirm('Concede this duel? You will lose your ante card.')) duel.end(1, `${me.name} concedes.`); break;
-      }
-      return;
-    }
-    const pb = ev.target.closest('.pbox');
-    if (pb && ui.targeting) { pickTarget({ type: 'player', idx: Number(pb.dataset.player) }); return; }
-    const el = ev.target.closest('.card'); if (!el) return;
-    const card = cardOf(el.dataset.id); if (!card) return;
-    const zoneName = el.dataset.zone;
-    if (ui.targeting) { if (zoneName === 'bf') pickTarget({ type: 'creature', id: card.id }); return; }
-    if (zoneName === 'hand' && card.controller === 0) { tryCast(card); return; }
-    if (zoneName !== 'bf') return;
-    if (duel.active === 0 && duel.phase === 'attack' && card.controller === 0) {
-      if (!duel.canAttack(card)) return;
-      if (ui.attackers.has(card.id)) ui.attackers.delete(card.id); else ui.attackers.add(card.id);
+  function next(w) {
+    const { card, info, opts } = w;
+    if (!('modes' in opts) && info.modes) {
+      ui.menu = { title: `${card.def.name}: choose a mode`, items: info.modes.options.map(m => ({ label: m.text, action: () => { opts.modes = [m.index]; ui.menu = null; next(w); } })) };
       render(); return;
     }
-    if (duel.active === 1 && duel.phase === 'block') {
+    if (info.kicker && !('kicked' in opts)) {
+      if (duel.canCast(me, card, { ...opts, kicked: true })) { ui.menu = { title: `Pay kicker ${costString(info.kicker)} for ${card.def.name}?`, items: [{ label: 'Kick it', primary: true, action: () => { opts.kicked = true; ui.menu = null; next(w); } }, { label: 'No kicker', action: () => { opts.kicked = false; ui.menu = null; next(w); } }] }; render(); return; }
+      opts.kicked = false;
+    }
+    if (info.buyback && !('buyback' in opts)) {
+      if (duel.canCast(me, card, { ...opts, buyback: true })) { ui.menu = { title: `Pay buyback ${costString(info.buyback)}?`, items: [{ label: 'Buyback', primary: true, action: () => { opts.buyback = true; ui.menu = null; next(w); } }, { label: 'No', action: () => { opts.buyback = false; ui.menu = null; next(w); } }] }; render(); return; }
+      opts.buyback = false;
+    }
+    if (info.pitch && !('pitch' in opts) && !duel.canPay(me, card.def.cost)) {
+      const cands = me.hand.filter(c => c !== card && c.def.colors.includes(info.pitch));
+      if (cands.length) { ui.menu = { title: `Exile a ${info.pitch} card instead of paying?`, items: [...cands.map(c => ({ label: c.def.name, action: () => { opts.pitch = c.id; ui.menu = null; next(w); } })), { label: 'Pay mana instead', action: () => { opts.pitch = undefined; ui.menu = null; next(w); } }] }; render(); return; }
+    }
+    if (info.x && !('x' in opts)) {
+      let maxX = 0; for (let x = 20; x >= 0; x--) if (duel.canPay(me, card.def.cost, x)) { maxX = x; break; }
+      w.maxX = maxX; w.stage = 'x'; render(); return;
+    }
+    if (info.additional && !w.extraDone) {
+      const a = info.additional;
+      if (a.sacrifice && !('sacrifice' in opts)) { const cands = me.battlefield.filter(c => isType(c, a.sacrifice)); ui.menu = { title: `Sacrifice a ${a.sacrifice}`, items: cands.map(c => ({ label: c.def.name, action: () => { opts.sacrifice = c.id; ui.menu = null; next(w); } })) }; render(); return; }
+      if (a.discard && !('discard' in opts)) { const cands = me.hand.filter(c => c !== card); ui.menu = { title: `Discard a card`, items: cands.map(c => ({ label: c.def.name, action: () => { opts.discard = [c.id]; ui.menu = null; next(w); } })) }; render(); return; }
+      w.extraDone = true;
+    }
+    if (!w.specs.length) { w.specs = duel.targetSpecs(me, card, opts).map(s => ({ ...s, options: duel.legalTargets(me, s.effect, card) })); }
+    if (w.targets.length < w.specs.length) { w.stage = 'targets'; render(); return; }
+    opts.targets = w.targets;
+    ui.wizard = null;
+    if (!duel.humanCast(card, opts)) { ui.message = 'That could not be cast.'; render(); return; }
+    run();
+  }
+  function startActivate(card, i) {
+    const info = duel.activateOptions(me, card, i);
+    const ab = card.def.abilities[i];
+    const w = { card, ability: i, info, opts: { targets: [] }, targets: [], specs: info.targets, stage: null };
+    ui.wizard = w;
+    const step = () => {
+      if (info.x && !('x' in w.opts)) { let maxX = 0; for (let x = 20; x >= 0; x--) if (duel.canPay(me, ab.cost.mana, x)) { maxX = x; break; } w.maxX = maxX; w.stage = 'x'; w.onX = v => { w.opts.x = v; step(); }; render(); return; }
+      if (info.sacrifice && !('sacrifice' in w.opts)) { ui.menu = { title: `Sacrifice a ${ab.cost.sacrifice}`, items: info.sacrifice.map(id => ({ label: duel.card(id).def.name, action: () => { w.opts.sacrifice = id; ui.menu = null; step(); } })) }; render(); return; }
+      if (info.discard && !('discard' in w.opts)) { ui.menu = { title: 'Discard a card', items: info.discard.map(id => ({ label: duel.card(id).def.name, action: () => { w.opts.discard = [id]; ui.menu = null; step(); } })) }; render(); return; }
+      if (w.targets.length < w.specs.length) { w.stage = 'targets'; render(); return; }
+      w.opts.targets = w.targets; ui.wizard = null;
+      if (!duel.humanActivate(card, i, w.opts)) { ui.message = 'That ability could not be activated.'; render(); return; }
+      run();
+    };
+    w.step = step; step();
+  }
+  function pickRef(ref) {
+    if (ui.wizard?.stage === 'targets') {
+      const w = ui.wizard; if (!isLegal(ref)) return;
+      w.targets.push(ref);
+      if (w.ability !== undefined) w.step(); else next(w);
+      return;
+    }
+    if (duel.pending?.req?.kind === 'target') { if (!isLegal(ref)) return; duel.humanAnswer(ref); run(); }
+  }
+  function permMenu(card) {
+    const items = [];
+    card.def.manaAbilities.forEach((ma, i) => { const ok = !card.tapped || !ma.cost.tap; for (const col of (ma.produces.length > 1 ? ma.produces : [ma.produces[0]])) items.push({ label: `Add ${ma.amount || 1} ${col} mana (${costText(ma.cost)})`, disabled: !ok, action: () => { ui.menu = null; duel.humanMana(card, i, col); render(); } }); });
+    card.def.abilities.forEach((ab, i) => { if (ab.type !== 'activated') return; items.push({ label: `${costText(ab.cost)}: ${ab.text.split(': ').slice(1).join(': ').slice(0, 60) || 'ability'}`, disabled: !duel.canActivate(me, card, i), action: () => { ui.menu = null; startActivate(card, i); } }); });
+    if (!items.length) return;
+    ui.menu = { title: card.def.name, items }; render();
+  }
+  function handMenu(card) {
+    const items = [];
+    if (duel.canCast(me, card)) items.push({ label: card.def.kind === 'land' ? 'Play' : 'Cast', primary: true, action: () => { ui.menu = null; startCast(card); } });
+    if (duel.canCast(me, card, { cycling: true })) items.push({ label: 'Cycle', action: () => { ui.menu = null; duel.humanCast(card, { cycling: true }); run(); } });
+    if (!items.length) { ui.message = card.def.kind === 'unsupported' ? 'This card is not supported by the engine yet.' : 'Cannot play that now.'; render(); return; }
+    if (items.length === 1) { items[0].action(); return; }
+    ui.menu = { title: card.def.name, items }; render();
+  }
+
+  // ---- events --------------------------------------------------------------------------
+  root.addEventListener('click', ev => {
+    const btn = ev.target.closest('button, [data-grave], [data-close-viewer], .stack-item, .pbox, .card');
+    if (!btn) return;
+    if (btn.dataset.menu !== undefined) { if (btn.dataset.menu === 'cancel') { ui.menu = null; ui.wizard = null; render(); } else { const it = ui.menu.items[Number(btn.dataset.menu)]; if (it && !it.disabled) it.action(); } return; }
+    if (btn.dataset.wiz === 'cancel') { ui.wizard = null; ui.menu = null; render(); return; }
+    if (btn.dataset.wiz === 'x') { const v = Math.max(0, Math.min(ui.wizard.maxX, Number(root.querySelector('#xval').value) || 0)); if (ui.wizard.ability !== undefined) ui.wizard.onX(v); else { ui.wizard.opts.x = v; next(ui.wizard); } return; }
+    if (btn.dataset.wizref) { const [type, id] = btn.dataset.wizref.split(':'); pickRef({ type, id: Number(id) }); return; }
+    if (btn.dataset.reqref) { const [type, id] = btn.dataset.reqref.split(':'); pickRef({ type, id: Number(id) }); return; }
+    if (btn.dataset.answer) { duel.humanAnswer(btn.dataset.answer === 'yes'); run(); return; }
+    if (btn.dataset.color) { duel.humanAnswer(btn.dataset.color); run(); return; }
+    if (btn.hasAttribute('data-close-viewer') && (btn === ev.target || btn.tagName === 'BUTTON')) { ui.viewer = null; render(); return; }
+    if (btn.dataset.grave !== undefined) { ui.viewer = Number(btn.dataset.grave); render(); return; }
+    switch (btn.id) {
+      case 'b-pass': duel.humanPass(); run(); return;
+      case 'b-endturn': duel.humanEndTurn(); run(); return;
+      case 'b-attack': { const ids = [...ui.attackers]; ui.attackers = new Set(); duel.humanAnswer(ids); run(); return; }
+      case 'b-block': { if (!duel.validBlocks(ui.blocks)) { ui.message = 'Those blocks are not legal.'; render(); return; } const b = ui.blocks; ui.blocks = {}; ui.blocker = null; ui.message = ''; duel.humanAnswer(b); run(); return; }
+      case 'b-choose': { const ids = [...(ui.choice || [])]; ui.choice = null; duel.humanAnswer(ids); run(); return; }
+      case 'b-concede': if (confirm('Concede this duel? You will lose your ante card.')) { duel.end(1, `${me.name} concedes.`); run(); } return;
+    }
+    if (btn.classList.contains('stack-item')) { pickRef({ type: 'spell', id: Number(btn.dataset.stack) }); return; }
+    if (btn.classList.contains('pbox')) { pickRef({ type: 'player', idx: Number(btn.dataset.player) }); return; }
+    if (!btn.classList.contains('card')) return;
+    const card = cardOf(btn.dataset.id); if (!card) return;
+    const z = btn.dataset.zone;
+    if (targeting()) { if (z === 'bf') pickRef({ type: 'perm', id: card.id }); else if (z === 'grave') pickRef({ type: 'card', id: card.id }); return; }
+    if (ui.menu) return;
+    const req = duel.pending?.req;
+    if (req?.kind === 'attackers' && z === 'bf' && card.controller === 0) { if (!req.options.includes(card.id)) return; if (ui.attackers.has(card.id)) ui.attackers.delete(card.id); else ui.attackers.add(card.id); render(); return; }
+    if (req?.kind === 'blockers' && z === 'bf') {
       if (card.controller === 0) {
         if (!isCreature(card) || card.tapped) return;
-        // clicking an assigned blocker clears it
         for (const k of Object.keys(ui.blocks)) if (ui.blocks[k].includes(card.id)) { ui.blocks[k] = ui.blocks[k].filter(id => id !== card.id); if (!ui.blocks[k].length) delete ui.blocks[k]; ui.blocker = null; render(); return; }
         ui.blocker = ui.blocker === card.id ? null : card.id; render(); return;
       }
-      if (card.controller === 1 && duel.attackers.includes(card.id) && ui.blocker != null) {
+      if (duel.attackers.includes(card.id) && ui.blocker != null) {
         const b = cardOf(ui.blocker);
         if (!duel.canBlock(b, card)) { ui.message = `${b.def.name} cannot block ${card.def.name}.`; render(); return; }
         (ui.blocks[card.id] ||= []).push(ui.blocker); ui.blocker = null; ui.message = ''; render(); return;
       }
+      return;
     }
+    if (duel.pending?.type !== 'priority') return;
+    if (z === 'hand' && card.controller === 0) { handMenu(card); return; }
+    if (z === 'grave' && card.owner === 0) { if (duel.canCast(me, card)) { ui.viewer = null; startCast(card); } return; }
+    if (z === 'bf' && card.controller === 0) { permMenu(card); return; }
   });
-  root.addEventListener('mouseover', ev => {
-    const el = ev.target.closest('.card'); if (!el) return;
-    const card = cardOf(el.dataset.id); if (card) showPreview(card.def, card);
+  root.addEventListener('change', ev => {
+    const cb = ev.target.closest('input[data-choice]'); if (!cb) return;
+    ui.choice ||= new Set(); const id = Number(cb.dataset.choice);
+    if (cb.checked) ui.choice.add(id); else ui.choice.delete(id);
+    const req = duel.pending?.req; if (req && req.max === 1 && ui.choice.size > 1) { ui.choice = new Set([id]); }
+    render();
   });
   document.addEventListener('keydown', function onKey(ev) {
     if (!root.isConnected) { document.removeEventListener('keydown', onKey); return; }
-    if (ev.key === 'Escape' && ui.targeting) { ui.targeting = null; render(); }
+    if (ev.key === 'Escape') { ui.wizard = null; ui.menu = null; ui.viewer = null; render(); }
+    if (ev.key === ' ' && duel.pending?.type === 'priority' && !ui.wizard && !ui.menu) { ev.preventDefault(); duel.humanPass(); run(); }
   });
 
-  async function drive() {
-    if (duel.winner !== null) {
-      if (!finished) { finished = true; await sleep(900); onEnd(duel.winner); }
-      return;
-    }
-    const key = `${duel.turn}:${duel.active}:${duel.phase}`;
-    if (aiKeys.has(key)) return;
-    if (duel.active === 1 && (duel.phase === 'main1' || duel.phase === 'main2')) {
-      aiKeys.add(key);
-      await sleep(speed);
-      await (duel.phase === 'main1' ? aiMain1 : aiMain2)(duel, speed);
-    } else if (duel.active === 0 && duel.phase === 'block') {
-      aiKeys.add(key);
-      await sleep(speed);
-      duel.declareBlockers(chooseBlocks(duel));
-    }
-  }
-
-  duel.onChange(() => { ui.message = ''; render(); drive(); });
+  duel.onChange(() => { ui.message = ''; render(); });
   duel.start();
+  run();
 }

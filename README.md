@@ -32,14 +32,23 @@ art/grizzly-bears.webp
 
 A photo of the physical card works. Cards with your art show a ★. Click **Rescan art folder** in the Collection screen after adding files. Cards without your art fall back to Scryfall's image at runtime. Nothing is ever bundled or committed: `art/` and `collection.csv` are in `.gitignore`.
 
-## What the demo engine understands
+## The rules core
 
-- **Lands**: basics and anything with `{T}: Add {X}`; enters-tapped is respected.
-- **Creatures** with numeric power and toughness. Keywords: flying, first strike, double strike, trample, haste, vigilance, deathtouch, lifelink, reach, defender, menace. Mana creatures work. Other abilities are ignored, and the card is marked approximated.
-- **Instants and sorceries** whose text is: damage to a target/any target/each creature, destroy or exile target creature, +N/+N until end of turn, grant a keyword, draw cards, gain life, return target creature to hand, return a creature card from graveyard to hand, destroy target land.
-- No stack. Spells resolve when cast. You get priority only on your own turn.
+The engine targets the mechanics of Alpha through Alliances, using current Oracle text from Scryfall.
 
-Everything else is unsupported for now. This engine is a placeholder: the project plan is to swap in a full rules engine behind the same interface.
+- **Turn structure** with all steps, a real **stack**, and **priority** for both players. Instants and abilities can be cast on the opponent's turn; counterspells work. Space bar passes priority.
+- **Permanents**: lands, creatures, artifacts, enchantments, auras (including control-changing ones), equipment.
+- **Abilities**: static (lords, anthems, enchanted-creature effects, can't attack/block, must attack, doesn't untap), triggered (enters, dies, attacks, blocks, deals damage, upkeep, end step, draw step), activated (tap, mana, sacrifice, discard, life, counter costs; sorcery or upkeep timing), mana abilities.
+- **Keywords**: flying, first strike, double strike, trample, haste, vigilance, deathtouch, lifelink, reach, defender, menace, flash, indestructible, hexproof, shroud, fear, intimidate, shadow, horsemanship, flanking, prowess, exalted, wither, infect, undying, persist, protection, landwalk, rampage, cumulative upkeep, echo, kicker, buyback, flashback, cycling, equip, enchant. Banding is ignored.
+- **Effects**: damage, destroy, exile, bounce, pump, grants, draw, discard, mill, life, counters, tokens, tutors, regeneration, fog, tap/untap/freeze, sacrifice, control, X costs, modal spells, "unless you pay", additional costs, pitch spells, extra turns, scry, poison, legend rule.
+
+Run the coverage report to see exactly which cards work:
+
+```bash
+node tools/coverage.mjs era --patterns
+```
+
+At the time of writing, 73% of the 1,590 distinct cards from Alpha to Alliances are playable and 40% are implemented exactly; the rest are approximated with a note saying what is ignored. `node tools/inspect.mjs "Card Name"` shows how a card was compiled. `node tools/simulate.mjs 20` plays the enemy roster against itself.
 
 ## Layout
 
