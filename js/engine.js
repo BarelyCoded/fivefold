@@ -34,7 +34,7 @@ export class Duel {
     this.turn = 0; this.active = 0; this.priority = 0; this.passes = 0; this.step = 'setup'; this.stepIndex = -1;
     this.stack = []; this.jobs = []; this.events = []; this.pending = null; this.winner = null;
     this.log = []; this.listeners = []; this.attackers = []; this.blocks = {}; this.fog = false; this.extraTurns = 0;
-    this.firstPlayer = 0; this.stepCount = 0; this.delayed = []; this.fx = []; this.ignoreLandwalk = new Set();
+    this.firstPlayer = 0; this.stepCount = 0; this.delayed = []; this.fx = []; this.ignoreLandwalk = new Set(); this.damageReplacements = [];
   }
   makePlayer(p, idx) {
     const library = shuffle(p.deck.map(def => this.instance(def, idx)), this.rng);
@@ -313,6 +313,7 @@ export class Duel {
       if (c.controlUntilEot !== null) { const orig = c.controlUntilEot; c.controlUntilEot = null; this.changeControl(c, orig); }
     }
     this.delayed = this.delayed.filter(d => d.kind !== 'scheduled');
+    this.damageReplacements = [];
     this.fog = false;
   }
   *upkeepCosts(ap) {
@@ -1023,6 +1024,14 @@ export class Duel {
       case 'scry': yield* this.scry(p, n); break;
       case 'preventNext': for (const s of subs) { if (s.card) s.card.shield += n; else if (s.player) s.player.shield += n; this.say(`The next ${n} damage to ${s.card ? s.card.def.name : s.player.name} this turn will be prevented.`); } break;
       case 'copShield': for (const s of subs) if (s.player) { s.player.cop.push(e.from); this.say(`${s.player.name} is shielded from the next ${e.from === 'artifact' ? 'artifact' : e.from} source this turn.`); } break;
+      case 'dmgRep': {
+        const entry = { owner: p.idx, action: e.action, n: e.n, color: e.color, sourceType: e.sourceType, combatOnly: !!e.combat, gainLife: !!e.gainLife, oneShot: e.oneShot !== false, sourceExclude: src.id };
+        if (e.to === 'targetCreature') { const c = subs.find(x => x.card)?.card; if (!c) break; entry.toCard = c.id; }
+        else entry.toPlayer = (e.to === 'targetPlayer' && subs.find(x => x.player)) ? subs.find(x => x.player).player.idx : p.idx;
+        this.damageReplacements.push(entry);
+        this.say(`${this.players[entry.owner ?? p.idx].name} sets up damage prevention.`);
+        break;
+      }
       case 'delayedBounceSelf': if (src.zone === 'battlefield') this.delayed.push({ type: 'bounce', card: src.id }); break;
       case 'putBack': for (const who of (subs.length ? subs.filter(s => s.player).map(s => s.player) : [p])) {
         const k = Math.min(n, who.hand.length); if (!k) continue;
@@ -1231,8 +1240,40 @@ export class Duel {
     this.say(`${item.card.def.name} is countered.`);
     if (item.kind === 'spell') { item.card.zone = 'limbo'; if (item._toTop) { this.moveTo(item.card, 'library'); const ow = this.players[item.card.owner]; removeFrom(ow.library, item.card); ow.library.push(item.card); } else this.moveTo(item.card, item.flashback ? 'exile' : 'graveyard'); }
   }
+  // Damage-replacement layer: prevent / redirect / reduce a damage instance (Pentagram, Jade Monolith,
+  // Forcefield, Nova Pentacle, Reverse Damage, Al-abara's Carpet).
+  matchDamageRep(source, target, opts) {
+    for (const r of this.damageReplacements) {
+      if (r.used) continue;
+      if (r.owner === undefined) continue;
+      if (source && (source.id === r.sourceExclude)) continue;
+      if (target.def) { if (r.toCard !== target.id) continue; }
+      else { if (r.toPlayer !== target.idx) continue; }
+      if (r.combatOnly && !opts.combat) continue;
+      if (r.color) { const cols = Array.isArray(r.color) ? r.color : [r.color]; if (!cols.some(c => (source.def?.colors || []).includes(c))) continue; }
+      if (r.sourceType === 'unblockedCreature' && !(source.def && isCreature(source) && this.attackers.includes(source.id) && !(this.blocks[source.id] && this.blocks[source.id].length))) continue;
+      if (r.sourceType === 'attackingNonFlyer' && !(source.def && isCreature(source) && this.attackers.includes(source.id) && !has(source, 'Flying'))) continue;
+      return r;
+    }
+    return null;
+  }
+  applyDamageRep(r, source, target, n, opts) {
+    if (r.oneShot !== false) r.used = true;
+    const who = target.def ? target.def.name : target.name;
+    if (r.action === 'prevent') { this.say(`Damage to ${who} is prevented.`); if (r.gainLife) { this.players[r.owner].life += n; this.say(`${this.players[r.owner].name} gains ${n} life.`); } return { done: true, dealt: 0 }; }
+    if (r.action === 'reduceTo') { const keep = Math.min(n, r.n); if (keep < n) this.say(`All but ${r.n} damage to ${who} is prevented.`); if (keep <= 0) return { done: true, dealt: 0 }; return { done: false, n: keep }; }
+    if (r.action === 'redirectToOwner') { this.say(`Damage is redirected to ${this.players[r.owner].name}.`); return { done: true, dealt: this.dealDamage(source, this.players[r.owner], n, { ...opts, _noReplace: true }) }; }
+    if (r.action === 'redirectToCreature') {
+      const opp = this.opponentOf(this.players[r.owner]);
+      const pick = opp.battlefield.filter(c => isCreature(c)).sort((a, b) => toughness(a) - toughness(b))[0] || this.players[r.owner].battlefield.filter(c => isCreature(c))[0];
+      if (!pick) { this.say(`Damage to ${who} is prevented (no creature to redirect to).`); return { done: true, dealt: 0 }; }
+      this.say(`Damage is redirected to ${pick.def.name}.`); return { done: true, dealt: this.dealDamage(source, pick, n, { ...opts, _noReplace: true }) };
+    }
+    return { done: false, n };
+  }
   dealDamage(source, target, n, opts = {}) {
     if (n <= 0) return 0;
+    if (!opts._noReplace) { const rep = this.matchDamageRep(source, target, opts); if (rep) { const r = this.applyDamageRep(rep, source, target, n, opts); if (r.done) return r.dealt; n = r.n; } }
     if (target.def) { // creature
       if (this.protectedFrom(target, source)) { this.say(`${target.def.name} is protected from ${source.def.name}.`); return 0; }
       if (opts.combat && (this.fog || target.flags.has('noCombatDamage') || source.flags?.has('noCombatDamage') || target.cur?.flags.has('noCombatDamage') || source.cur?.flags.has('noCombatDamage') || source.flags?.has('dealsNoCombatDamage') || target.cur?.flags.has('noCombatDamageTo'))) return 0;
@@ -1255,7 +1296,7 @@ export class Duel {
     const ci = pl.cop.findIndex(f => f === 'any' || (Array.isArray(f) ? f.some(x => (source.def?.colors || []).includes(x)) : f === 'artifact' ? isType(source, 'artifact') : (source.def?.colors || []).includes(f)));
     if (ci >= 0) { pl.cop.splice(ci, 1); this.say(`${pl.name}'s circle of protection prevents ${source.def.name}'s damage.`); return 0; }
     if (pl.shield > 0) { const used = Math.min(pl.shield, n); pl.shield -= used; n -= used; this.say(`${used} damage to ${pl.name} is prevented.`); if (n <= 0) return 0; }
-    if (has(source, 'Infect') || has0(source.def, 'Infect')) pl.poison += n; else pl.life -= n;
+    if (has(source, 'Infect') || has0(source.def, 'Infect')) pl.poison += n; else { if (pl.lifeFloor !== undefined && pl.life - n < pl.lifeFloor) n = Math.max(0, pl.life - pl.lifeFloor); pl.life -= n; if (n <= 0) return 0; }
     this.say(`${source.def.name} deals ${n} damage to ${pl.name}.`);
     this.fx.push({ type: 'damage', player: pl.idx, amount: n });
     if (has(source, 'Lifelink')) this.players[source.controller].life += n;
@@ -1339,6 +1380,8 @@ export class Duel {
     for (const c of perms) if (c.controlLink) { const s = this.card(c.controlLink.src); if (!s || s.zone !== 'battlefield' || !s.tapped) { const back = c.controlLink.back; c.controlLink = null; this.changeControlQuiet(c, back); } }
     const all = this.permanents();
     this.ignoreLandwalk = new Set();
+    for (const pl of this.players) pl.lifeFloor = undefined;
+    for (const c of perms) for (const ab of c.def.abilities) if (ab.type === 'static' && ab.kind === 'lifeFloor') { const pl = this.players[c.controller]; pl.lifeFloor = Math.max(pl.lifeFloor ?? -Infinity, ab.n); }
     for (const c of all) {
       const d = c.def;
       const cur = { p: d.power || 0, t: d.toughness || 0, kw: new Set(), flags: new Set(), types: new Set(d.types.map(t => t.toLowerCase())), cantBeBlockedBy: [], blockableOnlyBy: [], attackOnlyIfDefenderHas: null, lose: [], preventFrom: null, granted: [] };

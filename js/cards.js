@@ -233,7 +233,12 @@ const rules = [
   [/^prevent all combat damage that would be dealt by (target .+?) this turn$/, m => tgt({ type: 'flag', flag: 'dealsNoCombatDamage' }, m[1])],
   [/^prevent all damage that would be dealt this turn by (target .+?)$/, m => tgt({ type: 'flag', flag: 'dealsNoDamage' }, m[1])],
   [/^prevent all damage that would be dealt to (target .+?) this turn$/, m => tgt({ type: 'flag', flag: 'noDamage' }, m[1])],
-  [/^the next time a source of your choice would deal damage to you this turn, prevent that damage$/, () => [{ type: 'copShield', from: 'any', sel: 'you' }]],
+  [/^the next time a source of your choice would deal damage to you this turn, prevent that damage$/, () => [{ type: 'dmgRep', to: 'you', action: 'prevent' }]],
+  [/^the next time (?:a|an) (white|blue|black|red|green)(?: or (white|blue|black|red|green))? source of your choice would deal damage to you this turn, prevent that damage$/, m => [{ type: 'dmgRep', to: 'you', action: 'prevent', color: m[2] ? [COLOR_WORD[m[1]], COLOR_WORD[m[2]]] : COLOR_WORD[m[1]] }]],
+  [/^the next time a source of your choice would deal damage to (target creature) this turn, that source deals that damage to you instead$/, m => { const k = T(m[1]); return k ? [{ type: 'dmgRep', to: 'targetCreature', action: 'redirectToOwner', ...k }] : null; }],
+  [/^the next time a source of your choice would deal damage to you this turn, that damage is dealt to target creature of an opponent's choice instead$/, () => [{ type: 'dmgRep', to: 'you', action: 'redirectToCreature', note: "the redirected creature is chosen automatically" }]],
+  [/^the next time an unblocked creature of your choice would deal combat damage to you this turn, prevent all but (\d+) of that damage$/, m => [{ type: 'dmgRep', to: 'you', action: 'reduceTo', n: Number(m[1]), sourceType: 'unblockedCreature', combat: true }]],
+  [/^prevent all damage that would be dealt to you this turn by attacking creatures without flying$/, () => [{ type: 'dmgRep', to: 'you', action: 'prevent', sourceType: 'attackingNonFlyer', oneShot: false, combat: true }]],
   [/^the next time (?:a|an) (white|blue|black|red|green) or (white|blue|black|red|green) source of your choice would deal damage to you this turn, prevent that damage$/, m => [{ type: 'copShield', from: [COLOR_WORD[m[1]], COLOR_WORD[m[2]]], sel: 'you' }]],
   [/^switch (target creature)'s power and toughness until end of turn$/, m => tgt({ type: 'flag', flag: 'swapPT', temp: true }, m[1])],
   [/^(target .+?|it|that creature) gets ([+-]\S+)\/([+-]\S+) and gains (.+?) until end of turn(?:, where x is (.+))?$/, m => { const k = T(m[1]); if (!k) return null; const kws = m[4].split(/,? and |, /).map(w => cap(w.trim())); if (!kws.every(kw => KEYWORDS.has(kw))) return null; const x = m[5] ? parseWhereX(m[5]) : null; const pt = v => v.toLowerCase().replace('+', '') === 'x' ? (x || 'X') : v.toLowerCase() === '-x' ? '-X' : Number(v); return [{ type: 'pump', p: pt(m[2]), t: pt(m[3]), ...k }, ...kws.map(kw => ({ type: 'grant', keyword: kw, ...k }))]; }],
@@ -474,6 +479,7 @@ export function parseEffects(text) {
     if (last && last.type === 'counter' && /^if that spell is countered this way, put it on top of its owner's library instead of into that player's graveyard$/i.test(s.replace(/\.$/, ''))) { last.toTop = true; continue; }
     if (last && last.type === 'peek' && /^put one of them into your hand and the rest on top of (?:your|their) library in any order$/i.test(s.replace(/\.$/, ''))) { last.mode = 'handTop'; continue; }
     if (last && last.type === 'peek' && /^you may have that player shuffle$/i.test(s.replace(/\.$/, ''))) { last.mayShuffle = true; continue; }
+    if (last && last.type === 'dmgRep' && /^you gain life equal to the damage prevented(?: this way)?$/i.test(s.replace(/\.$/, ''))) { last.gainLife = true; continue; }
     const e = parseSentence(s);
     if (e) { out.effects.push(...e); for (const x of e) if (x.note) out.notes.push('Approximated: ' + x.note); }
     else out.notes.push('Ignored: ' + s.slice(0, 80));
@@ -581,6 +587,7 @@ function parseStatic(t) {
   if (/^you may play an additional land on each of your turns$/.test(t)) return [{ type: 'static', kind: 'extraLands', n: 1, who: 'you', scope: { who: 'self' } }];
   if (/^artifacts, creatures, and lands your opponents control enter tapped$/.test(t)) return [{ type: 'static', kind: 'oppEntersTapped', scope: { who: 'self' } }];
   if (/^you have no maximum hand size$/.test(t)) return [{ type: 'static', kind: 'noMaxHand', scope: { who: 'self' } }];
+  if ((m = t.match(/^damage that would reduce your life total to less than (\d+) reduces it to \1 instead$/))) return [{ type: 'static', kind: 'lifeFloor', n: Number(m[1]), scope: { who: 'self' } }];
   if (/^~ can't be the target of aura spells$/.test(t)) return [{ type: 'static', kind: 'noAuras', scope: { who: 'self' } }];
   if ((m = t.match(/^~ can't attack if defending player controls an untapped creature with power (\d+) or greater$/))) return [{ type: 'static', kind: 'cantAttackIfDefenderPower', n: Number(m[1]), scope: { who: 'self' } }];
   if (/^prevent all combat damage that would be dealt to and dealt by enchanted creature$/.test(t)) return [{ type: 'static', kind: 'noCombatDamage', scope: { who: 'enchanted' } }];
