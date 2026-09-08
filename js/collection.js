@@ -1,5 +1,5 @@
 // Collection import: parse card lists, fetch and compile definitions, index your own art.
-import { fetchCards, cached, norm } from './scryfall.js';
+import { fetchCards, cached, norm, tokenArt } from './scryfall.js';
 import { compile, slug } from './cards.js';
 
 // Accepts decklist-style text. Lines like:
@@ -64,6 +64,7 @@ export async function loadArtIndex() {
 }
 export function artFor(def) {
   if (!def) return null;
+  if (def.token) return artIndex.get(slug(def.name)) || tokenArt(def);
   return artIndex.get(slug(def.name)) || (def.id && artIndex.get(def.id)) || def.image || null;
 }
 export function hasOwnArt(def) { return !!(artIndex.get(slug(def.name)) || (def.id && artIndex.get(def.id))); }

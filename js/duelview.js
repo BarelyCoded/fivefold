@@ -4,6 +4,7 @@ import { has, power, toughness, isCreature, isLand, isType, STEP_NAME, costText 
 import { artFor, hasOwnArt } from './collection.js';
 import { costString, COLORS } from './cards.js';
 import { spriteStyle, atlasReady } from './atlas.js';
+import { onTokenArt } from './scryfall.js';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -320,6 +321,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     return `<div class="overlay" data-close-viewer><div class="modal wide"><h3>${esc(p.name)}'s graveyard</h3><div class="viewer">${p.graveyard.length ? p.graveyard.slice().reverse().map(c => cardHtml(c.def, { id: c.id, zone: 'grave', classes: p === me && duel.canCast(me, c) ? ['castable'] : [] })).join('') : '<p class="small">Empty.</p>'}</div><button class="btn" data-close-viewer>Close</button></div></div>`;
   }
   function render() { root.innerHTML = template(); drawArrows(); }
+  onTokenArt(() => { if (root.isConnected) render(); }); // a token's picture arrived: show it
 
   // ---- cast wizard -------------------------------------------------------------------
   function startCast(card, base = {}) {

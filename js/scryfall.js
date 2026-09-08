@@ -128,3 +128,41 @@ export function cached(name) {
 
 export function cacheSize() { return Object.keys(load()).length; }
 export function clearCache() { cache = {}; save(); }
+
+// ---- token art ----------------------------------------------------------------------
+// Tokens are made by the engine, not fetched, so their pictures are looked up separately by
+// type line, colour and size: the oldest paper token that matches. Cached in localStorage.
+const TOKEN_KEY = 'ff.tokens.v1';
+let tokenCache = null;
+const tokenPending = new Set();
+const tokenListeners = [];
+function loadTokens() { if (!tokenCache) { try { tokenCache = JSON.parse(localStorage.getItem(TOKEN_KEY) || '{}'); } catch { tokenCache = {}; } } return tokenCache; }
+export const tokenKey = def => `${(def.subtypes || []).join(' ')}|${(def.colors || []).join('')}|${def.power}/${def.toughness}`;
+export function onTokenArt(fn) { tokenListeners.push(fn); }
+// Synchronous: the cached image URL, or null while a lookup runs in the background.
+export function tokenArt(def) {
+  const cache = loadTokens(); const key = tokenKey(def);
+  if (key in cache) return cache[key];
+  if (!tokenPending.has(key)) { tokenPending.add(key); fetchTokenArt(def, key); }
+  return null;
+}
+async function fetchTokenArt(def, key) {
+  const cache = loadTokens();
+  const subs = (def.subtypes || []).filter(Boolean);
+  const colors = def.colors || [];
+  const parts = ['t:token', 't:creature', 'game:paper', ...subs.map(s => `t:"${s}"`), colors.length ? `c=${colors.join('').toLowerCase()}` : 'c=c'];
+  if (Number.isFinite(def.power)) parts.push(`pow=${def.power}`);
+  if (Number.isFinite(def.toughness)) parts.push(`tou=${def.toughness}`);
+  let url = null;
+  try {
+    for (const q of [parts.join(' '), parts.filter(x => !x.startsWith('pow') && !x.startsWith('tou')).join(' ')]) {
+      const data = await getJson(`https://api.scryfall.com/cards/search?q=${encodeURIComponent(q)}&unique=art&order=released&dir=asc`);
+      const hit = (data?.data || []).find(c => imageOf(c));
+      if (hit) { url = imageOf(hit); break; }
+    }
+  } catch (e) { console.warn('token art lookup failed', e); }
+  cache[key] = url;
+  try { localStorage.setItem(TOKEN_KEY, JSON.stringify(cache)); } catch { /* ignore */ }
+  tokenPending.delete(key);
+  for (const l of tokenListeners) l(key, url);
+}
