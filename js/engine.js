@@ -891,7 +891,7 @@ export class Duel {
       }
       case 'peek': for (const s of subs) if (s.player) yield* this.peek(p, s.player, n, e.mode); break;
       case 'extraTurn': this.extraTurns++; break;
-      case 'token': for (let i = 0; i < n; i++) this.createToken(p, e); break;
+      case 'token': { const cnt = this.amount(e.count ?? e.amount ?? 1, ctx) || 1; for (let i = 0; i < cnt; i++) this.createToken(p, e); break; }
       case 'exileGraveyard': { const pls = e.who === 'you' ? [p] : e.who === 'each' ? this.players : subs.filter(s => s.player).map(s => s.player); for (const pl of pls) for (const c of pl.graveyard.slice()) this.moveTo(c, 'exile'); break; }
       case 'poison': for (const s of subs) if (s.player) s.player.poison += n; break;
       case 'noop': break;
