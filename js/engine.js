@@ -32,7 +32,7 @@ export class Duel {
     this.turn = 0; this.active = 0; this.priority = 0; this.passes = 0; this.step = 'setup'; this.stepIndex = -1;
     this.stack = []; this.jobs = []; this.events = []; this.pending = null; this.winner = null;
     this.log = []; this.listeners = []; this.attackers = []; this.blocks = {}; this.fog = false; this.extraTurns = 0;
-    this.firstPlayer = 0; this.stepCount = 0; this.delayed = [];
+    this.firstPlayer = 0; this.stepCount = 0; this.delayed = []; this.fx = [];
   }
   makePlayer(p, idx) {
     const library = shuffle(p.deck.map(def => this.instance(def, idx)), this.rng);
@@ -194,6 +194,7 @@ export class Duel {
           for (const id of ids) { const c = this.card(id); if (!has(c, 'Vigilance')) this.tap(c); c.attackedThisTurn = true; this.fireEvent({ type: 'attacks', card: c }); }
           if (!ids.length) { this.say(`${ap.name} does not attack.`); this.stepIndex = STEPS.indexOf('endCombat') - 1; continue; }
           this.say(`${ap.name} attacks with ${ids.map(id => this.card(id).def.name).join(', ')}.`);
+          this.fx.push({ type: 'attack', ids: ids.slice() });
           if (ids.length === 1) for (const c of ap.battlefield) { const n = [...c.cur.kw].filter(k => k === 'Exalted').length; if (n) this.pushTrigger(c, { type: 'triggered', event: 'exalted', effects: [{ type: 'pump', p: 1, t: 1, sel: 'fixed' }], text: 'Exalted' }, { fixed: this.card(ids[0]) }); }
           break;
         }
@@ -206,6 +207,7 @@ export class Duel {
           else this.blocks = clean;
           const names = Object.entries(this.blocks).map(([aid, bids]) => `${bids.map(id => this.card(id).def.name).join(' + ')} blocks ${this.card(Number(aid)).def.name}`);
           this.say(names.length ? names.join('; ') + '.' : `${def.name} does not block.`);
+          for (const [aid, bids] of Object.entries(this.blocks)) this.fx.push({ type: 'block', attacker: Number(aid), blockers: bids.slice() });
           for (const [aid, bids] of Object.entries(this.blocks)) {
             const a = this.card(Number(aid));
             this.fireEvent({ type: 'becomesBlocked', card: a, by: bids.map(id => this.card(id)) });
@@ -535,6 +537,7 @@ export class Duel {
     const item = { id: uid++, kind: 'spell', card, controller: p.idx, targets, x: opts.x || 0, modes: opts.modes || null, kicked: !!opts.kicked, buyback: !!opts.buyback, flashback: fromGrave, effects: this.spellEffects(d, opts) };
     this.stack.push(item);
     this.say(`${p.name} casts ${d.name}${opts.x ? ` (X=${opts.x})` : ''}${opts.kicked ? ' with kicker' : ''}.`);
+    this.fx.push({ type: 'cast', id: card.id, controller: p.idx });
     for (const t of targets) if (t.type === 'perm') this.fireEvent({ type: 'targeted', card: this.card(t.id) });
     this.fireEvent({ type: 'cast', player: p.idx, card });
     for (const c of p.battlefield) if (has(c, 'Prowess') && !isCreatureDef(card)) this.pushTrigger(c, { effects: [{ type: 'pump', p: 1, t: 1, sel: 'self' }], text: 'Prowess' });
@@ -923,6 +926,7 @@ export class Duel {
     if (has(c, 'Indestructible')) return;
     if (c.regen > 0 && !noRegen) { c.regen--; c.tapped = true; c.damage = 0; removeFrom(this.attackers, c.id); delete this.blocks[c.id]; for (const k of Object.keys(this.blocks)) this.blocks[k] = this.blocks[k].filter(id => id !== c.id); this.say(`${c.def.name} regenerates.`); return; }
     this.say(`${c.def.name} is destroyed.`);
+    this.fx.push({ type: 'die', id: c.id, name: c.def.name, controller: c.controller });
     this.moveTo(c, 'graveyard');
   }
   counterItem(item) {
@@ -941,6 +945,7 @@ export class Duel {
       if (has(source, 'Deathtouch') && isCreature(source)) target.flags.add('deathtouched');
       target.damaged.add(source.id);
       this.say(`${source.def.name} deals ${n} damage to ${target.def.name}.`);
+      this.fx.push({ type: 'damage', target: target.id, amount: n });
       if (has(source, 'Lifelink')) this.players[source.controller].life += n;
       this.fireEvent({ type: 'damage', source, target, amount: n, combat: !!opts.combat });
       return n;
@@ -949,6 +954,7 @@ export class Duel {
     if (opts.combat && (this.fog || source.flags?.has('noCombatDamage'))) return 0;
     if (has(source, 'Infect') || has0(source.def, 'Infect')) pl.poison += n; else pl.life -= n;
     this.say(`${source.def.name} deals ${n} damage to ${pl.name}.`);
+    this.fx.push({ type: 'damage', player: pl.idx, amount: n });
     if (has(source, 'Lifelink')) this.players[source.controller].life += n;
     this.fireEvent({ type: 'damage', source, target: pl, amount: n, combat: !!opts.combat });
     return n;
@@ -993,6 +999,7 @@ export class Duel {
     const atk = this.activePlayer, def = this.defender;
     const first = c => has(c, 'First strike') || has(c, 'Double strike');
     const deals = c => which === 'first' ? first(c) : (!first(c) || has(c, 'Double strike'));
+    this.fx.push({ type: 'strike', attackers: this.attackers.slice(), blocks: Object.fromEntries(Object.entries(this.blocks).map(([k, v]) => [k, v.slice()])) });
     for (const aid of this.attackers.slice()) {
       const a = atk.battlefield.find(x => x.id === aid); if (!a) continue;
       const blockers = (this.blocks[aid] || []).map(id => def.battlefield.find(x => x.id === id)).filter(Boolean);

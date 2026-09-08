@@ -6,35 +6,38 @@ import { costString } from './cards.js';
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 let el = null, current = null;
 
+const hostAt = (x, y) => document.elementFromPoint(x, y)?.closest('.card, [data-preview]') || null;
+
 export function initPreview() {
   if (el) return;
   el = document.createElement('div'); el.id = 'bigcard'; el.hidden = true;
   document.body.appendChild(el);
-  document.addEventListener('mouseover', ev => {
-    const host = ev.target.closest('.card, [data-preview]');
-    if (!host || host === current) return;
-    const name = host.dataset.preview || host.dataset.name;
-    const def = name ? defOf(name) : null;
-    if (!def) return;
-    current = host;
-    show(def, host, ev);
+  document.addEventListener('mousemove', ev => {
+    // Re-check what is under the cursor every move: the table re-renders while hovering,
+    // which removes the hovered element without a mouseout event.
+    const host = hostAt(ev.clientX, ev.clientY);
+    if (!host) { if (!el.hidden) hide(); return; }
+    if (host !== current || !current.isConnected) {
+      const name = host.dataset.preview || host.dataset.name;
+      const def = name ? defOf(name) : null;
+      if (!def) { hide(); return; }
+      current = host;
+      show(def, host, ev);
+    } else place(ev);
   });
-  document.addEventListener('mouseout', ev => {
-    const host = ev.target.closest('.card, [data-preview]');
-    if (!host || host !== current) return;
-    if (ev.relatedTarget && host.contains(ev.relatedTarget)) return;
-    hide();
-  });
-  document.addEventListener('mousemove', ev => { if (!el.hidden) place(ev); });
+  document.addEventListener('mousedown', hide, true);
   document.addEventListener('scroll', hide, true);
+  document.addEventListener('keydown', hide);
+  document.documentElement.addEventListener('mouseleave', hide);
+  window.addEventListener('blur', hide);
 }
 
 function show(def, host, ev) {
   const art = artFor(def);
   const own = hasOwnArt(def);
   const pt = host.querySelector('.card-pt')?.textContent || (def.kind === 'creature' ? `${def.power}/${def.toughness}` : '');
-  const kws = def.keywords?.length ? def.keywords.join(', ') : '';
-  const showText = !art || own; // Scryfall's image already carries the rules text
+  const kws = def.kwNames?.length ? def.kwNames.join(', ') : (def.keywords || []).map(k => typeof k === 'string' ? k : k.k).join(', ');
+  const showText = !art || own;
   el.innerHTML = `
     <div class="bc-img${art ? '' : ' none'}" style="${art ? `background-image:url('${art}')` : ''}">
       ${!art ? `<div class="bc-fallback"><b>${esc(def.name)}</b><span>${esc(def.typeLine)}</span></div>` : ''}
@@ -45,7 +48,7 @@ function show(def, host, ev) {
       <div class="bc-oracle">${esc(def.oracle).replace(/\n/g, '<br>')}</div>
       ${pt || kws ? `<div class="bc-pt">${esc(pt)}${kws ? (pt ? ' · ' : '') + esc(kws) : ''}</div>` : ''}
     </div>` : ''}
-    ${def.notes?.length ? `<div class="bc-notes">Demo engine: ${def.notes.map(esc).join('; ')}</div>` : ''}`;
+    ${def.notes?.length ? `<div class="bc-notes">Engine: ${def.notes.map(esc).join('; ')}</div>` : ''}`;
   el.hidden = false;
   place(ev);
 }
@@ -59,4 +62,4 @@ function place(ev) {
   el.style.left = x + 'px'; el.style.top = y + 'px';
 }
 
-export function hide() { if (el) { el.hidden = true; } current = null; }
+export function hide() { if (el) el.hidden = true; current = null; }
