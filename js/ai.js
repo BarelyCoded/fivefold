@@ -7,7 +7,7 @@ const cardValue = c => (isCreatureDef(c) ? c.def.power + c.def.toughness + 1 : 2
 
 // ---- targeting -----------------------------------------------------------------------
 const HOSTILE = new Set(['damage', 'damageEqualPower', 'fight', 'destroy', 'exile', 'bounce', 'tap', 'freeze', 'control', 'flag', 'counter', 'lose', 'discard', 'mill', 'sacrifice', 'poison']);
-const FRIENDLY = new Set(['pump', 'grant', 'regenerate', 'untap', 'gain', 'draw', 'fromGraveyard']);
+const FRIENDLY = new Set(['pump', 'grant', 'regenerate', 'untap', 'gain', 'draw', 'fromGraveyard', 'peek']);
 
 function pickTarget(duel, p, e, options, x = 0) {
   const opp = duel.opponentOf(p);
@@ -34,7 +34,7 @@ function pickTarget(duel, p, e, options, x = 0) {
     return null;
   }
   if (FRIENDLY.has(e.type)) {
-    if (e.type === 'gain' || e.type === 'draw') return players.find(o => o.idx === p.idx) || null;
+    if (e.type === 'gain' || e.type === 'draw' || e.type === 'peek') return players.find(o => o.idx === p.idx) || null;
     if (e.type === 'fromGraveyard') { const cards = options.filter(o => o.type === 'card').map(o => ({ o, c: duel.card(o.id) })).filter(t => t.c && t.c.owner === p.idx); const b = cards.sort((a, b) => cardValue(b.c) - cardValue(a.c))[0]; return b ? b.o : null; }
     const b = best(mine.filter(t => isCreature(t.c)));
     return b ? b.o : null;
@@ -295,6 +295,13 @@ export const aiHooks = {
       }
       case 'color': { const need = {}; for (const c of p.hand) for (const pip of c.def.cost.pips) for (const col of pip) need[col] = (need[col] || 0) + 1; return Object.entries(need).sort((a, b) => b[1] - a[1])[0]?.[0] || 'G'; }
       case 'target': return pickTarget(duel, p, req.effect, req.options);
+      case 'order': {
+        // Top first. Lands to the top while short on mana, then the cheapest castable spells, then the rest by value.
+        const cards = req.options.map(o => ({ o, c: duel.card(o.id) })).filter(t => t.c);
+        const lands = p.battlefield.filter(isLand).length;
+        const score = t => isLand(t.c) ? (lands < 4 ? 100 : -100) : (t.c.def.cmc <= lands + 1 ? 50 : 0) + cardValue(t.c);
+        return cards.sort((a, b) => score(b) - score(a)).map(t => t.o.id);
+      }
       case 'choose': {
         const cards = req.options.map(o => ({ o, c: duel.card(o.id) })).filter(t => t.c);
         const text = req.text.toLowerCase();

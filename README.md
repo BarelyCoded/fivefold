@@ -40,7 +40,7 @@ The engine targets the mechanics of Alpha through Alliances, using current Oracl
 - **Permanents**: lands, creatures, artifacts, enchantments, auras (including control-changing ones), equipment.
 - **Abilities**: static (lords, anthems, enchanted-creature effects, can't attack/block, must attack, doesn't untap), triggered (enters, dies, attacks, blocks, deals damage, upkeep, end step, draw step), activated (tap, mana, sacrifice, discard, life, counter costs; sorcery or upkeep timing), mana abilities.
 - **Keywords**: flying, first strike, double strike, trample, haste, vigilance, deathtouch, lifelink, reach, defender, menace, flash, indestructible, hexproof, shroud, fear, intimidate, shadow, horsemanship, flanking, prowess, exalted, wither, infect, undying, persist, protection, landwalk, rampage, cumulative upkeep, echo, kicker, buyback, flashback, cycling, equip, enchant. Banding is ignored.
-- **Effects**: damage, destroy, exile, bounce, pump, grants, draw, discard, mill, life, counters, tokens, tutors, regeneration, fog, tap/untap/freeze, sacrifice, control, X costs, modal spells, "unless you pay", additional costs, pitch spells, extra turns, scry, poison, legend rule.
+- **Effects**: damage, destroy, exile, bounce, pump, grants, draw, discard, mill, life, counters, tokens, tutors, regeneration, fog, tap/untap/freeze, sacrifice, control, X costs, modal spells, "unless you pay", additional costs, pitch spells, extra turns, scry, looking at and reordering the top of a library, poison, legend rule.
 
 Run the coverage report to see exactly which cards work:
 

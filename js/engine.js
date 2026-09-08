@@ -810,6 +810,7 @@ export class Duel {
       case 'fog': this.fog = true; this.say('All combat damage this turn is prevented.'); break;
       case 'addMana': if (e.any) { const col = p.ai ? (this.hooks.choose(this, { kind: 'color', player: p.idx }) || 'G') : yield { kind: 'color', player: p.idx, text: 'Choose a color' }; p.pool[col] += e.any; } else for (const m of e.mana) p.pool[m]++; break;
       case 'scry': yield* this.scry(p, n); break;
+      case 'peek': for (const s of subs) if (s.player) yield* this.peek(p, s.player, n, e.mode); break;
       case 'extraTurn': this.extraTurns++; break;
       case 'token': for (let i = 0; i < n; i++) this.createToken(p, e); break;
       case 'exileGraveyard': { const pls = e.who === 'you' ? [p] : e.who === 'each' ? this.players : subs.filter(s => s.player).map(s => s.player); for (const pl of pls) for (const c of pl.graveyard.slice()) this.moveTo(c, 'exile'); break; }
@@ -865,6 +866,27 @@ export class Duel {
     }
     shuffle(p.library, this.rng);
     if (e.to === 'top' && c) { removeFrom(p.library, c); p.library.push(c); }
+  }
+  // Look at the top n cards of `owner`'s library. mode: 'look' | 'reorder' (put back in any order) | 'bottom' (may put on the bottom).
+  *peek(p, owner, n, mode = 'look') {
+    const top = owner.library.slice(-n).reverse(); // top card first
+    if (!top.length) return;
+    const whose = owner === p ? (p.ai ? 'their' : 'your') : `${owner.name}'s`;
+    const opts = top.map(c => ({ id: c.id, label: c.def.name }));
+    if (p.ai) this.say(`${p.name} looks at the top ${top.length} card${top.length > 1 ? 's' : ''} of ${whose} library.`);
+    else this.say(`Top of ${whose} library: ${top.map(c => c.def.name).join(', ')}.`);
+    if (mode === 'reorder') {
+      const ids = yield { kind: 'order', player: p.idx, text: `Put the top ${top.length} cards of ${whose} library back in any order`, options: opts, secret: true };
+      const order = (ids || []).map(id => this.card(id)).filter((c, i, a) => c && top.includes(c) && a.indexOf(c) === i);
+      for (const c of top) if (!order.includes(c)) order.push(c);
+      for (const c of top) removeFrom(owner.library, c);
+      for (const c of order.slice().reverse()) owner.library.push(c);
+    } else if (mode === 'bottom') {
+      const ids = yield { kind: 'choose', player: p.idx, text: `Choose cards to put on the bottom of ${whose} library`, options: opts, min: 0, max: top.length, secret: true };
+      for (const id of ids || []) { const c = this.card(id); if (c && top.includes(c)) { removeFrom(owner.library, c); owner.library.unshift(c); } }
+    } else if (!p.ai) {
+      yield { kind: 'look', player: p.idx, text: `Top of ${whose} library, top card first`, options: opts, secret: true };
+    }
   }
   *scry(p, n) {
     const top = p.library.slice(-n).reverse();

@@ -204,7 +204,11 @@ const rules = [
   [/^(that player|target player|target opponent) gets (\S+) poison counters?$/, m => { const k = T(m[1]); return k ? [{ type: 'poison', amount: amt(m[2]), ...k }] : null; }],
   [/^(that player|target player|each player|each opponent|target opponent) (?:draws|draw) (\S+) cards?$/, m => { const k = T(m[1]); return k ? [{ type: 'draw', amount: amt(m[2]), ...k }] : null; }],
   [/^(that player|target player) (gains|loses) (\S+) life$/, m => { const k = T(m[1]); return k ? [{ type: m[2] === 'gains' ? 'gain' : 'lose', amount: amt(m[3]), ...k }] : null; }],
-  [/^look at the top (\S+) cards? of (?:your|target player's) library(?:, then put (?:them|it) back in any order|\. you may put (?:them|it) on the bottom of your library in any order)?$/, () => [{ type: 'noop' }]],
+  [/^look at the top (\S+) cards? of (your|target player's) library(, then put (?:them|it) back in any order|\. you may put (?:them|it) on the bottom of your library in any order)?$/, m => {
+    const k = m[2] === 'your' ? { sel: 'you', restrict: {} } : T('target player');
+    const mode = !m[3] ? 'look' : m[3].startsWith(',') ? 'reorder' : 'bottom';
+    return [{ type: 'peek', amount: amt(m[1]), mode, ...k }];
+  }],
   [/^a creature dealt damage this way can't be regenerated this turn$/, () => []],
   [/^you may put (?:it|that card) on the bottom of your library$/, () => []],
   [/^(?:you )?gain (\S+) life$/, m => [{ type: 'gain', amount: amt(m[1]), sel: 'you' }]],

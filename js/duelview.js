@@ -30,7 +30,7 @@ export function cardHtml(def, opts = {}) {
 
 export function mountDuel(root, duel, { onEnd, ante, speed = 420 }) {
   const me = duel.players[0], ai = duel.players[1];
-  const ui = { wizard: null, attackers: new Set(), blocks: {}, blocker: null, message: '', menu: null, viewer: null, choice: null };
+  const ui = { wizard: null, attackers: new Set(), blocks: {}, blocker: null, message: '', menu: null, viewer: null, choice: null, order: null };
   let finished = false, running = false;
 
   // ---- engine driver ----------------------------------------------------------------
@@ -256,6 +256,12 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420 }) {
       case 'yesno': return `<div class="hint">${esc(req.text)}</div><button class="btn primary" data-answer="yes">Yes</button><button class="btn" data-answer="no">No</button>`;
       case 'color': return `<div class="hint">${esc(req.text)}</div>${COLORS.map(c => `<button class="btn" data-color="${c}">${c}</button>`).join('')}`;
       case 'target': return `<div class="hint">${esc(req.text)} — click it on the table.</div>${req.options.filter(o => o.type === 'card').map(o => `<button class="btn small" data-reqref="${o.type}:${o.id}">${esc(o.label)}</button>`).join('')}`;
+      case 'look': return `<div class="hint">${esc(req.text)}.</div><div class="choices">${req.options.map((o, i) => `<div class="choice" data-preview="${esc(o.label)}">${i + 1}. ${esc(o.label)}</div>`).join('')}</div><button class="btn primary" id="b-look">OK</button>`;
+      case 'order': {
+        if (!ui.order || ui.order.length !== req.options.length || ui.order.some(id => !req.options.some(o => o.id === id))) ui.order = req.options.map(o => o.id);
+        const label = id => req.options.find(o => o.id === id)?.label || '';
+        return `<div class="hint">${esc(req.text)}. The first card is drawn first.</div><div class="choices">${ui.order.map((id, i) => `<div class="choice" data-preview="${esc(label(id))}"><button class="btn small" data-order="up" data-idx="${i}" ${i === 0 ? 'disabled' : ''} title="Move up">▲</button><button class="btn small" data-order="down" data-idx="${i}" ${i === ui.order.length - 1 ? 'disabled' : ''} title="Move down">▼</button> ${i + 1}. ${esc(label(id))}</div>`).join('')}</div><button class="btn primary" id="b-order">OK</button>`;
+      }
       case 'choose': {
         const sel = ui.choice || new Set();
         return `<div class="hint">${esc(req.text)}${req.min === req.max ? '' : ` (${req.min}–${req.max})`}</div><div class="choices">${req.options.map(o => `<label class="choice" data-preview="${esc(o.label)}"><input type="checkbox" data-choice="${o.id}" ${sel.has(o.id) ? 'checked' : ''}> ${esc(o.label)}</label>`).join('')}</div><button class="btn primary" id="b-choose" ${sel.size < req.min || sel.size > req.max ? 'disabled' : ''}>OK</button>`;
@@ -383,6 +389,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420 }) {
     if (btn.dataset.wizref) { const [type, id] = btn.dataset.wizref.split(':'); pickRef({ type, id: Number(id) }); return; }
     if (btn.dataset.reqref) { const [type, id] = btn.dataset.reqref.split(':'); pickRef({ type, id: Number(id) }); return; }
     if (btn.dataset.answer) { duel.humanAnswer(btn.dataset.answer === 'yes'); run(); return; }
+    if (btn.dataset.order && ui.order) { const i = Number(btn.dataset.idx), j = btn.dataset.order === 'up' ? i - 1 : i + 1; if (j >= 0 && j < ui.order.length) { [ui.order[i], ui.order[j]] = [ui.order[j], ui.order[i]]; render(); } return; }
     if (btn.dataset.color) { duel.humanAnswer(btn.dataset.color); run(); return; }
     if (btn.hasAttribute('data-close-viewer') && (btn === ev.target || btn.tagName === 'BUTTON')) { ui.viewer = null; render(); return; }
     if (btn.dataset.grave !== undefined) { ui.viewer = Number(btn.dataset.grave); render(); return; }
@@ -392,6 +399,8 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420 }) {
       case 'b-attack': { const ids = [...ui.attackers]; ui.attackers = new Set(); duel.humanAnswer(ids); run(); return; }
       case 'b-block': { if (!duel.validBlocks(ui.blocks)) { ui.message = 'Those blocks are not legal.'; render(); return; } const b = ui.blocks; ui.blocks = {}; ui.blocker = null; ui.message = ''; duel.humanAnswer(b); run(); return; }
       case 'b-choose': { const ids = [...(ui.choice || [])]; ui.choice = null; duel.humanAnswer(ids); run(); return; }
+      case 'b-order': { const ids = (ui.order || []).slice(); ui.order = null; duel.humanAnswer(ids); run(); return; }
+      case 'b-look': { duel.humanAnswer(null); run(); return; }
       case 'b-concede': if (confirm('Concede this duel? You will lose your ante card.')) { duel.end(1, `${me.name} concedes.`); run(); } return;
     }
     if (btn.classList.contains('stack-item')) { if (targeting()) pickRef({ type: 'spell', id: Number(btn.dataset.stack) }); return; }
