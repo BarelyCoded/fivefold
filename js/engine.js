@@ -39,7 +39,7 @@ export class Duel {
     return { idx, name: p.name, life: p.life, poison: 0, library, hand: [], battlefield: [], graveyard: [], exile: [], landPlayed: 0, ai: !!p.ai, pool: emptyPool(), skipToEnd: false, portrait: p.portrait || null, shield: 0, cop: [] };
   }
   instance(def, owner) {
-    return { id: uid++, def, owner, controller: owner, zone: 'library', tapped: false, sick: true, damage: 0, counters: {}, temp: { p: 0, t: 0, kw: [], flags: [] }, attachedTo: null, regen: 0, flags: new Set(), controlUntilEot: null, token: false, cur: null, damaged: new Set(), attackedThisTurn: false, enteredTurn: 0, onceUsed: 0, chosenColor: null, shield: 0, linked: [] };
+    return { id: uid++, def, owner, controller: owner, zone: 'library', tapped: false, sick: true, damage: 0, counters: {}, temp: { p: 0, t: 0, kw: [], flags: [] }, attachedTo: null, regen: 0, flags: new Set(), controlUntilEot: null, token: false, cur: null, damaged: new Set(), attackedThisTurn: false, enteredTurn: 0, uses: { turn: -1, n: {} }, chosenColor: null, shield: 0, linked: [] };
   }
   say(msg) { this.log.push(msg); if (this.log.length > 400) this.log.shift(); }
   emit() { for (const l of this.listeners) l(this); }
@@ -601,7 +601,8 @@ export class Duel {
     const ab = card.def.abilities[i]; if (!ab || ab.type !== 'activated') return false;
     if (card.zone !== 'battlefield' || card.controller !== p.idx) return false;
     if (ab.timing === 'sorcery' && !this.sorcerySpeed(p)) return false;
-    if (ab.once && card.onceUsed === this.stepCount) return false;
+    const lim = ab.limit || (ab.once ? 1 : 0);
+    if (lim && card.uses.turn === this.turn && (card.uses.n[i] || 0) >= lim) return false;
     const c = ab.cost;
     if (c.tap && (card.tapped || (isCreature(card) && card.sick && !has(card, 'Haste')))) return false;
     if (c.untap && !card.tapped) return false;
@@ -634,7 +635,8 @@ export class Duel {
     if (c.discard) { const cs = (opts.discard || []).map(id => this.card(id)).filter(x => x && p.hand.includes(x)); while (cs.length < c.discard) { const x = p.hand.find(h => !cs.includes(h)); if (!x) break; cs.push(x); } this.discardCards(p, cs); }
     if (c.removeCounter) card.counters[c.removeCounter.kind] -= c.removeCounter.n;
     if (c.tapCreature) { const t = this.card(opts.tapCreature) || p.battlefield.find(x => isCreature(x) && !x.tapped && x !== card); if (t) this.tap(t); }
-    if (ab.once) card.onceUsed = this.stepCount;
+    if (card.uses.turn !== this.turn) card.uses = { turn: this.turn, n: {} };
+    card.uses.n[i] = (card.uses.n[i] || 0) + 1;
     const item = { id: uid++, kind: 'ability', card, controller: p.idx, targets, x: opts.x || 0, effects: ab.effects, optional: ab.optional, text: ab.text };
     this.stack.push(item);
     this.say(`${p.name} activates ${card.def.name}.`);

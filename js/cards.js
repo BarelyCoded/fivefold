@@ -508,9 +508,9 @@ function parseAbilityLine(line, ctx) {
     const cost = parseAbilityCost(m[1]);
     if (!cost) return null;
     let body = m[2];
-    let timing = 'instant', once = false;
-    body = body.replace(/\s*activate (?:this ability )?only (as a sorcery|once each turn|during your turn|during combat|if [^.]+|any time you could cast a sorcery)\.?$/i, (s, w) => { if (/sorcery$/.test(w) || /cast a sorcery/.test(w)) timing = 'sorcery'; else if (/once each turn/.test(w)) once = true; return ''; });
-    body = body.replace(/\s*activate (?:this ability )?no more than (once|twice|\w+ times) each turn\.?$/i, () => { once = true; return ''; });
+    let timing = 'instant', limit = 0;   // limit: activations allowed per turn (0 = unlimited)
+    body = body.replace(/\s*activate (?:this ability )?only (as a sorcery|once each turn|during your turn|during combat|if [^.]+|any time you could cast a sorcery)\.?$/i, (s, w) => { if (/sorcery$/.test(w) || /cast a sorcery/.test(w)) timing = 'sorcery'; else if (/once each turn/.test(w)) limit = 1; return ''; });
+    body = body.replace(/\s*activate (?:this ability )?no more than (once|twice|\w+) (?:times? )?each turn\.?$/i, (s, w) => { limit = w === 'once' ? 1 : w === 'twice' ? 2 : (NUM[w] ?? Number(w) ?? 1) || 1; return ''; });
     body = body.replace(/\s*activate only during your upkeep\.?$/i, () => { timing = 'upkeep'; return ''; });
     // mana ability
     let mm;
@@ -523,7 +523,7 @@ function parseAbilityLine(line, ctx) {
     if (/^add one mana of any color that a land an opponent controls could produce\.?$/.test(body)) return { type: 'mana', cost, produces: COLORS.slice(), amount: 1, notes: ['Approximated: adds any color, whatever lands the opponent controls'] };
     const eff = parseEffects(body);
     if (!eff.effects.length) return null;
-    return { type: 'activated', cost, effects: eff.effects, optional: eff.optional, timing, once, notes: eff.notes, text: line };
+    return { type: 'activated', cost, effects: eff.effects, optional: eff.optional, timing, limit, once: limit === 1, notes: eff.notes, text: line };
   }
   // triggered
   if ((m = t.match(/^(when|whenever) (.+?), (.+)$/))) {
