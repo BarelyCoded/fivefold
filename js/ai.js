@@ -201,6 +201,28 @@ function isHostileToMe(duel, p, item) {
   return (item.targets || []).some(t => (t.type === 'perm' && duel.card(t.id)?.controller === p.idx) || (t.type === 'player' && t.idx === p.idx)) || (item.effects || []).some(e => e.type === 'destroyAll' || (e.sel === 'each' && e.type === 'damage'));
 }
 
+// Simulate one attacker against one blocker: who dies, honouring first strike, double strike,
+// deathtouch, damage already marked, protection, indestructible and regeneration shields.
+export function outcome(duel, a, b) {
+  const fs = c => has(c, 'First strike') || has(c, 'Double strike');
+  const aFS = fs(a), bFS = fs(b), aDS = has(a, 'Double strike'), bDS = has(b, 'Double strike');
+  const aPow = duel.protectedFrom(b, a) ? 0 : power(a), bPow = duel.protectedFrom(a, b) ? 0 : power(b);
+  const survives = c => has(c, 'Indestructible') || c.regen > 0;
+  const lethal = (victim, dmg, src) => dmg >= toughness(victim) || (dmg > 0 && has(src, 'Deathtouch'));
+  let aDmg = a.damage, bDmg = b.damage, aDead = false, bDead = false;
+  if (aFS || bFS) {
+    if (aFS) bDmg += aPow;
+    if (bFS) aDmg += bPow;
+    if (aFS && lethal(b, bDmg, a) && !survives(b)) bDead = true;
+    if (bFS && lethal(a, aDmg, b) && !survives(a)) aDead = true;
+  }
+  if (!aDead && (!aFS || aDS)) bDmg += aPow;
+  if (!bDead && (!bFS || bDS)) aDmg += bPow;
+  if (!bDead && lethal(b, bDmg, a) && !survives(b)) bDead = true;
+  if (!aDead && lethal(a, aDmg, b) && !survives(a)) aDead = true;
+  return { attackerDies: aDead, blockerDies: bDead };
+}
+
 function chooseAttackers(duel, p) {
   const opp = duel.opponentOf(p);
   const mine = p.battlefield.filter(c => duel.canAttack(c));
@@ -211,11 +233,14 @@ function chooseAttackers(duel, p) {
   for (const a of mine) {
     if (a.cur.flags.has('mustAttack')) { out.push(a.id); continue; }
     const legal = blockers.filter(b => duel.canBlock(b, a));
-    const killedBy = legal.filter(b => (power(b) >= toughness(a) || has(b, 'Deathtouch')) && !(has(a, 'First strike') && !has(b, 'First strike') && power(a) >= toughness(b)));
-    const survivesAndKills = killedBy.filter(b => toughness(b) > power(a) || (has(b, 'First strike') && !has(a, 'First strike') && power(b) >= toughness(a)));
-    if (!legal.length || !killedBy.length) out.push(a.id);
-    else if (!survivesAndKills.length && value(a) <= 3.5) out.push(a.id);
-    else if (opp.life <= power(a) * 2 && killedBy.length <= 1) out.push(a.id);
+    const results = legal.map(b => ({ b, ...outcome(duel, a, b) }));
+    const killedBy = results.filter(r => r.attackerDies);
+    const eaten = killedBy.filter(r => !r.blockerDies);            // a blocker that kills it and lives
+    const badTrade = killedBy.filter(r => r.blockerDies && value(r.b) < value(a) - 1); // trades down
+    if (!legal.length || !killedBy.length) { out.push(a.id); continue; }
+    if (eaten.length) { if (opp.life <= power(a) && killedBy.length <= 1 && legal.length <= 1) out.push(a.id); continue; }
+    if (!badTrade.length && value(a) <= 4) out.push(a.id);            // happy to trade evenly with small stuff
+    else if (opp.life <= power(a) * 2) out.push(a.id);
   }
   return out;
 }
@@ -229,20 +254,21 @@ function chooseBlocks(duel, p) {
   // Lure: must block that creature with everything able
   const lure = attackers.find(a => a.cur.flags.has('lure'));
   if (lure) { const bs = free.filter(b => duel.canBlock(b, lure)); if (bs.length) { blocks[lure.id] = bs.map(b => b.id); for (const b of bs) free.splice(free.indexOf(b), 1); } }
+  const byValue = list => list.sort((x, y) => value(x.b) - value(y.b));
   for (const a of attackers) {
     if (blocks[a.id]) continue;
-    const cands = free.filter(b => duel.canBlock(b, a));
+    const cands = free.filter(b => duel.canBlock(b, a)).map(b => ({ b, ...outcome(duel, a, b) }));
     if (!cands.length) continue;
-    const kills = b => power(b) >= toughness(a) - a.damage || has(b, 'Deathtouch');
-    const dies = b => (power(a) >= toughness(b) || has(a, 'Deathtouch')) && !(has(b, 'First strike') && !has(a, 'First strike') && kills(b));
-    let pick = cands.filter(b => kills(b) && !dies(b)).sort((x, y) => value(x) - value(y))[0];
-    if (!pick) pick = cands.filter(b => kills(b) && dies(b) && value(a) >= value(b)).sort((x, y) => value(x) - value(y))[0];
-    if (!pick) pick = cands.filter(b => !dies(b)).sort((x, y) => value(x) - value(y))[0];
-    if (!pick && unblocked >= p.life) pick = cands.sort((x, y) => value(x) - value(y))[0];
+    let pick = byValue(cands.filter(r => r.attackerDies && !r.blockerDies))[0];                       // kill and survive
+    if (!pick) pick = byValue(cands.filter(r => r.attackerDies && r.blockerDies && value(a) >= value(r.b)))[0]; // even or better trade
+    if (!pick) pick = byValue(cands.filter(r => !r.blockerDies))[0];                                    // free wall
+    if (!pick && unblocked >= p.life) pick = byValue(cands)[0];                                         // chump only when it would be lethal
+    if (!pick && has(a, 'Trample') === false && unblocked - power(a) < p.life && unblocked >= p.life - 2) pick = byValue(cands)[0]; // desperate
     if (pick) {
-      if (has(a, 'Menace')) { const second = cands.find(b => b !== pick); if (!second) continue; blocks[a.id] = [pick.id, second.id]; free.splice(free.indexOf(second), 1); }
-      else blocks[a.id] = [pick.id];
-      free.splice(free.indexOf(pick), 1); unblocked -= power(a);
+      const b = pick.b;
+      if (has(a, 'Menace')) { const second = cands.find(r => r.b !== b); if (!second) continue; blocks[a.id] = [b.id, second.b.id]; free.splice(free.indexOf(second.b), 1); }
+      else blocks[a.id] = [b.id];
+      free.splice(free.indexOf(b), 1); unblocked -= power(a);
     }
   }
   return blocks;
