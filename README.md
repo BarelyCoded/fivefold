@@ -52,9 +52,9 @@ At the time of writing, 73% of the 1,590 distinct cards from Alpha to Alliances 
 
 ## Dungeons
 
-Five dungeons are hidden on the map, one per color. Beating a roaming mage has a chance to yield a clue that reveals one. Inside, you fight the rooms back to back with your life carried from one to the next, under a per-dungeon rule (six-card hands, a Wall guarding every room, a life drain, tougher guardians). There is no ante inside; the last room's guardian holds a treasure: one card from the dungeon's list in `content/dungeons.json`, a chance at a famous artifact, and gold. You can retreat between rooms and keep whatever life you have left.
+Five dungeons are hidden on the map, one per color. Beating a roaming mage has a chance to yield a clue that reveals one. Inside is an isometric stone maze on black rock: stationary monsters block the corridors until beaten, and your life carries from fight to fight under a per-dungeon rule (six-card hands, a Wall guarding every fight, a life drain, tougher guardians). Treasure piles hold gold, healing draughts, cards from the dungeon's list, or an amulet that raises maximum life. Scrolls ask a riddle about a real card: answer right for a card and gold, wrong and the scroll burns you. The guardian before the exit keeps the vault: a card from the list in `content/dungeons.json`, a chance at a famous artifact, and gold. There is no ante inside. Leave by the entrance or the exit at any time; the maze remembers what you cleared.
 
-Food: every step costs one. At zero you lose a life every other step until you eat. Cities sell food and every won duel yields some.
+Food: every step on the overworld costs one. At zero you lose a life every other step until you eat. Cities sell food and every won duel yields some.
 
 ## Layout
 
@@ -70,6 +70,7 @@ js/cards.js        Scryfall card -> engine definition compiler
 js/scryfall.js     fetch + cache
 js/collection.js   list parsing, art index
 js/world.js        world generation and map rendering
+js/dungeon.js      dungeon mazes: generation, isometric rendering, riddles
 content/enemies.json   enemy roster and decks (data only, no code)
 content/dungeons.json  dungeon templates, rules and treasure lists
 docs/story.md          story bible

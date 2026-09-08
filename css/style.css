@@ -261,3 +261,10 @@ tr.st-unsupported td:nth-child(7), tr.st-unsupported td:nth-child(3), tr.st-miss
 .stack-tray .card .card-body { display: none; }
 .stack-tray .card.targetable { box-shadow: 0 0 0 3px #ff4b4b; }
 svg.arrows { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 6; overflow: visible; }
+
+/* dungeon crawl */
+.dungeonscreen { display: grid; grid-template-columns: 1fr 300px; gap: 16px; }
+@media (max-width: 1100px) { .dungeonscreen { grid-template-columns: 1fr; } }
+.dwrap { background: #050506; border: 6px solid #4a3323; outline: 2px solid #7a5a3a; padding: 4px; }
+#dungeon { display: block; width: 100%; max-width: 940px; image-rendering: pixelated; image-rendering: crisp-edges; cursor: pointer; }
+.modal .mbtns .btn { max-width: 100%; }

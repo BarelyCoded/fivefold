@@ -7,6 +7,7 @@ import { Duel } from './engine.js';
 import { mountDuel, cardHtml } from './duelview.js';
 import { aiHooks } from './ai.js';
 import { initPreview, hide as hidePreview } from './preview.js';
+import { generateDungeon, drawDungeon, cellAtPixel, cellOf, linked, playerCell, remainingMonsters, makeRiddle, CANVAS as DCANVAS } from './dungeon.js';
 
 const SAVE_KEY = 'ff.save.v1', COLL_KEY = 'ff.collection.v1';
 const BASICS = { W: 'Plains', U: 'Island', B: 'Swamp', R: 'Mountain', G: 'Forest' };
@@ -131,7 +132,7 @@ function move(dx, dy) {
   if (enemy) { encounter(enemy); return; }
   if (g.world.castle.x === nx && g.world.castle.y === ny) { castlePrompt(); return; }
   const dg = dungeonAt(g.world, nx, ny);
-  if (dg && dg.revealed && !dg.cleared) { g.player.x = nx; g.player.y = ny; save(); dungeonPrompt(dg); return; }
+  if (dg && dg.revealed) { g.player.x = nx; g.player.y = ny; save(); dungeonPrompt(dg); return; }
   g.player.x = nx; g.player.y = ny; g.player.steps++;
   if (g.player.food > 0) g.player.food--;
   else if (g.player.steps % 2 === 0 && g.player.life > 1) { g.player.life--; toast('You are starving: 1 life lost. Buy food in any city.'); }
@@ -190,32 +191,106 @@ function startDuel(tpl, roamUid, opts = {}) {
 // ---- dungeons ---------------------------------------------------------------------
 function dungeonPrompt(dg) {
   const t = dungeonTemplate(dg.id); const rule = S.dungeons.rules[t.rule]; const g = S.game;
+  const resume = !!dg.layout;
   S.modal = {
     title: t.name,
-    body: `<p class="taunt">${esc(t.intro)}</p><p>${t.rooms} rooms, fought back to back. <b>${esc(rule.label)}:</b> ${esc(rule.text)} Your life carries from room to room. No ante inside; treasure waits at the end. You may retreat between rooms.</p><p>You have ${g.player.life} life.</p>`,
-    buttons: [{ label: 'Enter', primary: true, action: () => { S.modal = null; g.dungeon = { id: dg.id, room: 1, total: t.rooms }; save(); go('dungeon'); } }, { label: 'Not now', action: () => { S.modal = null; render(); } }],
+    body: `<p class="taunt">${esc(t.intro)}</p><p><b>${esc(rule.label)}:</b> ${esc(rule.text)} Your life carries from fight to fight. Monsters block the corridors until beaten; piles hold life, gold and cards; scrolls hold riddles. The guardian before the exit keeps the vault.</p><p>You have ${g.player.life} life.${dg.cleared ? ' The guardian is already dead; only leftovers remain.' : resume ? ' You have been here before, and the maze remembers.' : ''}</p>`,
+    buttons: [{ label: resume ? 'Go back in' : 'Enter', primary: true, action: () => {
+      S.modal = null;
+      if (!dg.layout) dg.layout = generateDungeon(Math.random, t);
+      dg.layout.px = dg.layout.entrance.x; dg.layout.py = dg.layout.entrance.y; dg.layout.status = 'First move';
+      g.dungeon = { id: dg.id }; save(); go('dungeon');
+    } }, { label: 'Not now', action: () => { S.modal = null; render(); } }],
   };
   render();
 }
-function dungeonRoom() {
-  const g = S.game; const st = g.dungeon; const t = dungeonTemplate(st.id); const rule = S.dungeons.rules[t.rule];
-  const pool = S.content.enemies.filter(e => e.color === t.color && !e.boss);
-  const last = st.room === st.total;
-  const tpl = (last ? pool.find(e => e.tier === 2) : st.room === 1 ? pool.find(e => e.tier === 1) : pool[Math.floor(Math.random() * pool.length)]) || pool[0];
-  const rules = { handSize: rule.handSize, upkeepDamage: rule.upkeepDamage, oppLife: rule.oppLife };
-  if (rule.wall) { const wd = defOf(S.dungeons.walls[t.color]); if (wd && wd.kind !== 'unsupported') rules.oppStart = [wd]; }
-  startDuel(tpl, null, { dungeon: { id: st.id, room: st.room, total: st.total }, rules, name: last ? `Guardian of the ${t.name}` : `${tpl.name} (room ${st.room})`, lifeBonus: last ? 4 : 0 });
+function currentDungeon() {
+  const g = S.game; if (!g?.dungeon) return null;
+  const dg = (g.world.dungeons || []).find(d => d.id === g.dungeon.id);
+  return dg?.layout ? { dg, layout: dg.layout, tpl: dungeonTemplate(dg.id) } : null;
 }
-function dungeonTreasure() {
-  const g = S.game; const st = g.dungeon; const t = dungeonTemplate(st.id);
+function dungeonMove(cell) {
+  const cur = currentDungeon(); if (!cur || S.modal) return;
+  const { layout } = cur;
+  const here = playerCell(layout);
+  if (!cell || !linked(layout, here, cell)) return;
+  if (cell.type === 'monster' && !cell.done) { dungeonFightPrompt(cell); return; }
+  layout.px = cell.x; layout.py = cell.y;
+  if (cell.type === 'treasure' && !cell.done) dungeonLoot(cell);
+  else if (cell.type === 'riddle' && !cell.done) { save(); dungeonRiddle(cell); return; }
+  else if (cell.type === 'exit') { save(); dungeonExitPrompt(false); return; }
+  else if (cell.type === 'entrance') { save(); dungeonExitPrompt(true); return; }
+  save(); render();
+}
+function dungeonFightPrompt(cell) {
+  const { tpl } = currentDungeon(); const g = S.game;
+  const guardian = !!cell.payload.guardian;
+  S.modal = {
+    title: guardian ? `The Guardian of the ${tpl.name}` : `A ${COLOR_NAME[tpl.color].toLowerCase()} mage bars the way`,
+    body: `<p>${guardian ? 'It has grown fat on what it guards. Beat it and the vault is yours.' : `Tier ${cell.payload.tier}. It will not move until it is beaten.`}</p><p>You have ${g.player.life} life. There is no ante here.</p>`,
+    buttons: [{ label: 'Fight', primary: true, action: () => { S.modal = null; dungeonFight(cell); } }, { label: 'Step back', action: () => { S.modal = null; render(); } }],
+  };
+  render();
+}
+function dungeonFight(cell) {
+  const { tpl, dg } = currentDungeon(); const rule = S.dungeons.rules[tpl.rule];
+  const pool = S.content.enemies.filter(e => e.color === tpl.color && !e.boss);
+  const guardian = !!cell.payload.guardian;
+  const etpl = (guardian ? pool.find(e => e.tier === 2) : pool.find(e => e.tier === cell.payload.tier)) || pool[0];
+  const rules = { handSize: rule.handSize, upkeepDamage: rule.upkeepDamage, oppLife: rule.oppLife };
+  if (rule.wall) { const wd = defOf(S.dungeons.walls[tpl.color]); if (wd && wd.kind !== 'unsupported') rules.oppStart = [wd]; }
+  startDuel(etpl, null, { dungeon: { id: dg.id, cell: { x: cell.x, y: cell.y } }, rules, name: guardian ? `Guardian of the ${tpl.name}` : `${etpl.name} of the ${tpl.name}`, lifeBonus: guardian ? 4 : 0 });
+}
+function dungeonLoot(cell) {
+  const g = S.game; const { tpl, layout } = currentDungeon();
+  const kind = cell.payload.kind; let msg;
+  const pick = list => rnd(list.filter(n => defOf(n) && defOf(n).kind !== 'unsupported')) || rnd(list);
+  switch (kind) {
+    case 'gold': { const n = 10 + Math.floor(Math.random() * 21); g.player.gold += n; msg = `A pile of ${n} gold.`; break; }
+    case 'life': { const before = g.player.life; g.player.life = Math.min(g.player.maxLife, g.player.life + 6); msg = `A healing draught: ${g.player.life - before} life restored.`; break; }
+    case 'card': { const c = pick(tpl.treasure); addCards(S.collection, c, 1); msg = `A card in the dust: ${c}.`; break; }
+    case 'amulet': { g.player.maxLife += 1; g.player.life += 1; msg = 'An old amulet: maximum life +1.'; break; }
+    default: { const n = 20 + Math.floor(Math.random() * 11); g.player.gold += n; const c = pick(tpl.treasure); addCards(S.collection, c, 1); msg = `A chest: ${n} gold and ${c}.`; }
+  }
+  cell.done = true; layout.status = msg; save(); toast(msg);
+}
+function dungeonRiddle(cell) {
+  const g = S.game; const { tpl, layout } = currentDungeon();
+  const names = [...tpl.treasure, ...S.content.enemies.filter(e => e.color === tpl.color).flatMap(e => Object.keys(e.deck))].filter(n => !BASIC_NAMES.has(n));
+  const r = makeRiddle(Math.random, [...new Set(names)].map(defOf));
+  if (!r) { cell.done = true; save(); render(); return; }
+  S.modal = {
+    title: 'A scroll, pinned to the wall',
+    body: `<p class="taunt">${esc(r.q)}</p>`,
+    buttons: r.options.map(o => ({ label: o, primary: false, action: () => {
+      S.modal = null; cell.done = true;
+      let msg;
+      if (o === r.answer) { const c = rnd(tpl.treasure.filter(n => defOf(n) && defOf(n).kind !== 'unsupported')) || rnd(tpl.treasure); addCards(S.collection, c, 1); g.player.gold += 10; msg = `Correct. The scroll unrolls into ${c} and 10 gold.`; }
+      else { g.player.life = Math.max(1, g.player.life - 3); msg = `Wrong: it was ${r.answer}. The scroll burns your hand for 3 life.`; }
+      layout.status = msg; save(); toast(msg);
+    } })),
+  };
+  render();
+}
+function dungeonExitPrompt(atEntrance) {
+  const { layout, dg, tpl } = currentDungeon(); const g = S.game;
+  const left = remainingMonsters(layout);
+  S.modal = {
+    title: atEntrance ? 'Back to the surface?' : 'The way out',
+    body: `<p>${left ? `${left} monster${left > 1 ? 's' : ''} still lurk${left > 1 ? '' : 's'} in the ${tpl.name}.` : 'The halls are quiet.'} You keep whatever you found and your ${g.player.life} life. The maze stays as you left it.</p>`,
+    buttons: [{ label: 'Leave', primary: true, action: () => { S.modal = null; g.dungeon = null; save(); go('map'); } }, { label: 'Stay', action: () => { S.modal = null; render(); } }],
+  };
+  render();
+}
+function dungeonTreasureDrop() {
+  const g = S.game; const { tpl, dg } = currentDungeon();
   const lines = [];
-  const card = rnd(t.treasure.filter(n => defOf(n) && defOf(n).kind !== 'unsupported')) || rnd(t.treasure);
-  addCards(S.collection, card, 1); lines.push(`Treasure: ${card}.`);
+  const card = rnd(tpl.treasure.filter(n => defOf(n) && defOf(n).kind !== 'unsupported')) || rnd(tpl.treasure);
+  addCards(S.collection, card, 1); lines.push(`The vault holds ${card}.`);
   if (Math.random() < 0.5) { const art = rnd(S.dungeons.artifacts.filter(n => defOf(n) && defOf(n).kind !== 'unsupported')); if (art) { addCards(S.collection, art, 1); lines.push(`A relic: ${art}.`); } }
   const gold = 20 + Math.floor(Math.random() * 21); g.player.gold += gold; lines.push(`${gold} gold in an old chest.`);
-  const dg = g.world.dungeons.find(d => d.id === st.id); if (dg) dg.cleared = true;
-  g.dungeon = null;
-  S.result = { won: true, tpl: { name: t.name }, lines, title: 'The vault is yours', flavour: `${t.name} is cleared.` };
+  dg.cleared = true;
+  S.result = { won: true, tpl: { name: tpl.name }, lines, title: 'The vault is yours', flavour: `The Guardian of the ${tpl.name} is dead. The exit is open.`, back: 'dungeon' };
   save(); go('result');
 }
 function revealClue(color) {
@@ -232,14 +307,17 @@ function finishDuel(winner) {
   const g = S.game; const { duel, tpl, ante, roamUid, dungeon } = S.duel; S.duel = null;
   const lines = [];
   if (dungeon) {
+    const cur = currentDungeon();
     if (winner === 0) {
       g.wins++; g.player.life = Math.max(1, duel.players[0].life);
-      if (g.dungeon.room >= g.dungeon.total) { dungeonTreasure(); return; }
-      g.dungeon.room++; save(); go('dungeon'); return;
+      const cell = cur && cellOf(cur.layout, dungeon.cell.x, dungeon.cell.y);
+      if (cell) { cell.done = true; cur.layout.px = cell.x; cur.layout.py = cell.y; cur.layout.status = `${tpl.name} falls. ${g.player.life} life left.`; }
+      if (cell?.payload?.guardian) { dungeonTreasureDrop(); return; }
+      save(); go('dungeon'); return;
     }
     g.losses++; g.dungeon = null;
     const lost = Math.floor(g.player.gold * 0.25); g.player.gold -= lost; if (lost) lines.push(`${lost} gold is taken from you.`);
-    g.player.life = g.player.maxLife; lines.push('You are dragged out of the dark and left on the road, restored but poorer.');
+    g.player.life = g.player.maxLife; lines.push('You are dragged out of the dark and left on the road, restored but poorer. The maze remembers what you cleared.');
     S.result = { won: false, tpl, lines }; save(); go('result'); return;
   }
   if (winner === 0) {
@@ -451,15 +529,25 @@ function duel() {
 }
 
 function dungeon() {
-  const g = S.game; if (!g?.dungeon) return map();
-  const st = g.dungeon; const t = dungeonTemplate(st.id); const rule = S.dungeons.rules[t.rule];
-  app.innerHTML = `<section class="screen resultscreen"><div class="box center dungeonbox">
-    <div class="eyebrow">${esc(t.name)}</div>
-    <h2>Room ${st.room} of ${st.total}</h2>
-    <p class="taunt">${esc(rule.label)}: ${esc(rule.text)}</p>
-    <p>You have <b>${g.player.life}</b> life. ${st.room === st.total ? 'The guardian waits beyond this door.' : 'Something stirs beyond this door.'}</p>
-    <div class="btnrow center"><button class="btn primary" id="b-room">${st.room === 1 ? 'Enter the first room' : 'Press on'}</button><button class="btn" id="b-retreat">Retreat to the surface</button></div>
-  </div></section>`;
+  const cur = currentDungeon(); if (!cur) return map();
+  const g = S.game; const { layout, tpl } = cur; const rule = S.dungeons.rules[tpl.rule];
+  app.innerHTML = `<section class="screen dungeonscreen">
+    <div class="dwrap"><canvas id="dungeon"></canvas></div>
+    <aside class="mappanel">
+      <h2>${esc(tpl.name)}</h2>
+      <p class="taunt">${esc(rule.label)}: ${esc(rule.text)}</p>
+      <p>Life <b>${g.player.life}</b>/${g.player.maxLife} · Gold ${g.player.gold} · Monsters left ${remainingMonsters(layout)}</p>
+      <p class="small">Click a neighbouring cell, or use WASD (W up-right, A up-left, S down-left, D down-right). Monsters block the way until beaten and your life carries between fights. Piles hold life, gold and cards. Scrolls ask riddles. Leave by the entrance or the exit.</p>
+      <div class="btnrow"><button class="btn" id="b-dleave">Leave the dungeon</button></div>
+    </aside>
+  </section>`;
+  const canvas = document.getElementById('dungeon');
+  drawDungeon(canvas, layout, tpl);
+  canvas.onclick = ev => {
+    const r = canvas.getBoundingClientRect();
+    const cx = (ev.clientX - r.left) / r.width * DCANVAS.w, cy = (ev.clientY - r.top) / r.height * DCANVAS.h;
+    dungeonMove(cellAtPixel(layout, cx, cy));
+  };
 }
 
 function result() {
@@ -468,7 +556,7 @@ function result() {
     <h2>${r.title || (r.won ? 'Victory' : 'Defeat')}</h2>
     <p>${r.flavour || (r.won ? `${esc(r.tpl.name)} yields.` : `${esc(r.tpl.name)} stands over you.`)}</p>
     <ul class="plain">${r.lines.map(l => `<li>${esc(l)}</li>`).join('')}</ul>
-    <button class="btn primary" data-go="map">Back to the map</button>
+    <button class="btn primary" data-go="${r.back || 'map'}">${r.back === 'dungeon' ? 'Back into the dungeon' : 'Back to the map'}</button>
   </div></section>`;
 }
 function end() {
@@ -485,10 +573,10 @@ app.addEventListener('submit', ev => {
   if (ev.target.id === 'newgame') { ev.preventDefault(); const f = new FormData(ev.target); newGame({ name: f.get('name').trim(), color: f.get('color'), difficulty: f.get('difficulty') }); }
 });
 document.addEventListener('click', ev => {
-  const t = ev.target.closest('[data-go],[data-modal],[data-filter],[data-add],[data-rem],[data-dec],[data-buy],#b-import,#b-csv,#b-rescan,#b-clear-coll,#b-fill,#b-rest,#b-inn,#b-food,#b-leave,#b-newgame,#b-room,#b-retreat');
+  const t = ev.target.closest('[data-go],[data-modal],[data-filter],[data-add],[data-rem],[data-dec],[data-buy],#b-import,#b-csv,#b-rescan,#b-clear-coll,#b-fill,#b-rest,#b-inn,#b-food,#b-leave,#b-newgame,#b-dleave');
   if (!t) return;
   const g = S.game;
-  if (t.dataset.go) { if (!t.disabled) { if (t.dataset.go === 'map' && g?.status !== 'playing' && g) go('end'); else go(t.dataset.go); } return; }
+  if (t.dataset.go) { if (!t.disabled) { if (t.dataset.go === 'map' && g?.status !== 'playing' && g) go('end'); else if (t.dataset.go === 'dungeon' && !currentDungeon()) go('map'); else go(t.dataset.go); } return; }
   if (t.dataset.modal != null) { const b = S.modal?.buttons[Number(t.dataset.modal)]; if (b && !b.disabled) b.action(); return; }
   if (t.dataset.filter) { S.filter = t.dataset.filter; render(); return; }
   if (t.dataset.add) { addCards(g.deck, t.dataset.add, 1); save(); render(); return; }
@@ -506,12 +594,18 @@ document.addEventListener('click', ev => {
     case 'b-food': if (g.player.gold >= 2) { g.player.gold -= 2; g.player.food += 20; save(); render(); } break;
     case 'b-leave': go('map'); break;
     case 'b-newgame': S.game = null; save(); go('title'); break;
-    case 'b-room': dungeonRoom(); break;
-    case 'b-retreat': g.dungeon = null; save(); go('map'); break;
+    case 'b-dleave': dungeonExitPrompt(false); break;
   }
 });
 document.addEventListener('input', ev => { if (ev.target.id === 'dfilter') { S.deckFilter = ev.target.value; deck(); document.getElementById('dfilter').focus(); const el = document.getElementById('dfilter'); el.setSelectionRange(el.value.length, el.value.length); } });
 document.addEventListener('keydown', ev => {
+  if (S.screen === 'dungeon' && !S.modal) {
+    const k = ev.key.toLowerCase();
+    const d = { w: [0, -1], arrowup: [0, -1], a: [-1, 0], arrowleft: [-1, 0], s: [0, 1], arrowdown: [0, 1], d: [1, 0], arrowright: [1, 0] }[k];
+    const cur = currentDungeon();
+    if (d && cur) { ev.preventDefault(); dungeonMove(cellOf(cur.layout, cur.layout.px + d[0], cur.layout.py + d[1])); }
+    return;
+  }
   if (S.screen !== 'map' || S.modal) return;
   const k = ev.key.toLowerCase();
   const d = { arrowup: [0, -1], w: [0, -1], arrowdown: [0, 1], s: [0, 1], arrowleft: [-1, 0], a: [-1, 0], arrowright: [1, 0], d: [1, 0] }[k];
