@@ -8,8 +8,10 @@ import { mountDuel, cardHtml } from './duelview.js';
 import { aiHooks } from './ai.js';
 import { initPreview, hide as hidePreview } from './preview.js';
 import { generateDungeon, drawDungeon, cellAtPixel, cellOf, linked, playerCell, remainingMonsters, makeRiddle, CANVAS as DCANVAS } from './dungeon.js';
+import { loadAtlas, onAtlas, SPRITES, MONSTERS, DUNGEON_MONSTER } from './atlas.js';
 
 const SAVE_KEY = 'ff.save.v1', COLL_KEY = 'ff.collection.v1';
+loadAtlas();
 const BASICS = { W: 'Plains', U: 'Island', B: 'Swamp', R: 'Mountain', G: 'Forest' };
 const BASIC_NAMES = new Set(Object.values(BASICS));
 const DIFF = {
@@ -381,6 +383,7 @@ async function doImport(text) {
 }
 
 // ---- rendering --------------------------------------------------------------------
+onAtlas(() => { if (S.screen === 'map' || S.screen === 'dungeon') render(); });
 function go(screen) { S.screen = screen; S.modal = null; hidePreview(); window.scrollTo(0, 0); render(); }
 
 function renderTop() {
@@ -492,7 +495,7 @@ function map() {
     <aside class="mappanel">
       <h2>${esc(g.name)}</h2>
       <p>Standing in the <b>${BIOME[here].name}</b> (${COLOR_NAME[here]}). ${near.length ? `<br>${near.map(e => enemyById(e.template).name).join(', ')} nearby.` : ''}</p>
-      <p class="small">Move with WASD or the arrow keys, or click a neighbouring tile. Walking costs food. Crystals are mana links (+2 life). Cave mouths are dungeons: revealed by clues from beaten foes, fought room by room with your life carried over. The dark fortress is the Usurper.</p>
+      <p class="small">Move with WASD or the arrow keys, or click a neighbouring tile. Walking costs food. Blue crystals are mana links (+2 life). Pits with a torch are dungeons: revealed by clues from beaten foes, fought room by room with your life carried over. The dark fortress is the Usurper.</p>
       ${(g.world.dungeons || []).some(d => d.revealed) ? `<p class="small">Known dungeons: ${g.world.dungeons.filter(d => d.revealed).map(d => `${dungeonTemplate(d.id).name}${d.cleared ? ' (cleared)' : ''}`).join(', ')}.</p>` : ''}
       <div class="btnrow"><button class="btn" id="b-rest" ${g.player.food < 3 || g.player.life >= g.player.maxLife ? 'disabled' : ''}>Rest (3 food, +5 life)</button><button class="btn ghost" data-go="title">Menu</button></div>
       <h3>Legend</h3>
@@ -533,7 +536,8 @@ function duel() {
   // Mount once per duel; a re-render (toast, stats) must not restart the game.
   if (!d.root) {
     d.root = document.createElement('div'); d.root.id = 'duelroot';
-    mountDuel(d.root, d.duel, { ante: d.ante ? { mine: d.ante.mine || '—', theirs: d.ante.theirs || '—' } : null, onEnd: finishDuel });
+    const foe = d.tpl.boss ? { frames: MONSTERS.dragon.idle, scale: 2.6 } : d.dungeon ? { frames: MONSTERS[DUNGEON_MONSTER[d.tpl.color] || 'skeleton'].idle, scale: 2.6 } : { frames: [(SPRITES.mage[d.tpl.color] || SPRITES.mage.M)[d.tpl.tier >= 2 ? 1 : 0]], scale: 2.6 };
+    mountDuel(d.root, d.duel, { ante: d.ante ? { mine: d.ante.mine || '—', theirs: d.ante.theirs || '—' } : null, onEnd: finishDuel, portraits: { me: { frames: [SPRITES.hero], scale: 2.6 }, foe } });
   }
   app.innerHTML = '';
   const sec = document.createElement('section'); sec.className = 'screen duelscreen';
@@ -549,7 +553,7 @@ function dungeon() {
       <h2>${esc(tpl.name)}</h2>
       <p class="taunt">${esc(rule.label)}: ${esc(rule.text)}</p>
       <p>Life <b>${g.player.life}</b>/${g.player.maxLife} · Gold ${g.player.gold} · Monsters left ${remainingMonsters(layout)}</p>
-      <p class="small">Click a neighbouring cell, or use WASD (W up-right, A up-left, S down-left, D down-right). Monsters block the way until beaten and your life carries between fights. Piles hold life, gold and cards. Scrolls ask riddles. Leave by the entrance or the exit.</p>
+      <p class="small">Click a neighbouring cell or use WASD / the arrow keys. Monsters block the way until beaten and your life carries between fights. Chests hold life, gold and cards. Scrolls ask riddles. Leave by the entrance or the exit door.</p>
       <div class="btnrow"><button class="btn" id="b-dleave">Leave the dungeon</button></div>
     </aside>
   </section>`;

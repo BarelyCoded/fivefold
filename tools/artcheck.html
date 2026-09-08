@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fivefold art check</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  body { padding: 16px; }
+  h2 { margin: 18px 0 6px; }
+  .strip { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-end; background: #1b1815; padding: 10px; border-radius: 6px; }
+  canvas { display: block; image-rendering: pixelated; }
+</style>
+</head>
+<body>
+<h1>Art check</h1>
+<p class="small">Renders the overworld, a dungeon of each colour, and the duel portraits straight from <code>assets/tileset.png</code>. Open it at <code>/tools/artcheck.html</code> while <code>node server.js</code> runs.</p>
+<h2>Overworld</h2>
+<div class="mapwrap" style="max-width: 1240px"><canvas id="map"></canvas></div>
+<h2>Dungeons</h2>
+<div id="dungeons"></div>
+<h2>Portraits</h2>
+<div id="portraits" class="strip"></div>
+<script type="module">
+import { generateWorld, drawWorld, placeDungeons } from '../js/world.js';
+import { generateDungeon, drawDungeon } from '../js/dungeon.js';
+import { loadAtlas, onAtlas, spriteStyle, SPRITES, MONSTERS } from '../js/atlas.js';
+let seed = Number(new URLSearchParams(location.search).get('seed') || 3);
+const rng = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+const enemies = (await (await fetch('../content/enemies.json')).json()).enemies;
+const dungeons = (await (await fetch('../content/dungeons.json')).json()).dungeons;
+loadAtlas();
+onAtlas(() => {
+  const world = generateWorld(rng, enemies, 'G');
+  placeDungeons(world, rng, dungeons);
+  for (const d of world.dungeons) d.revealed = true;
+  drawWorld(document.getElementById('map'), world, { x: world.start.x, y: world.start.y });
+  const box = document.getElementById('dungeons');
+  for (const tpl of dungeons) {
+    const wrap = document.createElement('div'); wrap.className = 'dwrap'; wrap.style.maxWidth = '720px'; wrap.style.marginBottom = '10px';
+    const c = document.createElement('canvas'); wrap.appendChild(c); box.appendChild(wrap);
+    const layout = generateDungeon(rng, tpl); drawDungeon(c, layout, tpl);
+  }
+  const pb = document.getElementById('portraits');
+  const add = (rect, s = 2) => { const d = document.createElement('div'); d.style.cssText = spriteStyle(rect, s); pb.appendChild(d); };
+  add(SPRITES.hero, 2.6); for (const col of ['W', 'U', 'B', 'R', 'G']) for (const r of SPRITES.mage[col]) add(r, 2);
+  for (const m of Object.values(MONSTERS)) add(m.idle[0], 2);
+  for (const n of ['chest', 'chestOpen', 'chestSmall', 'crystal', 'scroll', 'potion', 'amulet', 'torch', 'pit', 'door', 'portal']) add(SPRITES[n], 2);
+  document.body.dataset.ready = '1';
+});
+</script>
+</body>
+</html>

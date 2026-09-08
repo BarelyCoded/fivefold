@@ -20,6 +20,10 @@ Then open http://localhost:8642. The first launch fetches rules text for the bui
 2. In the game, open **Collection** and click **Load collection.csv**, or paste any decklist-style text and click **Import list**.
 3. Each card is looked up on Scryfall and compiled for the demo engine. The report tells you whether it is **ready**, **approximated** (plays, but some abilities are ignored), or **unsupported** (kept in your collection, not allowed in a deck yet).
 
+## Art
+
+The overworld, dungeons, map figures and duel portraits are drawn from one sprite sheet, `assets/tileset.png` ("The Planeswalker's Complete Asset Bibliotheca"). `js/atlas.js` maps names to rectangles on that sheet, keys out the cell backgrounds at load time, and the renderers fall back to the older painted tiles if the sheet is missing. Open http://localhost:8642/tools/artcheck.html while the server runs to see every sprite the game uses on a generated world and one dungeon per colour. The five regions are snowfields (white), coast (blue), wastes (black), mountains (red) and forest (green).
+
 ## Use your own art
 
 Drop images in the `art/` folder named after the card, lowercase with dashes:
@@ -52,7 +56,7 @@ At the time of writing, 76% of the 1,590 distinct cards from Alpha to Alliances 
 
 ## Dungeons
 
-Five dungeons are hidden on the map, one per color. Beating a roaming mage has a chance to yield a clue that reveals one. Inside is an isometric stone maze on black rock: stationary monsters block the corridors until beaten, and your life carries from fight to fight under a per-dungeon rule (six-card hands, a Wall guarding every fight, a life drain, tougher guardians). Treasure piles hold gold, healing draughts, cards from the dungeon's list, or an amulet that raises maximum life. Scrolls ask a riddle about a real card: answer right for a card and gold, wrong and the scroll burns you. The guardian before the exit keeps the vault: a card from the list in `content/dungeons.json`, a chance at a famous artifact, and gold. There is no ante inside. Leave by the entrance or the exit at any time; the maze remembers what you cleared.
+Five dungeons are hidden on the map, one per color. Beating a roaming mage has a chance to yield a clue that reveals one. Inside is a top-down stone maze on black rock: stationary monsters block the corridors until beaten, and your life carries from fight to fight under a per-dungeon rule (six-card hands, a Wall guarding every fight, a life drain, tougher guardians). Treasure piles hold gold, healing draughts, cards from the dungeon's list, or an amulet that raises maximum life. Scrolls ask a riddle about a real card: answer right for a card and gold, wrong and the scroll burns you. The guardian before the exit keeps the vault: a card from the list in `content/dungeons.json`, a chance at a famous artifact, and gold. There is no ante inside. Leave by the entrance or the exit at any time; the maze remembers what you cleared.
 
 Food: every step on the overworld costs one. At zero you lose a life every other step until you eat. Cities sell food and every won duel yields some.
 
@@ -70,11 +74,13 @@ js/cards.js        Scryfall card -> engine definition compiler
 js/scryfall.js     fetch + cache
 js/collection.js   list parsing, art index
 js/world.js        world generation and map rendering
-js/dungeon.js      dungeon mazes: generation, isometric rendering, riddles
+js/dungeon.js      dungeon mazes: generation, top-down rendering, riddles
+js/atlas.js        sprite sheet coordinates, loading and keying
+assets/tileset.png the sprite sheet
 content/enemies.json   enemy roster and decks (data only, no code)
 content/dungeons.json  dungeon templates, rules and treasure lists
 docs/story.md          story bible
-tools/                 coverage report, card inspector, AI-vs-AI simulator
+tools/                 coverage report, card inspector, AI-vs-AI simulator, art check page
 ```
 
 Enemies are data. Add one to `content/enemies.json` with a name, color, tier, life, bribe cost, gold reward and a deck of card names, and it appears in the world.

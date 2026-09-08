@@ -3,16 +3,17 @@
 // gnarled trees in swamps, stone castles and domed keeps. Rendered at half resolution and
 // scaled 2x with smoothing off for chunky pixels. A camera follows the player.
 import { COLORS } from './cards.js';
+import { atlasReady, blit, blitAt, pick, TERRAIN, SPRITES } from './atlas.js';
 
 export const W = 30, H = 20;
-export const PX = 32;          // internal pixels per tile
+export const PX = 38;          // internal pixels per tile (one sprite-sheet tile)
 export const TILE = PX * 2;    // displayed pixels per tile
 export const VIEW = { w: 16, h: 11 };
 
 export const PAL = {
-  W: { name: 'Plains', ground: ['#b9a56a', '#c9b678', '#a99459', '#d3c084'], grass: '#7e9a3c', grassL: '#a6c455', rock: '#8f8779', rockL: '#b5ad9e', wood: '#5a4530', leaf: '#6b8f3a', leafL: '#8fb452' },
+  W: { name: 'Snowfields', ground: ['#b9a56a', '#c9b678', '#a99459', '#d3c084'], grass: '#7e9a3c', grassL: '#a6c455', rock: '#8f8779', rockL: '#b5ad9e', wood: '#5a4530', leaf: '#6b8f3a', leafL: '#8fb452' },
   U: { name: 'Coast', ground: ['#1f8ea6', '#2199b3', '#1a7f96', '#24a3bd'], deep: '#156f86', ripple: '#5fc7d6', rippleD: '#136a80', sand: ['#dcc78a', '#cdb676', '#e6d39a'], palm: '#2f7a3a', palmL: '#5aa54a', trunk: '#8a6a3a' },
-  B: { name: 'Swamp', ground: ['#6a6256', '#5b544a', '#77705f', '#4f4940'], pool: '#2c3c3b', poolL: '#3f5652', wood: '#2a2320', reed: '#6f7e3f', shroom: '#a86a8a' },
+  B: { name: 'Wastes', ground: ['#6a6256', '#5b544a', '#77705f', '#4f4940'], pool: '#2c3c3b', poolL: '#3f5652', wood: '#2a2320', reed: '#6f7e3f', shroom: '#a86a8a' },
   R: { name: 'Mountains', ground: ['#8b7a68', '#9a8977', '#7a6a5a', '#a69584'], faceL: '#bcaa98', faceM: '#8c7b6c', faceD: '#5a4c42', snow: '#f1ede6', rock: '#6f6154' },
   G: { name: 'Forest', ground: ['#4f7d3a', '#5a8b42', '#456f33', '#66984c'], pine: '#1e4b2c', pineL: '#3c7a46', pineD: '#123420', leaf: '#2f6b2f', leafL: '#4f9a3f', trunk: '#4a3220' },
 };
@@ -146,7 +147,24 @@ function dither(img, W_, x0, y0, w, h, cols, seed, scale = 6) {
 
 // ---- terrain painter -------------------------------------------------------------
 const terrainCache = new WeakMap();
+// Sprite-sheet ground: one tile per map cell, accents sprinkled by hash, cobbles under cities.
+function paintTiles(world) {
+  const Wp = world.w * PX, Hp = world.h * PX;
+  const c = document.createElement('canvas'); c.width = Wp; c.height = Hp;
+  const ctx = c.getContext('2d'); ctx.imageSmoothingEnabled = false;
+  const seed = world.seed || 0;
+  for (let y = 0; y < world.h; y++) for (let x = 0; x < world.w; x++) {
+    const b = tileAt(world, x, y); const t = TERRAIN[b] || TERRAIN.G;
+    const r = hash(x, y, seed + 5), r2 = hash(x, y, seed + 6);
+    let rect = r < 0.2 && t.accent.length ? pick(t.accent, r2) : pick(t.base, r2);
+    if (world.cities.some(ct => ct.x === x && ct.y === y) || (world.castle.x === x && world.castle.y === y)) rect = pick(TERRAIN.cobble, r2);
+    blit(ctx, rect, x * PX, y * PX, PX, PX);
+  }
+  c.atlas = true;
+  return c;
+}
 function paintTerrain(world) {
+  if (atlasReady()) return paintTiles(world);
   const Wp = world.w * PX, Hp = world.h * PX;
   const c = document.createElement('canvas'); c.width = Wp; c.height = Hp;
   const ctx = c.getContext('2d'); ctx.imageSmoothingEnabled = false;
@@ -316,6 +334,7 @@ function drawPalm(ctx, x, y, hgt) {
 }
 
 function drawCity(ctx, cx, cy, color, name) {
+  if (atlasReady()) { blitAt(ctx, SPRITES.city[color] || SPRITES.city.town, cx, cy + PX / 2 + 2); labels.push({ x: cx, y: cy + PX / 2 + 8, text: name }); return; }
   shade(ctx, cx, cy + 10, 28);
   switch (color) {
     case 'W': { // white marble castle with gold spires
@@ -381,9 +400,10 @@ function drawCity(ctx, cx, cy, color, name) {
   labels.push({ x: cx, y: cy + 17, text: name });
 }
 function drawFortress(ctx, cx, cy) {
-  const glow = ctx.createRadialGradient(cx, cy, 3, cx, cy, 22);
-  glow.addColorStop(0, 'rgba(160,30,50,.4)'); glow.addColorStop(1, 'rgba(160,30,50,0)');
-  ctx.fillStyle = glow; ctx.fillRect(cx - 22, cy - 22, 44, 44);
+  const glow = ctx.createRadialGradient(cx, cy, 3, cx, cy, 30);
+  glow.addColorStop(0, 'rgba(160,30,50,.45)'); glow.addColorStop(1, 'rgba(160,30,50,0)');
+  ctx.fillStyle = glow; ctx.fillRect(cx - 30, cy - 30, 60, 60);
+  if (atlasReady()) { blitAt(ctx, SPRITES.city.fortress, cx, cy + PX / 2 + 2); labels.push({ x: cx, y: cy + PX / 2 + 8, text: 'The Usurper' }); return; }
   shade(ctx, cx, cy + 10, 30);
   const s = '#26222c', sl = '#3d3846', sd = '#15121a';
   px(ctx, cx - 15, cy - 4, 30, 14, s); px(ctx, cx - 15, cy + 8, 30, 2, sd); px(ctx, cx - 15, cy - 4, 30, 1, sl);
@@ -396,6 +416,7 @@ function drawFortress(ctx, cx, cy) {
   px(ctx, cx - 2, cy + 4, 4, 6, sd);
 }
 function drawDungeon(ctx, cx, cy, cleared) {
+  if (atlasReady()) { if (cleared) ctx.globalAlpha = 0.55; blitAt(ctx, SPRITES.pit, cx, cy + PX / 2, 0.62); ctx.globalAlpha = 1; if (!cleared) blitAt(ctx, SPRITES.torch, cx + 14, cy + 6, 0.6); return; }
   shade(ctx, cx, cy + 9, 26);
   const rock = '#6f6558', rockL = '#8c8172', rockD = '#4b433a';
   ctx.fillStyle = rock; ctx.beginPath(); ctx.moveTo(cx - 14, cy + 8); ctx.lineTo(cx - 10, cy - 6); ctx.lineTo(cx - 3, cy - 12); ctx.lineTo(cx + 5, cy - 11); ctx.lineTo(cx + 12, cy - 4); ctx.lineTo(cx + 14, cy + 8); ctx.closePath(); ctx.fill();
@@ -406,6 +427,7 @@ function drawDungeon(ctx, cx, cy, cleared) {
   else { px(ctx, cx + 8, cy - 14, 1, 12, '#5a4025'); px(ctx, cx + 9, cy - 14, 5, 3, '#e8dcc2'); }
 }
 function drawCrystal(ctx, cx, cy, taken) {
+  if (atlasReady()) { if (!taken) { const g = ctx.createRadialGradient(cx, cy, 2, cx, cy, 16); g.addColorStop(0, 'rgba(160,220,255,.6)'); g.addColorStop(1, 'rgba(160,220,255,0)'); ctx.fillStyle = g; ctx.fillRect(cx - 16, cy - 16, 32, 32); } else ctx.globalAlpha = 0.4; blitAt(ctx, SPRITES.crystal, cx, cy + 14, 0.85); ctx.globalAlpha = 1; return; }
   if (!taken) { const g = ctx.createRadialGradient(cx, cy - 2, 1, cx, cy - 2, 14); g.addColorStop(0, 'rgba(255,245,180,.7)'); g.addColorStop(1, 'rgba(255,245,180,0)'); ctx.fillStyle = g; ctx.fillRect(cx - 14, cy - 16, 28, 28); }
   shade(ctx, cx, cy + 4, 12);
   const a = taken ? '#8d8a80' : '#f6efc2', b = taken ? '#6b6860' : '#d4bd5c', c = taken ? '#55524a' : '#a88c3a';
@@ -416,6 +438,12 @@ function drawCrystal(ctx, cx, cy, taken) {
   }
 }
 function drawFigure(ctx, cx, cy, robe, robeL, hat, opts = {}) {
+  if (atlasReady() && opts.sprite) {
+    if (opts.ring) { ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(cx, cy + PX / 2 - 3, 12, 4, 0, 0, Math.PI * 2); ctx.stroke(); }
+    blitAt(ctx, opts.sprite, cx, cy + PX / 2 - 1, 0.8);
+    if (opts.tier) { px(ctx, cx + 8, cy + 6, 9, 9, '#15120f'); labels.push({ x: cx + 12.5, y: cy + 10.5, text: String(opts.tier), size: 6, box: false, color: '#fff' }); }
+    return;
+  }
   shade(ctx, cx, cy + 3, 8);
   if (opts.ring) { ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(cx, cy + 3, 6, 2.5, 0, 0, Math.PI * 2); ctx.stroke(); }
   px(ctx, cx - 3, cy - 6, 6, 9, robe); px(ctx, cx - 3, cy - 6, 2, 9, robeL);
@@ -452,7 +480,7 @@ export function present(canvas, frame, fw, fh, labels = [], opts = {}) {
 let frame = null, labels = [];
 export function drawWorld(canvas, world, player, opts = {}) {
   let terrain = terrainCache.get(world);
-  if (!terrain) { terrain = paintTerrain(world); terrainCache.set(world, terrain); }
+  if (!terrain || !!terrain.atlas !== atlasReady()) { terrain = paintTerrain(world); terrainCache.set(world, terrain); }
   labels = [];
   const cam = cameraFor(world, player);
   const fw = VIEW.w * PX, fh = VIEW.h * PX;
@@ -469,8 +497,8 @@ export function drawWorld(canvas, world, player, opts = {}) {
   for (const ct of world.cities) if (vis(ct.x, ct.y)) { const [cx, cy] = c(ct.x, ct.y); objs.push({ y: cy, draw: () => drawCity(f, cx, cy, ct.color, ct.name) }); }
   if (vis(world.castle.x, world.castle.y)) { const [cx, cy] = c(world.castle.x, world.castle.y); objs.push({ y: cy, draw: () => drawFortress(f, cx, cy) }); }
   const robes = { W: ['#d9d2b8', '#f0ead6'], U: ['#2f5f9c', '#5e8cc9'], B: ['#3a2d4a', '#5e4d75'], R: ['#a33a2a', '#d0604a'], G: ['#3f6f2f', '#6a9a4a'] };
-  for (const e of world.enemies) if (vis(e.x, e.y)) { const [cx, cy] = c(e.x, e.y); const [r, rl] = robes[e.color]; objs.push({ y: cy, draw: () => drawFigure(f, cx, cy, r, rl, r, { tier: e.tier }) }); }
-  { const [cx, cy] = c(player.x, player.y); objs.push({ y: cy + 0.1, draw: () => drawFigure(f, cx, cy, '#c8322a', '#e0604a', null, { legs: '#2f4f9c', staff: true, ring: true }) }); }
+  for (const e of world.enemies) if (vis(e.x, e.y)) { const [cx, cy] = c(e.x, e.y); const [r, rl] = robes[e.color] || robes.B; const sp = (SPRITES.mage[e.color] || SPRITES.mage.M)[e.tier >= 2 ? 1 : 0]; objs.push({ y: cy, draw: () => drawFigure(f, cx, cy, r, rl, r, { tier: e.tier, sprite: sp }) }); }
+  { const [cx, cy] = c(player.x, player.y); objs.push({ y: cy + 0.1, draw: () => drawFigure(f, cx, cy, '#c8322a', '#e0604a', null, { legs: '#2f4f9c', staff: true, ring: true, sprite: SPRITES.hero }) }); }
   objs.sort((a, b) => a.y - b.y);
   for (const o of objs) o.draw();
   // vignette frame like the original's border

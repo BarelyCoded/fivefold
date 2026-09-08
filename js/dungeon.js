@@ -1,12 +1,14 @@
-// Dungeon crawls: a small isometric stone maze on black rock. Stationary monsters block corridors,
-// treasure piles hold life, gold and cards, scrolls hold riddles, and an exit arch leads out.
+// Dungeon crawls: a small top-down stone maze drawn from the sprite sheet. Stationary monsters block
+// corridors, chests hold life, gold and cards, scrolls hold riddles, and a door leads out.
 // Layouts are plain data so they persist in the save.
 
-const GW = 9, GH = 7;          // grid cells
-const TW = 48, TH = 24;        // internal iso tile size (drawn at 1x, scaled 2x)
-const WALL_H = 16, PARAPET_H = 6;
+const GW = 9, GH = 7;          // maze cells
+const T = 37;                  // sprite tile size; each maze cell is one tile with passage tiles between
+const TX = GW * 2 + 1, TY = GH * 2 + 1;
+const OY = 34;                 // banner strip above the map
 const key = (x, y) => `${x},${y}`;
 import { present } from './world.js';
+import { atlasReady, blit, blitAt, pick, DUNGEON_TILES, SPRITES, MONSTERS, DUNGEON_MONSTER } from './atlas.js';
 let labels = [];
 
 // ---- generation ------------------------------------------------------------------
@@ -98,132 +100,79 @@ export function makeRiddle(rng, defs) {
 // ---- rendering ---------------------------------------------------------------------
 function hash(x, y, s = 0) { let h = (x * 374761393 + y * 668265263 + s * 1103515245) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967295; }
 const px = (ctx, x, y, w, h, col) => { ctx.fillStyle = col; ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h)); };
-const ORIGIN = { x: (GH) * TW / 2 + 24, y: 40 };
-export const CANVAS = { w: (GW + GH) * TW / 2 + 48, h: (GW + GH) * TH / 2 + 80 };
-export function isoPos(x, y) { return [ORIGIN.x + (x - y) * TW / 2, ORIGIN.y + (x + y) * TH / 2]; }
-// Inverse: canvas (internal) pixel -> grid cell
+export const CANVAS = { w: TX * T, h: OY + TY * T };
+// Centre of a maze cell in canvas pixels.
+export function isoPos(x, y) { return [(2 * x + 1) * T + T / 2, OY + (2 * y + 1) * T + T / 2]; }
+// Inverse: canvas pixel -> maze cell. Clicking a passage tile picks the cell on its far side from the player.
 export function cellAtPixel(layout, cx, cy) {
-  const fx = (cx - ORIGIN.x) / (TW / 2), fy = (cy - ORIGIN.y) / (TH / 2);
-  const x = Math.round((fx + fy) / 2), y = Math.round((fy - fx) / 2);
-  return cellOf(layout, x, y);
+  const tx = Math.floor(cx / T), ty = Math.floor((cy - OY) / T);
+  if (tx < 0 || ty < 0 || tx >= TX || ty >= TY) return null;
+  if (tx % 2 === 1 && ty % 2 === 1) return cellOf(layout, (tx - 1) / 2, (ty - 1) / 2);
+  const cands = tx % 2 === 0 && ty % 2 === 1 ? [cellOf(layout, tx / 2 - 1, (ty - 1) / 2), cellOf(layout, tx / 2, (ty - 1) / 2)]
+    : ty % 2 === 0 && tx % 2 === 1 ? [cellOf(layout, (tx - 1) / 2, ty / 2 - 1), cellOf(layout, (tx - 1) / 2, ty / 2)] : [];
+  return cands.find(c => c && !(c.x === layout.px && c.y === layout.py)) || null;
 }
 
-function diamond(ctx, cx, cy, col, w = TW, h = TH) { ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(cx, cy - h / 2); ctx.lineTo(cx + w / 2, cy); ctx.lineTo(cx, cy + h / 2); ctx.lineTo(cx - w / 2, cy); ctx.closePath(); ctx.fill(); }
-function floor(ctx, cx, cy, seed) {
-  diamond(ctx, cx, cy, '#7d7f84');
-  // brick joints following the two iso directions
-  ctx.save(); ctx.beginPath(); ctx.moveTo(cx, cy - TH / 2); ctx.lineTo(cx + TW / 2, cy); ctx.lineTo(cx, cy + TH / 2); ctx.lineTo(cx - TW / 2, cy); ctx.closePath(); ctx.clip();
-  for (let i = -3; i <= 3; i++) {
-    ctx.strokeStyle = 'rgba(30,30,36,.75)'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(cx - TW / 2 + i * 8, cy + i * 4 - TH / 2); ctx.lineTo(cx + i * 8, cy + i * 4 + TH / 2 - TH / 2 + TH / 2); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(cx + TW / 2 - i * 8, cy + i * 4 - TH / 2); ctx.lineTo(cx - i * 8, cy + i * 4 + TH / 2); ctx.stroke();
-  }
-  for (let i = 0; i < 6; i++) { const rx = cx - 16 + hash(cx + i, cy, seed) * 32, ry = cy - 6 + hash(cx, cy + i, seed) * 12; px(ctx, rx, ry, 2, 1, hash(rx, ry, seed) < 0.5 ? '#9a9ca2' : '#5e6066'); }
-  ctx.restore();
-}
-// Wall along one edge of the diamond. side: 'nw' (x-1), 'ne' (y-1), 'sw' (y+1), 'se' (x+1)
-function wall(ctx, cx, cy, side, tall, seed) {
-  const h = tall ? WALL_H : PARAPET_H;
-  const top = cy - TH / 2, right = cx + TW / 2, bottom = cy + TH / 2, left = cx - TW / 2;
-  let a, b; // edge endpoints (base)
-  if (side === 'nw') { a = [left, cy]; b = [cx, top]; } else if (side === 'ne') { a = [cx, top]; b = [right, cy]; } else if (side === 'sw') { a = [left, cy]; b = [cx, bottom]; } else { a = [cx, bottom]; b = [right, cy]; }
-  const face = side === 'nw' || side === 'sw' ? '#5c5f66' : '#8a8d94';
-  const dark = side === 'nw' || side === 'sw' ? '#3f4147' : '#6b6e75';
-  ctx.fillStyle = face; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.lineTo(b[0], b[1] - h); ctx.lineTo(a[0], a[1] - h); ctx.closePath(); ctx.fill();
-  // brick courses
-  ctx.strokeStyle = 'rgba(20,20,26,.6)'; ctx.lineWidth = 1;
-  for (let yy = 4; yy < h; yy += 4) { ctx.beginPath(); ctx.moveTo(a[0], a[1] - yy); ctx.lineTo(b[0], b[1] - yy); ctx.stroke(); }
-  for (let t = 0.15; t < 1; t += 0.3) { const x = a[0] + (b[0] - a[0]) * t, y = a[1] + (b[1] - a[1]) * t; ctx.beginPath(); ctx.moveTo(x, y - 1); ctx.lineTo(x, y - h + 1); ctx.stroke(); }
-  // cap
-  ctx.fillStyle = '#a3a6ad'; ctx.beginPath(); ctx.moveTo(a[0], a[1] - h); ctx.lineTo(b[0], b[1] - h); ctx.lineTo(b[0], b[1] - h - 3); ctx.lineTo(a[0], a[1] - h - 3); ctx.closePath(); ctx.fill();
-  ctx.fillStyle = dark; ctx.fillRect(Math.round(a[0]), Math.round(a[1] - h - 3), 1, h + 3);
-  // torch on some tall back walls
-  if (tall && hash(cx, cy, seed + (side === 'nw' ? 1 : 2)) < 0.28) {
-    const tx = (a[0] + b[0]) / 2, ty = (a[1] + b[1]) / 2 - h / 2;
-    px(ctx, tx - 1, ty, 2, 5, '#4a3020'); px(ctx, tx - 2, ty - 4, 4, 4, '#ff9a2a'); px(ctx, tx - 1, ty - 6, 2, 3, '#ffe27a');
-    const g = ctx.createRadialGradient(tx, ty - 3, 1, tx, ty - 3, 14); g.addColorStop(0, 'rgba(255,170,60,.35)'); g.addColorStop(1, 'rgba(255,170,60,0)'); ctx.fillStyle = g; ctx.fillRect(tx - 14, ty - 17, 28, 28);
-  }
-}
-function figure(ctx, cx, cy, robe, robeL, hat, opts = {}) {
-  ctx.fillStyle = 'rgba(0,0,0,.4)'; ctx.beginPath(); ctx.ellipse(cx, cy + 2, 7, 3, 0, 0, Math.PI * 2); ctx.fill();
-  px(ctx, cx - 3, cy - 9, 6, 10, robe); px(ctx, cx - 3, cy - 9, 2, 10, robeL);
-  px(ctx, cx - 2, cy - 12, 4, 3, '#e9c39c');
-  if (hat) { px(ctx, cx - 4, cy - 13, 8, 1, hat); ctx.fillStyle = hat; ctx.beginPath(); ctx.moveTo(cx - 3, cy - 13); ctx.lineTo(cx + 1, cy - 19); ctx.lineTo(cx + 3, cy - 13); ctx.closePath(); ctx.fill(); }
-  else px(ctx, cx - 2, cy - 14, 4, 2, '#4a2e1a');
-  if (opts.legs) px(ctx, cx - 3, cy - 2, 6, 3, opts.legs);
-  if (opts.staff) { px(ctx, cx + 4, cy - 15, 1, 16, '#6b4a2a'); px(ctx, cx + 3, cy - 17, 3, 2, '#9fe7ff'); }
-  if (opts.guardian) { px(ctx, cx - 5, cy - 16, 2, 4, '#e8dcc2'); px(ctx, cx + 3, cy - 16, 2, 4, '#e8dcc2'); }
-  if (opts.badge) { px(ctx, cx + 4, cy - 4, 7, 7, '#15120f'); labels.push({ x: cx + 7.5, y: cy - 0.5, text: String(opts.badge), size: 5.5, box: false, color: '#fff' }); }
-}
-function treasure(ctx, cx, cy, kind, seed) {
-  ctx.fillStyle = 'rgba(0,0,0,.4)'; ctx.beginPath(); ctx.ellipse(cx, cy + 2, 8, 3, 0, 0, Math.PI * 2); ctx.fill();
-  if (kind === 'gold') { ctx.fillStyle = '#d9a62b'; ctx.beginPath(); ctx.ellipse(cx, cy - 2, 8, 4, 0, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#f2cf5c'; ctx.beginPath(); ctx.ellipse(cx - 1, cy - 4, 5, 3, 0, 0, Math.PI * 2); ctx.fill(); for (let i = 0; i < 4; i++) px(ctx, cx - 6 + hash(i, cx, seed) * 12, cy - 5 + hash(cx, i, seed) * 5, 2, 1, '#fff2b0'); }
-  else if (kind === 'card') { px(ctx, cx - 5, cy - 9, 8, 11, '#e8dcc2'); px(ctx, cx - 4, cy - 8, 6, 5, '#3b5fb0'); px(ctx, cx - 3, cy - 2, 4, 1, '#333'); px(ctx, cx - 2, cy - 11, 8, 11, 'rgba(232,220,194,.6)'); }
-  else if (kind === 'life') { px(ctx, cx - 3, cy - 7, 6, 8, '#c8322a'); px(ctx, cx - 2, cy - 10, 4, 3, '#8fb0ee'); px(ctx, cx - 3, cy - 11, 6, 1, '#6b4a2a'); px(ctx, cx - 2, cy - 5, 2, 3, '#ff8a7a'); }
-  else if (kind === 'amulet') { ctx.fillStyle = '#f2cf5c'; ctx.beginPath(); ctx.arc(cx, cy - 5, 5, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#d060ff'; ctx.beginPath(); ctx.arc(cx, cy - 5, 2.5, 0, Math.PI * 2); ctx.fill(); px(ctx, cx - 1, cy - 12, 2, 3, '#a07c48'); }
-  else { px(ctx, cx - 7, cy - 6, 14, 8, '#7a5a34'); px(ctx, cx - 7, cy - 9, 14, 3, '#a07c48'); px(ctx, cx - 1, cy - 6, 2, 2, '#f2cf5c'); }
-}
-function scroll(ctx, cx, cy) {
-  ctx.fillStyle = 'rgba(0,0,0,.4)'; ctx.beginPath(); ctx.ellipse(cx, cy + 2, 8, 3, 0, 0, Math.PI * 2); ctx.fill();
-  px(ctx, cx - 7, cy - 8, 14, 9, '#efe3c2'); px(ctx, cx - 8, cy - 9, 3, 11, '#c9b686'); px(ctx, cx + 5, cy - 9, 3, 11, '#c9b686');
-  for (let i = 0; i < 3; i++) px(ctx, cx - 4, cy - 6 + i * 2.5, 7, 1, '#6b5a3a');
-}
-function exitArch(ctx, cx, cy) {
-  px(ctx, cx - 9, cy - 20, 18, 22, '#3a3c42'); px(ctx, cx - 6, cy - 16, 12, 18, '#08080a');
-  ctx.fillStyle = '#3a3c42'; ctx.beginPath(); ctx.arc(cx, cy - 20, 9, Math.PI, 0); ctx.fill();
-  ctx.fillStyle = '#08080a'; ctx.beginPath(); ctx.arc(cx, cy - 16, 6, Math.PI, 0); ctx.fill();
-  px(ctx, cx - 2, cy - 4, 4, 1, '#9fe7ff');
-}
-function label(ctx, cx, cy, text) { labels.push({ x: cx, y: cy, text, size: 7.5, bg: 'rgba(0,0,0,.7)' }); }
-
-let frame = null, bgCache = null;
+let frame = null;
+const TREASURE_SPRITE = { card: 'chest', gold: 'chestSmall', life: 'potion', amulet: 'amulet' };
 export function drawDungeon(canvas, layout, tpl, opts = {}) {
   const W = CANVAS.w, H = CANVAS.h;
   labels = [];
   if (!frame) frame = document.createElement('canvas');
   frame.width = W; frame.height = H;
   const ctx = frame.getContext('2d'); ctx.imageSmoothingEnabled = false;
-  // cavern background
-  if (!bgCache || bgCache.width !== W) {
-    bgCache = document.createElement('canvas'); bgCache.width = W; bgCache.height = H;
-    const b = bgCache.getContext('2d'); const img = b.createImageData(W, H); const d = img.data;
-    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const n = hash(x >> 2, y >> 2, 7) * 0.6 + hash(x, y, 3) * 0.4; const v = 14 + Math.floor(n * 26); const o = (y * W + x) * 4; d[o] = v; d[o + 1] = v; d[o + 2] = v + 4; d[o + 3] = 255; }
-    b.putImageData(img, 0, 0);
-    // crack lines
-    b.strokeStyle = 'rgba(0,0,0,.6)'; b.lineWidth = 1;
-    for (let i = 0; i < 40; i++) { let x = hash(i, 1, 9) * W, y = hash(1, i, 9) * H; b.beginPath(); b.moveTo(x, y); for (let s = 0; s < 6; s++) { x += (hash(i, s, 11) - 0.5) * 30; y += (hash(s, i, 13) - 0.5) * 30; b.lineTo(x, y); } b.stroke(); }
-  }
-  ctx.drawImage(bgCache, 0, 0);
+  px(ctx, 0, 0, W, H, '#0a0908');
   const links = new Set(layout.links);
-  const has = (x, y) => !!layout.cells[key(x, y)];
   const open = (c, dx, dy) => links.has(key(c.x, c.y) + '|' + key(c.x + dx, c.y + dy));
-  const cells = Object.values(layout.cells).sort((a, b) => (a.x + a.y) - (b.x + b.y) || a.x - b.x);
+  const cells = Object.values(layout.cells);
   const seed = layout.seed || 0;
-  const reach = new Set(neighbours(layout.cells, links, playerCell(layout)).map(c => key(c.x, c.y)));
-  // floors first, then walls and objects in depth order
-  for (const c of cells) { const [cx, cy] = isoPos(c.x, c.y); floor(ctx, cx, cy, seed); if (reach.has(key(c.x, c.y)) && opts.showReach !== false) { ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.setLineDash([2, 2]); ctx.beginPath(); ctx.moveTo(cx, cy - TH / 2 + 2); ctx.lineTo(cx + TW / 2 - 4, cy); ctx.lineTo(cx, cy + TH / 2 - 2); ctx.lineTo(cx - TW / 2 + 4, cy); ctx.closePath(); ctx.stroke(); ctx.setLineDash([]); } }
+  const ready = atlasReady();
+  // tile kinds: floor for cells and open passages, wall around them, rock beyond
+  const kind = Array.from({ length: TY }, () => new Array(TX).fill('rock'));
+  for (const c of cells) {
+    kind[2 * c.y + 1][2 * c.x + 1] = 'floor';
+    if (open(c, 1, 0)) kind[2 * c.y + 1][2 * c.x + 2] = 'floor';
+    if (open(c, 0, 1)) kind[2 * c.y + 2][2 * c.x + 1] = 'floor';
+  }
+  for (let ty = 0; ty < TY; ty++) for (let tx = 0; tx < TX; tx++) {
+    if (kind[ty][tx] !== 'rock') continue;
+    let near = false;
+    for (let dy = -1; dy <= 1 && !near; dy++) for (let dx = -1; dx <= 1; dx++) if (kind[ty + dy]?.[tx + dx] === 'floor') { near = true; break; }
+    if (near) kind[ty][tx] = 'wall';
+  }
+  const at = (tx, ty) => kind[ty]?.[tx] || 'rock';
+  for (let ty = 0; ty < TY; ty++) for (let tx = 0; tx < TX; tx++) {
+    const k = at(tx, ty), x = tx * T, y = OY + ty * T, r = hash(tx, ty, seed), r2 = hash(tx, ty, seed + 1);
+    if (!ready) { px(ctx, x, y, T, T, k === 'floor' ? '#4a443e' : k === 'wall' ? '#6b6258' : r < 0.1 ? '#b3401a' : '#1c1816'); continue; }
+    if (k === 'floor') blit(ctx, pick(DUNGEON_TILES.floor, r), x, y, T, T);
+    else if (k === 'wall') blit(ctx, at(tx, ty + 1) === 'floor' ? pick(DUNGEON_TILES.wallFace, r) : pick(DUNGEON_TILES.wallTop, r), x, y, T, T);
+    else blit(ctx, r < 0.06 ? pick(DUNGEON_TILES.lava, r2) : r < 0.22 ? pick(DUNGEON_TILES.rockCrack, r2) : pick(DUNGEON_TILES.rock, r2), x, y, T, T);
+    if (k === 'wall' && at(tx, ty + 1) === 'floor' && r2 < 0.22) blitAt(ctx, SPRITES.torch, x + T / 2, y + T - 4, 0.7);
+  }
+  // reachable cells
+  const reach = neighbours(layout.cells, links, playerCell(layout));
+  if (opts.showReach !== false) for (const c of reach) { const [cx, cy] = isoPos(c.x, c.y); ctx.strokeStyle = 'rgba(255,255,255,.45)'; ctx.setLineDash([3, 3]); ctx.strokeRect(cx - T / 2 + 2.5, cy - T / 2 + 2.5, T - 5, T - 5); ctx.setLineDash([]); }
+  // objects
+  const monster = MONSTERS[DUNGEON_MONSTER[tpl?.color] || 'skeleton'];
+  const drawObj = (rect, cx, cy, s) => { if (ready) blitAt(ctx, rect, cx, cy + T / 2 - 3, s); };
   for (const c of cells) {
     const [cx, cy] = isoPos(c.x, c.y);
-    if (!open(c, -1, 0)) wall(ctx, cx, cy, 'nw', true, seed);
-    if (!open(c, 0, -1)) wall(ctx, cx, cy, 'ne', true, seed);
-    // objects
-    const p = tpl?.color || 'B';
-    const robes = { W: ['#d9d2b8', '#f0ead6'], U: ['#2f5f9c', '#5e8cc9'], B: ['#3a2d4a', '#5e4d75'], R: ['#a33a2a', '#d0604a'], G: ['#3f6f2f', '#6a9a4a'] }[p];
-    if (c.type === 'monster' && !c.done) figure(ctx, cx, cy, robes[0], robes[1], robes[0], { badge: c.payload.guardian ? 'G' : c.payload.tier, guardian: c.payload.guardian });
-    else if (c.type === 'treasure' && !c.done) treasure(ctx, cx, cy, c.payload.kind, seed);
-    else if (c.type === 'riddle' && !c.done) scroll(ctx, cx, cy);
-    else if (c.type === 'exit') { exitArch(ctx, cx, cy); label(ctx, cx, cy + 12, 'Exit'); }
-    else if (c.type === 'entrance') label(ctx, cx, cy + 10, 'Entrance');
-    if (c.x === layout.px && c.y === layout.py) figure(ctx, cx, cy, '#c8322a', '#e0604a', null, { legs: '#2f4f9c', staff: true });
-    if (!open(c, 0, 1)) wall(ctx, cx, cy, 'sw', false, seed);
-    if (!open(c, 1, 0)) wall(ctx, cx, cy, 'se', false, seed);
+    if (c.type === 'monster' && !c.done) {
+      const g = c.payload.guardian;
+      if (ready) blitAt(ctx, monster.idle[0], cx, cy + T / 2 - 2, g ? 0.85 : 0.7); else px(ctx, cx - 8, cy - 10, 16, 20, '#c04040');
+      px(ctx, cx + 9, cy + 7, 10, 10, '#15120f'); labels.push({ x: cx + 14, y: cy + 12, text: g ? 'G' : String(c.payload.tier), size: 6.5, box: false, color: g ? '#ffd27a' : '#fff' });
+    }
+    else if (c.type === 'treasure') drawObj(c.done ? SPRITES.chestOpen : SPRITES[TREASURE_SPRITE[c.payload.kind] || 'chest'], cx, cy, 0.8);
+    else if (c.type === 'riddle') { if (!c.done) drawObj(SPRITES.scroll, cx, cy, 0.8); }
+    else if (c.type === 'exit') { if (ready) blit(ctx, SPRITES.door, cx - T / 2, cy - T / 2, T, T); label(cx, cy + T / 2 + 6, 'Exit'); }
+    else if (c.type === 'entrance') { if (ready) blit(ctx, SPRITES.portal, cx - T / 2, cy - T / 2, T, T); label(cx, cy + T / 2 + 6, 'Entrance'); }
+    if (c.x === layout.px && c.y === layout.py) { if (ready) blitAt(ctx, SPRITES.hero, cx, cy + T / 2 - 1, 0.8); else px(ctx, cx - 6, cy - 12, 12, 22, '#e0604a'); }
   }
-  // banner box on the frame; its text at full resolution
+  // banner
   const title = tpl?.name || 'Dungeon'; const sub = layout.status || '';
-  ctx.font = 'bold 11px Georgia, serif';
-  const bw = Math.max(ctx.measureText(title).width, Math.min(200, sub.length * 4.2), 90) + 24;
-  px(ctx, W / 2 - bw / 2, 4, bw, 28, '#1d2a1b'); ctx.strokeStyle = '#6fa04a'; ctx.lineWidth = 1; ctx.strokeRect(W / 2 - bw / 2 + 0.5, 4.5, bw - 1, 27);
-  labels.push({ x: W / 2, y: 13, text: title, size: 11, box: false, color: '#e8ffd0', font: 'Georgia, serif' });
-  labels.push({ x: W / 2, y: 25, text: sub, size: 7, box: false, color: '#9fe08a', weight: 'normal' });
+  px(ctx, 0, 0, W, OY - 4, '#1d2a1b'); ctx.strokeStyle = '#6fa04a'; ctx.lineWidth = 1; ctx.strokeRect(0.5, 0.5, W - 1, OY - 5);
+  labels.push({ x: W / 2, y: 11, text: title, size: 11, box: false, color: '#e8ffd0', font: 'Georgia, serif' });
+  labels.push({ x: W / 2, y: 23, text: sub, size: 7, box: false, color: '#9fe08a', weight: 'normal' });
   present(canvas, frame, W, H, labels);
 }
+function label(cx, cy, text) { labels.push({ x: cx, y: cy, text, size: 7.5, bg: 'rgba(0,0,0,.7)' }); }

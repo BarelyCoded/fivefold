@@ -203,6 +203,7 @@ tr.st-unsupported td:nth-child(7), tr.st-unsupported td:nth-child(3), tr.st-miss
 .pbox.thinking { box-shadow: inset 0 0 14px rgba(0,0,0,.6), 0 0 10px rgba(227,197,106,.4); }
 .pbox.targetable { box-shadow: 0 0 0 3px #ff4b4b; cursor: pointer; animation: pulse .9s infinite alternate; }
 .pname { font-family: Garamond, Georgia, serif; font-weight: 600; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #f0e6cf; }
+.portrait { margin: 2px auto 0; image-rendering: pixelated; filter: drop-shadow(0 4px 4px rgba(0,0,0,.6)); }
 .plife { font-family: Garamond, Georgia, serif; font-size: 46px; line-height: 1; margin: 6px 0 4px; color: #ffb3a5; text-shadow: 0 2px 6px rgba(0,0,0,.7); }
 .pmeta { display: flex; justify-content: center; gap: 10px; font-size: 12px; color: var(--ink2); margin-top: 6px; }
 .gems { display: flex; justify-content: center; flex-wrap: wrap; gap: 4px; min-height: 22px; }
