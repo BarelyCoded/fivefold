@@ -1,5 +1,5 @@
 // Fivefold app controller: screens, world loop, persistence.
-import { parseList, importNames, defOf, forgetDefs, loadArtIndex, artFor, artCount, hasOwnArt } from './collection.js';
+import { parseList, importNames, defOf, forgetDefs, loadArtIndex, artFor, artCount, hasOwnArt, hasServer } from './collection.js';
 import { fetchCards, cacheSize, cached as cachedCard } from './scryfall.js';
 import { COLORS, COLOR_NAME, costString, statusLabel } from './cards.js';
 import { generateWorld, drawWorld, drawMinimap, tileAt, inBounds, cityAt, linkAt, enemyAt, stepEnemies, BIOME, TILE, VIEW, placeDungeons, dungeonAt, placeLandmarks, landmarkAt } from './world.js';
@@ -478,7 +478,7 @@ function title() {
       <div class="box">
         <h2>${g ? 'Continue' : 'Your cards'}</h2>
         ${g ? `<p>${esc(g.name)}, day ${g.player.day}, ${g.wins} wins and ${g.losses} losses. ${g.status !== 'playing' ? 'This journey is over.' : ''}</p><button class="btn primary" data-go="${g.status === 'playing' ? 'map' : 'end'}">Continue</button>` : ''}
-        <p>${Object.values(S.collection).reduce((a, b) => a + b, 0)} cards in your collection, ${artCount()} custom images in the art folder.</p>
+        <p>${Object.values(S.collection).reduce((a, b) => a + b, 0)} cards in your collection${hasServer() ? `, ${artCount()} custom images in the art folder` : ''}.</p>
         <button class="btn" data-go="collection">Manage collection</button>
       </div>
     </div>
@@ -532,14 +532,14 @@ function collection() {
         <h2>Import your cards</h2>
         <p class="small">Paste a list (one card per line, like <code>4 Lightning Bolt</code>) or put a <code>collection.csv</code> next to <code>server.js</code>. Rules text is fetched from Scryfall and cached in this browser.</p>
         <textarea id="imp" rows="7" placeholder="4 Lightning Bolt&#10;2 Serra Angel&#10;Grizzly Bears">${esc(S.importText)}</textarea>
-        <div class="btnrow"><button class="btn primary" id="b-import">Import list</button><button class="btn" id="b-csv">Load collection.csv</button><button class="btn ghost" id="b-clear-coll">Clear collection</button></div>
+        <div class="btnrow"><button class="btn primary" id="b-import">Import list</button>${hasServer() ? '<button class="btn" id="b-csv">Load collection.csv</button>' : ''}<button class="btn ghost" id="b-clear-coll">Clear collection</button></div>
         ${rep ? rep.error ? `<div class="msg">${esc(rep.error)}</div>` : `<div class="report"><b>Added ${rep.added} cards.</b>
           <table><tr><th>Card</th><th>Qty</th><th>Status</th><th>Notes</th></tr>${rep.rows.map(r => `<tr class="st-${r.def ? r.def.status : 'missing'}"><td>${esc(r.canonical || r.name)}</td><td>${r.count}</td><td>${statusLabel(r.def)}</td><td>${esc((r.def?.notes || []).join('; '))}</td></tr>`).join('')}</table></div>` : ''}
       </div>
       <div class="box">
         <h2>Your art</h2>
-        <p class="small">${artCount()} images found in the <code>art/</code> folder. Name a file after the card, lowercase with dashes: <code>lightning-bolt.jpg</code>, <code>serra-angel.png</code>. A photo of your physical card works fine. Cards with your art show a ★.</p>
-        <button class="btn" id="b-rescan">Rescan art folder</button>
+        ${hasServer() ? `<p class="small">${artCount()} images found in the <code>art/</code> folder. Name a file after the card, lowercase with dashes: <code>lightning-bolt.jpg</code>, <code>serra-angel.png</code>. A photo of your physical card works fine. Cards with your art show a ★.</p>
+        <button class="btn" id="b-rescan">Rescan art folder</button>` : `<p class="small">Custom art and <code>collection.csv</code> work when the game runs from its own folder with <code>node server.js</code>. On the web version, card images come from Scryfall.</p>`}
         <h2 style="margin-top:18px">Engine support</h2>
         <p class="small"><b>ready</b>: fully playable. <b>approximated</b>: plays, but some abilities are ignored (the notes say which). <b>unsupported</b>: stays in your collection but cannot go in a deck yet. The demo engine knows lands, creatures with common keywords, and burn, removal, pump, bounce, draw and life-gain spells.</p>
       </div>
@@ -703,7 +703,7 @@ document.addEventListener('click', ev => {
   if (t.dataset.buy != null) { const c = cityAt(g.world, g.player.x, g.player.y); const it = cityStock(c)[Number(t.dataset.buy)]; if (it && !it.sold && g.player.gold >= it.price) { g.player.gold -= it.price; it.sold = true; addCards(S.collection, it.name, 1); sfx('coin'); save(); render(); } return; }
   switch (t.id) {
     case 'b-import': S.importText = document.getElementById('imp').value; doImport(S.importText); break;
-    case 'b-csv': fetch('/api/collection').then(r => r.ok ? r.text() : Promise.reject(new Error('collection.csv not found next to server.js'))).then(txt => { S.importText = txt; doImport(txt); }).catch(e => { S.report = { error: e.message }; render(); }); break;
+    case 'b-csv': fetch('api/collection').then(r => r.ok ? r.text() : Promise.reject(new Error('collection.csv not found next to server.js'))).then(txt => { S.importText = txt; doImport(txt); }).catch(e => { S.report = { error: e.message }; render(); }); break;
     case 'b-rescan': loadArtIndex().then(render); break;
     case 'b-clear-coll': if (confirm('Remove every card from your collection? Your deck will need rebuilding.')) { S.collection = {}; if (g) g.deck = {}; save(); render(); } break;
     case 'b-fill': fillBasics(g.deck); save(); render(); break;

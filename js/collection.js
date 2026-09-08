@@ -48,16 +48,19 @@ export async function importNames(entries, onProgress) {
 
 // ---- art -----------------------------------------------------------------------
 let artIndex = new Map(); // slug or scryfall id -> url
+let serverSeen = false;   // true when server.js answered: the art folder and collection.csv exist only there
+export const hasServer = () => serverSeen;
 export async function loadArtIndex() {
   artIndex = new Map();
   try {
-    const res = await fetch('/api/art');
+    const res = await fetch('api/art');   // relative: the site may live under a sub-path (GitHub Pages)
     if (!res.ok) return artIndex;
     const files = await res.json();
+    serverSeen = true;
     for (const f of files) {
       const key = f.replace(/\.[^.]+$/, '').toLowerCase();
-      artIndex.set(key, '/art/' + encodeURIComponent(f));
-      artIndex.set(slug(key), '/art/' + encodeURIComponent(f));
+      artIndex.set(key, 'art/' + encodeURIComponent(f));
+      artIndex.set(slug(key), 'art/' + encodeURIComponent(f));
     }
   } catch (e) { console.warn('art index failed', e); }
   return artIndex;

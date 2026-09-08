@@ -14,6 +14,10 @@ node server.js
 
 Then open http://localhost:8642. The first launch fetches rules text for the built-in enemy decks from Scryfall and caches it in your browser.
 
+### Play it on the web
+
+The game is static files, so the repository publishes itself to GitHub Pages: every push to `main` runs `.github/workflows/pages.yml` and the site appears at `https://<owner>.github.io/fivefold/`. One-time setup in the repository settings: Pages, then set the source to "GitHub Actions". On the web version, saves live in each player's browser, card images come from Scryfall, and the local-only features (the `art/` folder and `collection.csv`) are hidden. Importing a pasted list still works.
+
 ## Import your cards
 
 1. Copy `collection.example.csv` to `collection.csv` and list your cards, one per line: `4 Lightning Bolt`. Set codes in parentheses are ignored. Basic lands never need listing.
