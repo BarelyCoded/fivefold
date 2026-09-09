@@ -66,6 +66,8 @@ Landmarks: a dozen wells, standing stones, signposts, towers, oases, volcanoes, 
 
 Food: every step on the overworld costs one. At zero you lose a life every other step until you eat. Cities sell food and every won duel yields some.
 
+The title screen tracks your current journey (name, day, wins and losses, and the date it began) and has a **Reset everything** button that wipes the save and the whole collection, so a New journey starts truly fresh with only its starter deck.
+
 ## Amulets
 
 Coloured amulets are a second currency, in the spirit of the old Shandalar game. You earn them by beating tougher wanderers (a chance per win, better against tier-two foes and guaranteed from dungeon guardians and the Usurper), by taking a city's **bounty** (the town watch offers a nearby foe; accept it, hunt the star-marked target, and beat them for an amulet of their colour), by buying them at the **Gem Cutter Guild** for 200 gold each, and by finding the **Lost City of El'Arkan**, which gives one amulet of every colour, once. Your amulets show as coloured gems in the top bar.

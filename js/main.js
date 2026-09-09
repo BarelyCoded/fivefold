@@ -149,7 +149,7 @@ async function newGame({ name, color, difficulty }) {
   S.game = {
     name: name || 'Wanderer', color, difficulty, deck, world,
     player: { x: world.start.x, y: world.start.y, life: d.life, maxLife: d.life, gold: d.gold, food: 60, day: 1, steps: 0, amulets: newAmulets() },
-    boss: { links: 0 }, status: 'playing', wins: 0, losses: 0, cityStock: {}, quests: [],
+    boss: { links: 0 }, status: 'playing', wins: 0, losses: 0, cityStock: {}, quests: [], created: Date.now(),
   };
   save(); go('map');
 }
@@ -639,9 +639,10 @@ function title() {
       </form>
       <div class="box">
         <h2>${g ? 'Continue' : 'Your cards'}</h2>
-        ${g ? `<p>${esc(g.name)}, day ${g.player.day}, ${g.wins} wins and ${g.losses} losses. ${g.status !== 'playing' ? 'This journey is over.' : ''}</p><button class="btn primary" data-go="${g.status === 'playing' ? 'map' : 'end'}">Continue</button>` : ''}
+        ${g ? `<p>${esc(g.name)}, day ${g.player.day}, ${g.wins} wins and ${g.losses} losses.${g.created ? ` Journey begun ${new Date(g.created).toLocaleDateString()}.` : ''} ${g.status !== 'playing' ? 'This journey is over.' : ''}</p><button class="btn primary" data-go="${g.status === 'playing' ? 'map' : 'end'}">Continue</button>` : ''}
         <p>${Object.values(S.collection).reduce((a, b) => a + b, 0)} cards in your collection${hasServer() ? `, ${artCount()} custom images in the art folder` : ''}.</p>
-        <button class="btn" data-go="collection">Manage collection</button>
+        <div class="btnrow"><button class="btn" data-go="collection">Manage collection</button><button class="btn ghost" id="b-reset-all">Reset everything</button></div>
+        <p class="small">Reset everything wipes your current journey and your whole collection, so a New journey starts truly fresh.</p>
       </div>
     </div>
     <footer class="legal">Unofficial fan project under the Wizards of the Coast Fan Content Policy. Not approved or endorsed by Wizards. Card data is fetched from Scryfall at runtime; nothing is bundled. Magic: The Gathering is a trademark of Wizards of the Coast.</footer>
@@ -871,7 +872,7 @@ app.addEventListener('submit', ev => {
 });
 document.addEventListener('click', ev => {
   if (ev.target.closest('.btn, .tab, .linkbtn')) sfx('click');
-  const t = ev.target.closest('[data-go],[data-modal],[data-filter],[data-add],[data-rem],[data-dec],[data-buy],[data-amshop],[data-audio],[data-lesson],#b-import,#b-csv,#b-rescan,#b-clear-coll,#b-fill,#b-rest,#b-inn,#b-food,#b-leave,#b-newgame,#b-dleave,#b-practice,#b-bounty,#b-worldmagic');
+  const t = ev.target.closest('[data-go],[data-modal],[data-filter],[data-add],[data-rem],[data-dec],[data-buy],[data-amshop],[data-audio],[data-lesson],#b-import,#b-csv,#b-rescan,#b-clear-coll,#b-fill,#b-rest,#b-inn,#b-food,#b-leave,#b-newgame,#b-dleave,#b-practice,#b-bounty,#b-worldmagic,#b-reset-all');
   if (!t) return;
   const g = S.game;
   if ('audio' in t.dataset) { toggleAudio(); renderTop(); return; }
@@ -898,6 +899,7 @@ document.addEventListener('click', ev => {
     case 'b-dleave': dungeonExitPrompt(false); break;
     case 'b-practice': startTutorialDuel().catch(e => setBusy('Could not load card data: ' + e.message)); break;
     case 'b-bounty': { const c = cityAt(g.world, g.player.x, g.player.y); if (c) acceptBounty(c); break; }
+    case 'b-reset-all': if (confirm('Wipe your current journey AND your entire collection so you can start completely fresh? This cannot be undone.')) { S.game = null; S.collection = {}; S.filter = 'all'; S.report = null; save(); go('title'); toast('Everything wiped. Begin a new journey with an empty collection.'); } break;
     case 'b-worldmagic': {
       if (amuletCount('R') < 1) break;
       const before = g.world.enemies.length;
