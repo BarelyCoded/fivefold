@@ -72,12 +72,19 @@ export function generateWorld(rng, enemies, startColor) {
   const roam = [];
   let uid = 1;
   const enemyCount = Math.round(W * H / 38);
-  const tierCut = Math.min(W, H) * 0.42;
+  const span = Math.max(W, H);
   for (let i = 0; i < enemyCount; i++) {
     const t = randomTile((x, y) => dist({ x, y }, start) >= 3); if (!t) continue;
-    const color = at(t.x, t.y); const tier = dist(t, start) < tierCut ? 1 : 2;
-    const pool = enemies.filter(e => e.color === color && !e.boss); const tpl = pool.find(e => e.tier === tier) || pool[0]; if (!tpl) continue;
-    roam.push({ uid: uid++, x: t.x, y: t.y, template: tpl.id, tier: tpl.tier, color }); occupied.add(`${t.x},${t.y}`);
+    const color = at(t.x, t.y);
+    // Level rises with distance from home so the early overland stays gentle; a small spread within each
+    // ring keeps a mix rather than a wall of same-level mages. Near the gate it's only level 1-2.
+    const frac = Math.min(1, dist(t, start) / (span * 0.7));
+    const maxL = Math.min(5, 1 + Math.floor(frac * 5));
+    const lo = Math.max(1, maxL - 2);
+    const level = lo + Math.floor(rng() * (maxL - lo + 1));
+    const tier = level >= 3 ? 2 : 1;                 // sprite + sight bucket
+    const pool = enemies.filter(e => e.color === color && !e.boss); const base = pool.find(e => e.tier === tier) || pool[0]; if (!base) continue;
+    roam.push({ uid: uid++, x: t.x, y: t.y, template: base.id, tier, level, color }); occupied.add(`${t.x},${t.y}`);
   }
   const world = { w: W, h: H, tiles, cities, links, castles, enemies: roam, start: { x: start.x, y: start.y }, seed: Math.floor(rng() * 1e9) };
   world.roads = computeRoadTiles(world);
@@ -815,7 +822,7 @@ export function drawWorld(canvas, world, player, opts = {}) {
   for (const ct of world.cities) if (vis(ct.x, ct.y)) { const [cx, cy] = c(ct.x, ct.y); objs.push({ y: cy, draw: () => { drawCity(f, cx, cy, ct.color, ct.name); if (ct.captured) labels.push({ x: cx, y: cy - PX / 2 - 12, text: 'BESIEGED · fallen', size: 8, color: '#ff8a8a', bg: 'rgba(70,10,10,.9)' }); else if (ct.siege) labels.push({ x: cx, y: cy - PX / 2 - 12, text: '⚔ ' + ct.siege + '/3', size: 9, color: '#ffce8a', bg: 'rgba(70,40,10,.9)' }); } }); }
   for (const ca of allCastles(world)) if (vis(ca.x, ca.y)) { const [cx, cy] = c(ca.x, ca.y); objs.push({ y: cy, draw: () => drawFortress(f, cx, cy, ca.color, ca.name, ca.fallen) }); }
   const robes = { W: ['#d9d2b8', '#f0ead6'], U: ['#2f5f9c', '#5e8cc9'], B: ['#3a2d4a', '#5e4d75'], R: ['#a33a2a', '#d0604a'], G: ['#3f6f2f', '#6a9a4a'] };
-  for (const e of world.enemies) if (vis(e.x, e.y)) { const [cx, cy] = c(e.x, e.y); const [r, rl] = robes[e.color] || robes.B; const sp = (SPRITES.mage[e.color] || SPRITES.mage.M)[e.tier >= 2 ? 1 : 0]; objs.push({ y: cy, draw: () => { drawFigure(f, cx, cy, r, rl, r, { tier: e.tier, sprite: sp }); if (e.bounty) labels.push({ x: cx, y: cy - PX / 2 - 10, text: '\u2605', size: 10, color: '#ffd54a', bg: 'rgba(60,40,10,.9)' }); } }); }
+  for (const e of world.enemies) if (vis(e.x, e.y)) { const [cx, cy] = c(e.x, e.y); const [r, rl] = robes[e.color] || robes.B; const sp = (SPRITES.mage[e.color] || SPRITES.mage.M)[e.tier >= 2 ? 1 : 0]; objs.push({ y: cy, draw: () => { drawFigure(f, cx, cy, r, rl, r, { tier: e.level || e.tier, sprite: sp }); if (e.bounty) labels.push({ x: cx, y: cy - PX / 2 - 10, text: '\u2605', size: 10, color: '#ffd54a', bg: 'rgba(60,40,10,.9)' }); } }); }
   { const [cx, cy] = c(player.x, player.y); objs.push({ y: cy + 0.1, draw: () => drawFigure(f, cx, cy, '#c8322a', '#e0604a', null, { legs: '#2f4f9c', staff: true, ring: true, sprite: SPRITES.hero }) }); }
   objs.sort((a, b) => a.y - b.y);
   for (const o of objs) o.draw();

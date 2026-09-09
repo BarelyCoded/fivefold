@@ -311,11 +311,42 @@ function specialPrompt(sp) {
     render(); return;
   }
 }
+// ---- roaming mage levels ------------------------------------------------------------
+// A roaming mage's power scales with its level (1..5). Higher levels field a stronger base deck salted
+// with more of their colour's best cards, carry more life, and pay out more gold. Built on encounter so
+// the injected bombs reflect the current card pool.
+const TIER_RANK = { S: 0, A: 1, B: 2, C: 3, D: 4, E: 5 };
+const WARDEN_BOMBS = { W: 'Serra Angel', U: 'Air Elemental', B: 'Sengir Vampire', R: 'Lightning Bolt', G: 'Craw Wurm' };
+function colorBombs(color, n) {
+  if (n <= 0) return [];
+  const rank = name => TIER_RANK[tierOf(name)] ?? 3.5;
+  const pool = (S.catalog?.[color] || []).filter(name => { const d = defOf(name); return d && d.kind !== 'unsupported' && d.kind !== 'land' && shopOk(name); });
+  pool.sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+  const out = pool.slice(0, n);
+  while (out.length < n && WARDEN_BOMBS[color]) out.push(WARDEN_BOMBS[color]);   // guaranteed fallback bomb
+  return out;
+}
+function trimWeakest(deck, k) {
+  const rank = name => TIER_RANK[tierOf(name)] ?? 3.5;
+  const nonland = Object.keys(deck).filter(n => { const d = defOf(n); return d && d.kind !== 'land'; }).sort((a, b) => rank(b) - rank(a));
+  for (const name of nonland) { if (k <= 0) break; const take = Math.min(k, deck[name]); deck[name] -= take; if (deck[name] <= 0) delete deck[name]; k -= take; }
+}
+function leveledEnemy(color, level) {
+  level = Math.max(1, Math.min(5, level | 0));
+  const baseTier = level >= 3 ? 2 : 1;
+  const base = S.content.enemies.find(e => e.color === color && e.tier === baseTier) || S.content.enemies.find(e => e.color === color && !e.boss) || S.content.enemies.find(e => e.color === color);
+  const deck = { ...base.deck };
+  const bombs = colorBombs(color, level - 1);        // 0..4 of the colour's best cards mixed in
+  if (bombs.length) { trimWeakest(deck, bombs.length); for (const b of bombs) deck[b] = (deck[b] || 0) + 1; }
+  return { id: `${color}-L${level}`, name: base.name, color, level, tier: baseTier, life: 8 + level * 3, gold: 5 + level * 5, bribe: 4 + level * 2, taunt: base.taunt, deck };
+}
+const roamLevel = e => e.level || e.tier || 1;
+const roamTemplate = e => leveledEnemy(e.color || enemyById(e.template)?.color || 'B', roamLevel(e));
 function encounter(enemy) {
-  const tpl = enemyById(enemy.template); const g = S.game;
+  const tpl = roamTemplate(enemy); const g = S.game;
   S.modal = {
-    title: `${tpl.name} (tier ${tpl.tier}, ${COLOR_NAME[tpl.color]})`,
-    body: `<p class="taunt">“${esc(tpl.taunt)}”</p><p>Life ${tpl.life + DIFF[g.difficulty].enemyBonus}. Win: ${tpl.gold} gold and their ante card. Lose: your ante card.</p>`,
+    title: `${tpl.name} — level ${tpl.level} ${COLOR_NAME[tpl.color]} mage`,
+    body: `<p class="taunt">“${esc(tpl.taunt)}”</p><p>Life ${tpl.life + DIFF[g.difficulty].enemyBonus}. Win: ${tpl.gold} gold and their ante card${tpl.level >= 3 ? ' — higher mages carry stronger cards' : ''}. Lose: your ante card.</p>`,
     buttons: [
       { label: 'Duel', primary: true, action: () => { S.modal = null; startDuel(tpl, enemy.uid); } },
       { label: `Bribe (${tpl.bribe} gold)`, disabled: g.player.gold < tpl.bribe, action: () => { g.player.gold -= tpl.bribe; g.world.enemies = g.world.enemies.filter(e => e.uid !== enemy.uid); if (g.quests) g.quests = g.quests.filter(q => q.enemyUid !== enemy.uid); S.modal = null; save(); render(); } },
@@ -337,13 +368,12 @@ function collectMote(mote) {
 // An ambush mote: a lurking foe of that region springs out. Tougher the farther from home you strayed.
 function ambushFromMote(mote) {
   const g = S.game;
-  const far = Math.abs(mote.x - g.world.start.x) + Math.abs(mote.y - g.world.start.y);
-  const tier = far < Math.min(g.world.w, g.world.h) * 0.42 ? 1 : 2;
-  const pool = S.content.enemies.filter(e => e.color === mote.color && !e.boss);
-  const tpl = pool.find(e => e.tier === tier) || pool[0] || S.content.enemies.find(e => !e.boss);
-  if (!tpl) { collectMote(mote); return; }   // fall back to a reward if no foe fits
+  const dx = mote.x - g.world.start.x, dy = mote.y - g.world.start.y;
+  const far = Math.hypot(dx, dy), span = Math.max(g.world.w, g.world.h);
+  const level = Math.max(1, Math.min(5, 1 + Math.floor((far / (span * 0.7)) * 5)));   // as tough as its region
+  if (!S.content.enemies.some(e => e.color === mote.color && !e.boss)) { collectMote(mote); return; }
   toast('The spark was a lure — an ambush!'); sfx('lose');
-  encounter({ template: tpl.id, uid: null });
+  encounter({ color: mote.color, level, uid: null });
 }
 const WARDEN_NAME = { W: 'the Warden of Light', U: 'the Warden of Tides', B: 'the Warden of the Grave', R: 'the Warden of Cinders', G: 'the Warden of the Wilds' };
 // A Warden fights their guild's honed mono-colour deck at boss stature. One is the Usurper in disguise.
@@ -558,9 +588,15 @@ function finishDuel(winner) {
     if (ante.theirs) { addCards(S.collection, ante.theirs, 1); lines.push(`You take ${ante.theirs} as ante.`); }
     g.player.life = Math.max(duel.players[0].life, Math.ceil(g.player.maxLife / 2));
     if (roamUid != null) { g.world.enemies = g.world.enemies.filter(e => e.uid !== roamUid); if (Math.random() < 0.45) { const clue = revealClue(tpl.color); if (clue) lines.push(clue); } }
-    // Tough foes drop amulets; a matching bounty pays one too.
-    const dropChance = tpl.boss ? 1 : tpl.tier >= 2 ? 0.4 : 0.12;
+    // Tougher mages drop amulets more often, and a high-level foe may also cough up a spare card from
+    // its deck — so seeking out level 2-3+ mages pays off. A matching bounty pays an amulet too.
+    const lvl = tpl.level || (tpl.tier >= 2 ? 2 : 1);
+    const dropChance = tpl.boss ? 1 : Math.min(0.85, 0.06 + lvl * 0.12);
     if (Math.random() < dropChance) { const col = tpl.boss ? rnd(COLORS) : tpl.color; giveAmulet(col); lines.push(`You pry a ${COLOR_NAME[col]} amulet from your fallen foe.`); }
+    if (!tpl.boss && lvl >= 2 && Math.random() < (lvl - 1) * 0.18) {
+      const loot = Object.keys(tpl.deck).filter(n => !BASIC_NAMES.has(n) && defOf(n) && shopOk(n));
+      if (loot.length) { const c = rnd(loot); addCards(S.collection, c, 1); lines.push(`You loot a spare ${c} from their satchel.`); }
+    }
     if (roamUid != null && g.quests?.length) { const q = g.quests.find(q => q.enemyUid === roamUid); if (q) { giveAmulet(q.color); g.quests = g.quests.filter(x => x !== q); lines.push(`Bounty claimed: ${q.city} rewards you a ${COLOR_NAME[q.color]} amulet.`); } }
     if (tpl.warden) {
       const castle = (g.world.castles || []).find(c => c.color === tpl.warden); if (castle) castle.fallen = true;
@@ -975,7 +1011,7 @@ function map() {
   const near = g.world.enemies.filter(e => Math.abs(e.x - g.player.x) <= 1 && Math.abs(e.y - g.player.y) <= 1);
   const panel = `<canvas id="minimap" class="minimap"></canvas>
       <h2>${esc(g.name)}</h2>
-      <p>Standing in the <b>${BIOME[here].name}</b> (${COLOR_NAME[here]}).${onRoad ? ' <b class="onroad">On a road — you travel it swiftly and pursuers lose your trail.</b>' : ''} ${near.length ? `<br>${near.map(e => enemyById(e.template).name).join(', ')} nearby.` : ''}</p>
+      <p>Standing in the <b>${BIOME[here].name}</b> (${COLOR_NAME[here]}).${onRoad ? ' <b class="onroad">On a road — you travel it swiftly and pursuers lose your trail.</b>' : ''} ${near.length ? `<br>${near.map(e => `${enemyById(e.template)?.name || 'a mage'} (Lvl ${roamLevel(e)})`).join(', ')} nearby.` : ''}</p>
       <p class="small">Move with WASD or the arrow keys, or click a neighbouring tile. Walking costs food. Blue crystals are mana links (+2 life). Landmarks marked ? ask a riddle about a card: answer right for a card of that region's color, wrong and you lose life, food or, rarely, a card. Pits with a torch are dungeons: revealed by clues from beaten foes, fought room by room with your life carried over. Faint sparks are mana motes — walk over one for gold or an amulet. Dirt roads link the cities: stay on one and you move too fast for pursuing mages to close in. The five dark fortresses are the Warden guilds; storm them to find the one the Usurper wears.</p>
       ${(g.world.dungeons || []).some(d => d.revealed) ? `<p class="small">Known dungeons: ${g.world.dungeons.filter(d => d.revealed).map(d => `${dungeonTemplate(d.id).name}${d.cleared ? ' (cleared)' : ''}`).join(', ')}.</p>` : ''}
       <div class="btnrow"><button class="btn" id="b-rest" ${g.player.food < 3 || g.player.life >= g.player.maxLife ? 'disabled' : ''}>Rest (3 food, +5 life)</button><button class="btn ghost" data-go="title">Menu</button></div>
@@ -994,6 +1030,16 @@ function map() {
   if (!g.world.motes) { placeMotes(g.world, Math.random); save(); }
   if (!g.world.castles) { migrateCastles(g); save(); }
   if (!g.world.roads) { ensureRoads(g.world); save(); }
+  // Give pre-level saves the graded overland: assign each roaming mage a level by its distance from home.
+  if (g.world.enemies.some(e => e.level == null)) {
+    const w = g.world, span = Math.max(w.w, w.h);
+    for (const e of w.enemies) if (e.level == null) {
+      const frac = Math.min(1, Math.hypot(e.x - w.start.x, e.y - w.start.y) / (span * 0.7));
+      const maxL = Math.min(5, 1 + Math.floor(frac * 5)), lo = Math.max(1, maxL - 2);
+      e.level = lo + Math.floor(Math.random() * (maxL - lo + 1)); e.tier = e.level >= 3 ? 2 : 1;
+    }
+    save();
+  }
   if (!g.usurper) { g.usurper = rnd(COLORS); save(); }
   if (!g.player.amulets) { g.player.amulets = newAmulets(); g.quests ||= []; save(); }
   const hl = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dy]) => [g.player.x + dx, g.player.y + dy]).filter(([x, y]) => inBounds(g.world, x, y));
@@ -1192,7 +1238,7 @@ document.addEventListener('keydown', ev => {
 
 // ---- boot -----------------------------------------------------------------------
 // Debug handle for the console and for automated tests: window.ff.S is the app state.
-window.ff = { S, defOf, save, render, startDuel, enemyById, startTutorialDuel, riddleDefs, makeRiddle, amuletShopPool, artifactShopPool, cityPool, wardenOf, finishDuel, advanceSieges, maxSieges, collectMote, ambushFromMote, amuletPrice, tierOf };
+window.ff = { S, defOf, save, render, startDuel, enemyById, startTutorialDuel, riddleDefs, makeRiddle, amuletShopPool, artifactShopPool, cityPool, wardenOf, finishDuel, advanceSieges, maxSieges, collectMote, ambushFromMote, amuletPrice, tierOf, leveledEnemy, colorBombs, roamTemplate };
 initPreview();
 load();
 render();
