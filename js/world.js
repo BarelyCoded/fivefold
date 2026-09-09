@@ -256,14 +256,14 @@ export const moteAt = (world, x, y) => (world.motes || []).find(m => m.x === x &
 function moteBlocked(world, x, y) {
   return blockedForEnemy(world, x, y) || !!moteAt(world, x, y);
 }
-export function placeMotes(world, rng, count = 10) {
+export function placeMotes(world, rng, count = 12) {
   if (world.motes) return world.motes;
   world.motes = [];
   for (let n = 0; n < count; n++) spawnMote(world, rng);
   return world.motes;
 }
 // Drop a mote on open terrain, biased near the player when one is given (keeps the map lively as you walk).
-export function spawnMote(world, rng, near = null, cap = 16) {
+export function spawnMote(world, rng, near = null, cap = 18) {
   world.motes ||= [];
   if (world.motes.length >= cap) return null;
   for (let i = 0; i < 300; i++) {
@@ -272,7 +272,7 @@ export function spawnMote(world, rng, near = null, cap = 16) {
     else { x = Math.floor(rng() * world.w); y = Math.floor(rng() * world.h); }
     if (!inBounds(world, x, y) || moteBlocked(world, x, y)) continue;
     if (near && Math.abs(x - near.x) + Math.abs(y - near.y) < 3) continue;   // not right on top of the player
-    const m = { x, y, color: tileAt(world, x, y) }; world.motes.push(m); return m;
+    const m = { x, y, color: tileAt(world, x, y), ambush: rng() < 0.14 }; world.motes.push(m); return m;
   }
   return null;
 }

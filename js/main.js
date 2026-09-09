@@ -201,9 +201,8 @@ function move(dx, dy) {
   const mote = moteAt(g.world, nx, ny);
   if (mote) {
     g.world.motes = g.world.motes.filter(m => m !== mote);
-    if (Math.random() < 0.3) { giveAmulet(mote.color); toast(`A mana mote yields a ${COLOR_NAME[mote.color]} amulet.`); }
-    else { const gold = 8 + Math.floor(Math.random() * 14); g.player.gold += gold; toast(`A mana mote scatters into ${gold} gold.`); }
-    sfx('coin');
+    if (mote.ambush) { save(); ambushFromMote(mote); return; }   // some sparks are lures — a foe springs out
+    collectMote(mote);
   }
   const onRoad = roadAt(g.world, nx, ny);                       // roads let you outpace pursuit, as in the old overland
   const caught = stepEnemies(g.world, Math.random, g.player, onRoad);   // roaming foes give chase and may catch you
@@ -311,6 +310,27 @@ function encounter(enemy) {
     ],
   };
   render();
+}
+// A collected mote pays out one of several ways — mostly gold, sometimes an amulet or provisions,
+// and now and then a rich vein worth both. Keeps foraging the overland varied rather than rote.
+function collectMote(mote) {
+  const g = S.game; const r = Math.random();
+  if (r < 0.10) { const gold = 30 + Math.floor(Math.random() * 26); g.player.gold += gold; giveAmulet(mote.color); toast(`A rich mana vein: ${gold} gold and a ${COLOR_NAME[mote.color]} amulet.`); }
+  else if (r < 0.34) { giveAmulet(mote.color); toast(`A mana mote yields a ${COLOR_NAME[mote.color]} amulet.`); }
+  else if (r < 0.56) { const food = 4 + Math.floor(Math.random() * 5); g.player.food += food; toast(`A cache of provisions: ${food} food.`); }
+  else { const gold = 8 + Math.floor(Math.random() * 14); g.player.gold += gold; toast(`A mana mote scatters into ${gold} gold.`); }
+  sfx('coin');
+}
+// An ambush mote: a lurking foe of that region springs out. Tougher the farther from home you strayed.
+function ambushFromMote(mote) {
+  const g = S.game;
+  const far = Math.abs(mote.x - g.world.start.x) + Math.abs(mote.y - g.world.start.y);
+  const tier = far < Math.min(g.world.w, g.world.h) * 0.42 ? 1 : 2;
+  const pool = S.content.enemies.filter(e => e.color === mote.color && !e.boss);
+  const tpl = pool.find(e => e.tier === tier) || pool[0] || S.content.enemies.find(e => !e.boss);
+  if (!tpl) { collectMote(mote); return; }   // fall back to a reward if no foe fits
+  toast('The spark was a lure — an ambush!'); sfx('lose');
+  encounter({ template: tpl.id, uid: null });
 }
 const WARDEN_NAME = { W: 'the Warden of Light', U: 'the Warden of Tides', B: 'the Warden of the Grave', R: 'the Warden of Cinders', G: 'the Warden of the Wilds' };
 // A Warden fights their guild's honed mono-colour deck at boss stature. One is the Usurper in disguise.
@@ -1145,7 +1165,7 @@ document.addEventListener('keydown', ev => {
 
 // ---- boot -----------------------------------------------------------------------
 // Debug handle for the console and for automated tests: window.ff.S is the app state.
-window.ff = { S, defOf, save, render, startDuel, enemyById, startTutorialDuel, riddleDefs, makeRiddle, amuletShopPool, artifactShopPool, cityPool, wardenOf, finishDuel, advanceSieges };
+window.ff = { S, defOf, save, render, startDuel, enemyById, startTutorialDuel, riddleDefs, makeRiddle, amuletShopPool, artifactShopPool, cityPool, wardenOf, finishDuel, advanceSieges, collectMote, ambushFromMote };
 initPreview();
 load();
 render();
