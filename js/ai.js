@@ -220,6 +220,25 @@ function instantAction(duel, p) {
         const act = pumpAction(duel, p, src, mine); if (act) return act;   // turns a loss/tie into a win, or saves it
       }
     }
+    // Pump to TRADE UP: sink mana into a creature (e.g. Vampire Bats' {B}:+1/+0) so it kills a bigger
+    // attacker or blocker even though it dies — when what it kills is worth clearly more than it plus the
+    // mana. Fire one pump per pass; it chains as priority returns. (First strike still stops it: a 0/1 that
+    // dies before it deals can't be pumped into a trade.)
+    const FS = c => has(c, 'First strike') || has(c, 'Double strike');
+    for (const f of fights) {
+      const mine = f.a.controller === p.idx ? f.a : f.b.controller === p.idx ? f.b : null; if (!mine) continue;
+      const other = mine === f.a ? f.b : f.a;
+      const otherT = toughness(other) - other.damage;
+      const strikesFirst = FS(other) && !FS(mine) && power(other) >= toughness(mine) - mine.damage;   // other kills it first
+      const killsAt = np => !strikesFirst && np >= otherT;
+      if (killsAt(power(mine))) continue;                                  // already kills it unaided
+      const reach = power(mine) + pumpReach(duel, p, mine, availMana(p));  // most power we could give it
+      if (!killsAt(reach)) continue;                                       // even full pumping can't kill it
+      const mineDies = power(other) >= toughness(mine) - mine.damage;      // a 0/1 will almost surely trade away
+      const manaCost = Math.max(0, otherT - power(mine)) * 0.45;           // ~1 mana per +1 power (Bats)
+      if (value(other) - (mineDies ? value(mine) : 0) - manaCost <= 0.5) continue;   // only a clearly profitable trade
+      for (const src of pumps) { if (src.p <= 0) continue; if (src.kind === 'activate' && src.self && src.card.id !== mine.id) continue; const act = pumpAction(duel, p, src, mine); if (act) return act; }
+    }
     // Push extra damage through unblocked attackers when pumping can reach lethal — even across
     // several activations (Vampire Bats' {B}:+1/+0 twice). Fire one pump per pass; it chains.
     if (duel.active === p.idx) {

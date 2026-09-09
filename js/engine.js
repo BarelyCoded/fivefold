@@ -44,6 +44,14 @@ export class Duel {
     return { id: uid++, def, owner, controller: owner, zone: 'library', tapped: false, sick: true, damage: 0, counters: {}, temp: { p: 0, t: 0, kw: [], flags: [] }, attachedTo: null, regen: 0, flags: new Set(), controlUntilEot: null, token: false, cur: null, damaged: new Set(), attackedThisTurn: false, blockedThisTurn: false, enteredTurn: 0, uses: { turn: -1, n: {} }, chosenColor: null, shield: 0, linked: [], controlLink: null };
   }
   say(msg) { this.log.push(msg); if (this.log.length > 400) this.log.shift(); }
+  // A disambiguating label for the log: whose creature it is and its current power/toughness, so a combat
+  // log with two "Black Knight"s or three "Vampire Bats" can still be read back to figure out what happened.
+  cname(c) {
+    if (!c || !c.def) return 'something';
+    const who = this.players[c.controller]?.name || '?';
+    const pt = isCreature(c) ? ` (${power(c)}/${toughness(c)})` : '';
+    return `${who}'s ${c.def.name}${pt} #${c.id}`;   // #id disambiguates identical copies in the log
+  }
   emit() { for (const l of this.listeners) l(this); }
   onChange(fn) { this.listeners.push(fn); }
   get activePlayer() { return this.players[this.active]; }
@@ -232,7 +240,7 @@ export class Duel {
           this.attackers = ids;
           for (const id of ids) { const c = this.card(id); if (!has(c, 'Vigilance')) this.tap(c); c.attackedThisTurn = true; this.fireEvent({ type: 'attacks', card: c }); }
           if (!ids.length) { this.say(`${ap.name} does not attack.`); this.stepIndex = STEPS.indexOf('endCombat') - 1; continue; }
-          this.say(`${ap.name} attacks with ${ids.map(id => this.card(id).def.name).join(', ')}.`);
+          this.say(`${ap.name} attacks with ${ids.map(id => { const c = this.card(id); return `${c.def.name} (${power(c)}/${toughness(c)}) #${c.id}`; }).join(', ')}.`);
           this.fx.push({ type: 'attack', ids: ids.slice() });
           if (ids.length === 1) for (const c of ap.battlefield) { const n = [...c.cur.kw].filter(k => k === 'Exalted').length; if (n) this.pushTrigger(c, { type: 'triggered', event: 'exalted', effects: [{ type: 'pump', p: 1, t: 1, sel: 'fixed' }], text: 'Exalted' }, { fixed: this.card(ids[0]) }); }
           break;
@@ -244,7 +252,7 @@ export class Duel {
           for (const [aid, bids] of Object.entries(blocks || {})) if (bids.length) clean[Number(aid)] = bids.slice();
           if (!this.validBlocks(clean)) { this.say('Illegal blocks were ignored.'); }
           else this.blocks = clean;
-          const names = Object.entries(this.blocks).map(([aid, bids]) => `${bids.map(id => this.card(id).def.name).join(' + ')} blocks ${this.card(Number(aid)).def.name}`);
+          const names = Object.entries(this.blocks).map(([aid, bids]) => `${bids.map(id => this.cname(this.card(id))).join(' + ')} blocks ${this.cname(this.card(Number(aid)))}`);
           this.say(names.length ? names.join('; ') + '.' : `${def.name} does not block.`);
           for (const [aid, bids] of Object.entries(this.blocks)) this.fx.push({ type: 'block', attacker: Number(aid), blockers: bids.slice() });
           for (const [aid, bids] of Object.entries(this.blocks)) {
@@ -1259,8 +1267,8 @@ export class Duel {
   destroy(c, noRegen) {
     if (!c || c.zone !== 'battlefield') return;
     if (has(c, 'Indestructible')) return;
-    if (c.regen > 0 && !noRegen) { c.regen--; c.tapped = true; c.damage = 0; removeFrom(this.attackers, c.id); delete this.blocks[c.id]; for (const k of Object.keys(this.blocks)) this.blocks[k] = this.blocks[k].filter(id => id !== c.id); this.say(`${c.def.name} regenerates.`); return; }
-    this.say(`${c.def.name} is destroyed.`);
+    if (c.regen > 0 && !noRegen) { c.regen--; c.tapped = true; c.damage = 0; removeFrom(this.attackers, c.id); delete this.blocks[c.id]; for (const k of Object.keys(this.blocks)) this.blocks[k] = this.blocks[k].filter(id => id !== c.id); this.say(`${this.cname(c)} regenerates.`); return; }
+    this.say(`${this.cname(c)} is destroyed.`);
     this.fx.push({ type: 'die', id: c.id, name: c.def.name, controller: c.controller });
     this.moveTo(c, 'graveyard');
   }
@@ -1314,7 +1322,7 @@ export class Duel {
       else target.damage += n;
       if (has(source, 'Deathtouch') && isCreature(source)) target.flags.add('deathtouched');
       target.damaged.add(source.id);
-      this.say(`${source.def.name} deals ${n} damage to ${target.def.name}.`);
+      this.say(`${this.cname(source)} deals ${n} damage to ${this.cname(target)}.`);
       this.fx.push({ type: 'damage', target: target.id, amount: n });
       if (has(source, 'Lifelink')) this.players[source.controller].life += n;
       this.fireEvent({ type: 'damage', source, target, amount: n, combat: !!opts.combat });
@@ -1327,7 +1335,7 @@ export class Duel {
     if (ci >= 0) { pl.cop.splice(ci, 1); this.say(`${pl.name}'s circle of protection prevents ${source.def.name}'s damage.`); return 0; }
     if (pl.shield > 0) { const used = Math.min(pl.shield, n); pl.shield -= used; n -= used; this.say(`${used} damage to ${pl.name} is prevented.`); if (n <= 0) return 0; }
     if (has(source, 'Infect') || has0(source.def, 'Infect')) pl.poison += n; else { if (pl.lifeFloor !== undefined && pl.life - n < pl.lifeFloor) n = Math.max(0, pl.life - pl.lifeFloor); pl.life -= n; if (n <= 0) return 0; }
-    this.say(`${source.def.name} deals ${n} damage to ${pl.name}.`);
+    this.say(`${this.cname(source)} deals ${n} damage to ${pl.name}.`);
     this.fx.push({ type: 'damage', player: pl.idx, amount: n });
     if (has(source, 'Lifelink')) this.players[source.controller].life += n;
     this.fireEvent({ type: 'damage', source, target: pl, amount: n, combat: !!opts.combat });
