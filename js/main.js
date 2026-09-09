@@ -640,13 +640,14 @@ const PREMIUM_AMULETS = {
 };
 function amuletPrice(name) {
   if (PREMIUM_AMULETS[name]) return PREMIUM_AMULETS[name];
+  // Price by power tier, not rarity: a bomb should cost a bomb's worth and a do-nothing rare should be
+  // cheap (Dingus Egg shouldn't cost what a Mox does). The tier screen uses this same S..E price ladder.
+  const priceByTier = (S.tiers && S.tiers.price) || { S: 8, A: 6, B: 4, C: 3, D: 2, E: 1 };
+  const t = tierOf(name);
+  if (t && priceByTier[t] != null) return priceByTier[t];
+  // Unranked card (outside the tiered sets): a mild mana-value estimate around the middle of the ladder.
   const d = defOf(name); if (!d) return 3;
-  let cost = 1 + Math.floor((d.cmc || 0) / 2);         // mana value as the quality proxy
-  const rar = cachedCard(name)?.rarity;
-  if (rar === 'mythic' || rar === 'rare') cost += 2;
-  else if (rar === 'uncommon') cost += 1;
-  if (d.kind === 'artifact' || d.legendary) cost += 1;
-  return Math.max(1, Math.min(7, cost));
+  return Math.max(1, Math.min(6, 2 + Math.floor((d.cmc || 0) / 3)));
 }
 const SHOP_CAP = 80;
 function shopNames(color) {
@@ -1191,7 +1192,7 @@ document.addEventListener('keydown', ev => {
 
 // ---- boot -----------------------------------------------------------------------
 // Debug handle for the console and for automated tests: window.ff.S is the app state.
-window.ff = { S, defOf, save, render, startDuel, enemyById, startTutorialDuel, riddleDefs, makeRiddle, amuletShopPool, artifactShopPool, cityPool, wardenOf, finishDuel, advanceSieges, maxSieges, collectMote, ambushFromMote };
+window.ff = { S, defOf, save, render, startDuel, enemyById, startTutorialDuel, riddleDefs, makeRiddle, amuletShopPool, artifactShopPool, cityPool, wardenOf, finishDuel, advanceSieges, maxSieges, collectMote, ambushFromMote, amuletPrice, tierOf };
 initPreview();
 load();
 render();
