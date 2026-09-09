@@ -265,9 +265,9 @@ export class Duel {
           const fs = c => has(c, 'First strike') || has(c, 'Double strike');
           const any = this.attackers.some(id => fs(this.card(id))) || Object.values(this.blocks).flat().some(id => fs(this.card(id)));
           if (!any) continue;
-          this.combatDamage('first'); break;
+          yield* this.combatDamage('first'); break;
         }
-        case 'damage': this.combatDamage('regular'); break;
+        case 'damage': yield* this.combatDamage('regular'); break;
         case 'endCombat': {
           this.fireEvent({ type: 'endCombat' });
           for (const c of this.permanents()) if (c.flags.has('destroyAtEndOfCombat')) { c.flags.delete('destroyAtEndOfCombat'); this.destroy(c, false); }
@@ -1372,7 +1372,7 @@ export class Duel {
     }
     return true;
   }
-  combatDamage(which) {
+  *combatDamage(which) {
     const atk = this.activePlayer, def = this.defender;
     const first = c => has(c, 'First strike') || has(c, 'Double strike');
     const deals = c => which === 'first' ? first(c) : (!first(c) || has(c, 'Double strike'));
@@ -1386,10 +1386,20 @@ export class Duel {
         if (!wasBlocked) { this.dealDamage(a, def, dmg, { combat: true }); if (which !== 'first' || !has(a, 'Double strike')) this.fireEvent({ type: 'unblocked', card: a }); }
         else {
           const trample = has(a, 'Trample');
-          // The attacker assigns damage in an order of its choosing: kill the cheapest-to-kill blockers
-          // first so a 3/3 blocked by 1/4, 1/1, 1/1 kills both 1/1s instead of dumping all on the 1/4.
           const lethalOf = b => has(a, 'Deathtouch') ? 1 : Math.max(0, toughness(b) - b.damage);
-          const ordered = blockers.slice().sort((x, y) => lethalOf(x) - lethalOf(y));
+          // The attacker assigns damage down an order of its choosing. When you're the attacker and more
+          // than one creature blocks — and you can't kill them all — you pick who dies; otherwise the AI
+          // (or a trivial split) uses the "cheapest to kill first" heuristic.
+          let ordered;
+          const totalLethal = blockers.reduce((s, b) => s + lethalOf(b), 0);
+          if (a.controller === 0 && blockers.length >= 2 && dmg < totalLethal) {
+            const ids = yield { kind: 'order', player: 0, note: `Assign ${a.def.name}'s ${dmg} combat damage: order the blockers — each takes lethal before the next.`, text: `${a.def.name} is blocked by ${blockers.length}. Choose the order damage is dealt`, options: blockers.map(b => ({ id: b.id, label: `${b.def.name} (${power(b)}/${toughness(b) - b.damage})` })) };
+            const byId = new Map(blockers.map(b => [b.id, b]));
+            ordered = (ids || []).map(id => byId.get(id)).filter(Boolean);
+            for (const b of blockers) if (!ordered.includes(b)) ordered.push(b);
+          } else {
+            ordered = blockers.slice().sort((x, y) => lethalOf(x) - lethalOf(y));
+          }
           ordered.forEach((b, i) => {
             if (dmg <= 0) return;
             let give = Math.min(dmg, lethalOf(b));

@@ -337,7 +337,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
       case 'order': {
         if (!ui.order || ui.order.length !== req.options.length || ui.order.some(id => !req.options.some(o => o.id === id))) ui.order = req.options.map(o => o.id);
         const label = id => req.options.find(o => o.id === id)?.label || '';
-        return `<div class="hint">${esc(req.text)}. The first card is drawn first.</div><div class="choices">${ui.order.map((id, i) => `<div class="choice" data-preview="${esc(label(id))}"><button class="btn small" data-order="up" data-idx="${i}" ${i === 0 ? 'disabled' : ''} title="Move up">▲</button><button class="btn small" data-order="down" data-idx="${i}" ${i === ui.order.length - 1 ? 'disabled' : ''} title="Move down">▼</button> ${i + 1}. ${esc(label(id))}</div>`).join('')}</div><button class="btn primary" id="b-order">OK</button>`;
+        return `<div class="hint">${esc(req.text)}. ${esc(req.note || 'The first card is drawn first.')}</div><div class="choices">${ui.order.map((id, i) => `<div class="choice" data-preview="${esc(label(id))}"><button class="btn small" data-order="up" data-idx="${i}" ${i === 0 ? 'disabled' : ''} title="Move up">▲</button><button class="btn small" data-order="down" data-idx="${i}" ${i === ui.order.length - 1 ? 'disabled' : ''} title="Move down">▼</button> ${i + 1}. ${esc(label(id))}</div>`).join('')}</div><button class="btn primary" id="b-order">OK</button>`;
       }
       case 'choose': {
         const sel = ui.choice || new Set();
