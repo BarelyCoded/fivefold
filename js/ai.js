@@ -275,11 +275,15 @@ export function combatOutcome(duel, a, bs) {
   const aDeath = has(a, 'Deathtouch');
   const state = bs.map(b => ({ b, dmg: b.damage, dead: false, aHit: false }));
   let aDmg = a.damage, aDead = false, aDeathMark = false;
-  // Attacker allocates power(a) among the living blockers it can damage, killing the cheapest first.
+  // Attacker allocates its power among the living blockers, playing for itself: kill the blockers that
+  // deal damage back FIRST (so it survives / trades up), cheapest of those first, and only then waste
+  // anything on harmless 0-power chumps. This is what a real attacker does — so a defender can't "trap"
+  // an attacker by piling a 0/1 alongside a real blocker to force a bad split.
   const attackerAssign = () => {
     let rem = power(a);
+    const threat = s => power(s.b) > 0 ? 0 : 1;
     const targets = state.filter(s => !s.dead && !duel.protectedFrom(a, s.b))
-      .sort((x, y) => (toughness(x.b) - x.dmg) - (toughness(y.b) - y.dmg));
+      .sort((x, y) => (threat(x) - threat(y)) || (toughness(x.b) - x.dmg) - (toughness(y.b) - y.dmg));
     for (const s of targets) {
       if (rem <= 0) break;
       const need = aDeath ? 1 : Math.max(1, toughness(s.b) - s.dmg);
