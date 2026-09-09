@@ -462,9 +462,25 @@ function finishDuel(winner) {
 }
 
 // ---- city ---------------------------------------------------------------------
+// A card the engine gives no real function to is a shop trap: unsupported cards, and cards whose
+// only text the engine ignores — ante cards like Bronze Tablet, or artifacts whose sole ability
+// can't be run (Jester's Mask, Runed Arch, Sword of the Ages). Creatures always have a usable body
+// and lands make mana, so those are never blank. Such cards stay in a collection but aren't sold.
+const DRAWBACK_STATICS = new Set(['entersTapped']);
+function engineFunctional(d) {
+  if (!d || d.kind === 'unsupported') return false;
+  if (d.kind === 'creature' || d.kind === 'land') return true;
+  const sp = d.spell;
+  if (sp && ((sp.effects && sp.effects.length) || (sp.modes && sp.modes.some(mo => mo.effects && mo.effects.length)))) return true;
+  if (d.manaAbilities && d.manaAbilities.length) return true;
+  if (d.keywords && d.keywords.length) return true;
+  if (d.abilities && d.abilities.some(a => a.type !== 'static' || !DRAWBACK_STATICS.has(a.kind))) return true;
+  return false;
+}
+const shopOk = n => engineFunctional(defOf(n));
 function cityPool(color) {
   const names = new Set();
-  for (const e of S.content.enemies) if (e.color === color) for (const n of Object.keys(e.deck)) { const d = defOf(n); if (d && d.kind !== 'land' && d.kind !== 'unsupported') names.add(n); }
+  for (const e of S.content.enemies) if (e.color === color) for (const n of Object.keys(e.deck)) { const d = defOf(n); if (engineFunctional(d) && d.kind !== 'land') names.add(n); }
   return [...names];
 }
 function cityStock(city) {
@@ -473,8 +489,8 @@ function cityStock(city) {
   if (st && g.player.day - st.day < 6) return st.items;
   const pool = cityPool(city.color); const items = [];
   for (let i = 0; i < 4 && pool.length; i++) { const n = pool.splice(Math.floor(Math.random() * pool.length), 1)[0]; items.push({ name: n, price: 3 + defOf(n).cmc * 2, sold: false }); }
-  // Occasional artifacts and special lands. Unsupported cards never appear.
-  const ok = n => { const d = defOf(n); return d && d.kind !== 'unsupported'; };
+  // Occasional artifacts and special lands. Engine-ignored / do-nothing cards never appear.
+  const ok = n => shopOk(n);
   if (Math.random() < 0.6) { const a = rnd(S.shop.artifacts.filter(ok)); if (a) items.push({ name: a, price: 6 + defOf(a).cmc * 4 + (S.shop.rareArtifacts.includes(a) ? 12 : 0), sold: false, special: 'artifact' }); }
   if (Math.random() < 0.55) {
     const list = [...(S.shop.lands[city.color] || []), ...S.shop.lands.any].filter(ok);
@@ -523,17 +539,15 @@ function artifactNames() {
   const own = knownCardNames().filter(n => { const d = defOf(n); return d && d.kind !== 'unsupported' && d.types.includes('Artifact') && d.colors?.length === 0; });
   return [...new Set([...cat, ...own])];
 }
-// Engine-ignored (unsupported) cards can't go in a deck, so they're never offered for sale.
-const shopSellable = n => { const d = defOf(n); return d && d.kind !== 'unsupported' && d.kind !== 'land'; };
 function amuletShopPool(color) {
-  return shopNames(color).filter(shopSellable).sort((a, b) => (defOf(a).cmc - defOf(b).cmc) || a.localeCompare(b));
+  return shopNames(color).filter(n => shopOk(n) && defOf(n).kind !== 'land').sort((a, b) => (defOf(a).cmc - defOf(b).cmc) || a.localeCompare(b));
 }
 // A shop shows a random 15 that stays put until the player wins or loses a battle (wins+losses is the nonce).
 function amuletStockNames(city) {
   const g = S.game; const color = city.color; const bc = g.wins + g.losses;
   g.amuletStock ||= {};
   const st = g.amuletStock[color];
-  if (st && st.bc === bc && st.names && st.names.length) return st.names.filter(n => { const d = defOf(n); return d && d.kind !== 'unsupported'; });
+  if (st && st.bc === bc && st.names && st.names.length) return st.names.filter(shopOk);
   if (S.shopFetching === color) return null;                 // still loading; don't lock in a thin stock
   const pool = [...amuletShopPool(color), ...artifactShopPool()];
   if (!pool.length) return null;
@@ -544,7 +558,7 @@ function amuletStockNames(city) {
 }
 const isColorlessArtifact = n => { const d = defOf(n); return !!d && d.types.includes('Artifact') && (!d.colors || d.colors.length === 0); };
 function artifactShopPool() {
-  return artifactNames().filter(n => { const d = defOf(n); return d && d.kind !== 'unsupported'; }).sort((a, b) => (defOf(a).cmc - defOf(b).cmc) || a.localeCompare(b));
+  return artifactNames().filter(shopOk).sort((a, b) => (defOf(a).cmc - defOf(b).cmc) || a.localeCompare(b));
 }
 // On opening a city, pull card data (not the slow era-art) for that color's shelf, then re-render.
 function stockAmuletShop(color) {
