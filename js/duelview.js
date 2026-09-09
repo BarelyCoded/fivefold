@@ -104,9 +104,34 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
         case 'cast': { const s = root.querySelector('.stack-item.top'); if (s) s.classList.add('fx-cast'); sfx('cast'); wait = Math.max(wait, 300); break; }
         case 'land': sfx('land'); break;
         case 'die': { const z = f.controller === 0 ? '.zone.mine .field' : '.zone.opp .field'; floatText(root.querySelector(z), `${f.name} ✝`, 'fx-die'); sfx('die'); wait = Math.max(wait, 500); break; }
+        case 'chaosOrb': chaosConfetti(f.orb, f.victims); sfx('die'); wait = Math.max(wait, 1150); break;
       }
     }
     return wait;
+  }
+  // Chaos Orb: shower torn paper from the orb across the table, converging on the doomed permanents.
+  function chaosConfetti(orbId, victimIds = []) {
+    const table = root.querySelector('.table'); if (!table) return;
+    const tr = table.getBoundingClientRect();
+    const orbEl = elOf(orbId);
+    const src = orbEl ? orbEl.getBoundingClientRect() : { left: tr.left + tr.width / 2, top: tr.top + tr.height / 2, width: 0, height: 0 };
+    const sx = src.left - tr.left + src.width / 2, sy = src.top - tr.top + src.height / 2;
+    const ends = [];
+    for (const id of victimIds) { const el = elOf(id); if (el) { const r = el.getBoundingClientRect(); ends.push([r.left - tr.left + r.width / 2, r.top - tr.top + r.height / 2]); if (el.classList) el.classList.add('fx-hit'); } }
+    const hue = ['#efe8d4', '#ddd0b0', '#c9a367', '#b8b3a5', '#e7d9b8'];
+    const count = Math.max(14, ends.length * 4);
+    for (let i = 0; i < count; i++) {
+      const piece = document.createElement('div');
+      piece.className = 'fx-confetti';
+      piece.style.left = sx + 'px'; piece.style.top = sy + 'px';
+      piece.style.background = hue[i % hue.length];
+      const end = (ends.length && i % 2 === 0) ? ends[i % ends.length] : [Math.random() * tr.width, Math.random() * tr.height];
+      const dx = end[0] - sx + (Math.random() - 0.5) * 34, dy = end[1] - sy + (Math.random() - 0.5) * 34;
+      const rot = (Math.random() * 720 - 360).toFixed(0);
+      table.appendChild(piece);
+      requestAnimationFrame(() => { piece.style.transform = `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px) rotate(${rot}deg)`; piece.style.opacity = '0'; });
+      setTimeout(() => piece.remove(), 1250);
+    }
   }
 
   // ---- rendering ---------------------------------------------------------------------

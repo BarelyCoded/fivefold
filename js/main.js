@@ -525,6 +525,19 @@ function finishDuel(winner) {
     };
     render(); return;
   }
+  // A Chaos Orb you flipped is torn up for good — remove each one you used from your collection and deck.
+  const chaosUsed = duel.chaosFlips ? (duel.chaosFlips[0] || 0) : 0;
+  if (chaosUsed > 0) {
+    let removed = 0;
+    for (let k = 0; k < chaosUsed && (S.collection['Chaos Orb'] || 0) > 0; k++) {
+      addCards(S.collection, 'Chaos Orb', -1); removed++;
+      if (g.deck['Chaos Orb']) addCards(g.deck, 'Chaos Orb', -1);
+    }
+    if (removed > 0) {
+      if (deckSize(g.deck) < 40) fillBasics(g.deck);
+      toast(removed > 1 ? `${removed} Chaos Orbs are torn beyond repair — gone from your collection.` : 'Your Chaos Orb is torn beyond repair — gone from your collection.');
+    }
+  }
   const lines = [];
   if (dungeon) {
     const cur = currentDungeon();

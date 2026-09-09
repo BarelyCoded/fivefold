@@ -900,6 +900,21 @@ export function compile(c) {
   def.legendary = tl.supertypes.includes('Legendary');
   const unsupported = why => ({ ...def, kind: 'unsupported', status: 'unsupported', notes: [why] });
 
+  // Chaos Orb: a bespoke one-shot. Its ability tears the orb into pieces that flutter down and destroy
+  // the permanents they land on, then shatters the orb itself. The generic parser can't express any of
+  // that, so it's hand-built here (and js/engine.js resolves the `chaosOrb` effect).
+  if (c.name === 'Chaos Orb') {
+    def.abilities.push({
+      type: 'activated',
+      cost: { mana: { pips: [], generic: 1, x: false }, tap: true, untap: false, sacSelf: false, sacrifice: null, discard: 0, life: 0, removeCounter: null, exileSelfFromGraveyard: false },
+      effects: [{ type: 'chaosOrb' }],
+      optional: false, timing: 'sorcery', limit: 0, once: false,
+      text: '{1}, {T}: Tear Chaos Orb into pieces; they scatter across the battlefield and destroy each nontoken permanent they touch. Then Chaos Orb is destroyed.',
+    });
+    def.status = 'full'; def.chaosOrb = true;
+    return def;
+  }
+
   if (def.kind === 'planeswalker') return unsupported('Planeswalkers are not supported');
   if (def.kind === 'unsupported') return unsupported(`${c.type_line} is not supported`);
   if (def.subtypes.includes('Vehicle') || def.subtypes.includes('Saga')) return unsupported(`${def.subtypes.join(' ')} is not supported`);

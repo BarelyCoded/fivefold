@@ -970,6 +970,23 @@ export class Duel {
       case 'fight': for (const s of subs) if (s.card) { this.dealDamage(src, s.card, power(src)); this.dealDamage(s.card, src, power(s.card)); } break;
       case 'destroy': for (const s of subs) if (s.card) this.destroy(s.card, !!e.noRegen); break;
       case 'destroyAll': for (const pl of this.players) for (const c of pl.battlefield.slice()) if (this.matchesRestrict(c, e.restrict, p)) this.destroy(c, true); break;
+      case 'chaosOrb': {
+        // Tear the orb up: a handful of pieces flutter down onto random nontoken permanents (either side's)
+        // and destroy what they touch, then the orb itself shatters. Randomness lives here so the outcome
+        // is authoritative; the duel view animates the pieces drifting to these victims.
+        const orb = src;
+        const board = this.permanents().filter(c => c !== orb && !c.token);
+        const pieces = 5;
+        const hit = new Set();
+        for (let k = 0; k < pieces && board.length; k++) hit.add(board[Math.floor(this.rng() * board.length)]);
+        const victims = [...hit];
+        this.say(`${this.players[orb.controller].name} tears ${orb.def.name} into pieces!`);
+        this.fx.push({ type: 'chaosOrb', orb: orb.id, controller: orb.controller, victims: victims.map(c => c.id) });
+        for (const c of victims) this.destroy(c, true);
+        if (orb.zone === 'battlefield') { this.say(`${orb.def.name} shatters and is gone.`); this.moveTo(orb, 'graveyard'); }
+        this.chaosFlips = this.chaosFlips || [0, 0]; this.chaosFlips[orb.controller]++;
+        break;
+      }
       case 'exile': for (const s of subs) if (s.card) { this.say(`${s.card.def.name} is exiled.`); this.moveTo(s.card, 'exile'); } break;
       case 'exileAll': for (const pl of this.players) for (const c of pl.battlefield.slice()) if (this.matchesRestrict(c, e.restrict, p)) this.moveTo(c, 'exile'); break;
       case 'bounce': for (const s of subs) if (s.card) this.moveTo(s.card, 'hand'); break;

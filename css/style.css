@@ -252,8 +252,9 @@ tr.st-unsupported td:nth-child(7), tr.st-unsupported td:nth-child(3), tr.st-miss
 .fx-float { position: absolute; z-index: 10; pointer-events: none; transform: translate(-50%, -50%); font-family: Garamond, Georgia, serif; font-weight: 700; animation: fxFloat .9s ease-out forwards; text-shadow: 0 2px 4px #000, 0 0 10px #000; }
 .fx-dmg { color: #ff6a4a; font-size: 34px; }
 .fx-die { color: #d8d0c0; font-size: 16px; }
+.fx-confetti { position: absolute; width: 9px; height: 13px; border-radius: 1px; pointer-events: none; z-index: 40; opacity: 1; box-shadow: 0 1px 2px rgba(0,0,0,.45); transition: transform 1s cubic-bezier(.2,.7,.3,1), opacity 1.05s ease-in; }
 @keyframes fxFloat { 0% { opacity: 0; transform: translate(-50%, -30%) scale(.6); } 20% { opacity: 1; transform: translate(-50%, -50%) scale(1.15); } 100% { opacity: 0; transform: translate(-50%, -130%) scale(1); } }
-@media (prefers-reduced-motion: reduce) { .fx-attack, .fx-block, .fx-lunge, .fx-hit, .fx-cast, .fx-float, .pbox.fx-hit { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .fx-attack, .fx-block, .fx-lunge, .fx-hit, .fx-cast, .fx-float, .pbox.fx-hit { animation: none; } .fx-confetti { transition: opacity .4s ease-in; } }
 
 
 /* dungeons */
