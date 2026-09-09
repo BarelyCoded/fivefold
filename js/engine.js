@@ -1356,11 +1356,14 @@ export class Duel {
         if (!wasBlocked) { this.dealDamage(a, def, dmg, { combat: true }); if (which !== 'first' || !has(a, 'Double strike')) this.fireEvent({ type: 'unblocked', card: a }); }
         else {
           const trample = has(a, 'Trample');
-          blockers.forEach((b, i) => {
+          // The attacker assigns damage in an order of its choosing: kill the cheapest-to-kill blockers
+          // first so a 3/3 blocked by 1/4, 1/1, 1/1 kills both 1/1s instead of dumping all on the 1/4.
+          const lethalOf = b => has(a, 'Deathtouch') ? 1 : Math.max(0, toughness(b) - b.damage);
+          const ordered = blockers.slice().sort((x, y) => lethalOf(x) - lethalOf(y));
+          ordered.forEach((b, i) => {
             if (dmg <= 0) return;
-            const lethal = has(a, 'Deathtouch') ? 1 : Math.max(0, toughness(b) - b.damage);
-            let give = Math.min(dmg, lethal);
-            if (i === blockers.length - 1 && !trample) give = dmg;
+            let give = Math.min(dmg, lethalOf(b));
+            if (i === ordered.length - 1 && !trample) give = dmg;
             this.dealDamage(a, b, give, { combat: true }); dmg -= give;
           });
           if (dmg > 0 && trample) this.dealDamage(a, def, dmg, { combat: true });
