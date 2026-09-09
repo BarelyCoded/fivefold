@@ -64,6 +64,8 @@ export class Duel {
   // ---- lifecycle -------------------------------------------------------------
   start() {
     for (const p of this.players) this.drawCards(p, p.idx === 0 ? (this.rules.handSize || 7) : 7);
+    // The AI takes the same mulligan the human is offered: redraw a hand of one land or none (bounded retries).
+    for (let tries = 0; tries < 3 && this.players[1].hand.filter(isLand).length <= 1; tries++) this.mulligan(1);
     for (const [idx, defs] of [[0, this.rules.playerStart], [1, this.rules.oppStart]]) for (const def of defs || []) { const c = this.instance(def, idx); c.zone = 'limbo'; this.moveTo(c, 'battlefield', { controller: idx }); c.sick = false; }
     this.events.length = 0;
     this.active = this.rng() < 0.5 ? 0 : 1; this.firstPlayer = this.active;
