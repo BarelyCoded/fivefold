@@ -268,9 +268,9 @@ function bossLink() {
 // How many cities the Wardens may besiege at once. Just one for the opening fortnight so the early
 // overland isn't swarmed; the war then widens as days pass, but never beyond the Wardens still standing.
 function maxSieges(day) {
-  if (day < 15) return 1;
-  if (day < 35) return 2;
-  if (day < 60) return 3;
+  if (day < 20) return 1;
+  if (day < 45) return 2;
+  if (day < 75) return 3;
   return 4;
 }
 // The surviving Wardens march on your cities. A besieged city, unrelieved, is captured; lose four
@@ -278,7 +278,7 @@ function maxSieges(day) {
 function advanceSieges(g) {
   const w = g.world;
   const aliveWardens = COLORS.filter(col => !(w.castles || []).find(c => c.color === col)?.fallen).length;
-  if (!aliveWardens || Math.random() > 0.34) return;   // a Warden makes a move every few days
+  if (!aliveWardens || Math.random() > 0.26) return;   // a Warden makes a move every few days
   const besieged = w.cities.filter(c => c.siege > 0 && !c.captured);
   const open = w.cities.filter(c => !c.siege && !c.captured);
   const cap = Math.min(maxSieges(g.player.day), aliveWardens);   // clearing guilds also eases the pressure
@@ -1038,14 +1038,28 @@ function tierRow(n, c) {
   </div>`;
 }
 
+// Compass bearing + distance from the player to a spot on the map, so a besieged city can be found
+// even when it has scrolled out of the viewport. y grows downward, so dy>0 is south.
+function compassTo(g, spot) {
+  const dx = spot.x - g.player.x, dy = spot.y - g.player.y;
+  if (!dx && !dy) return 'you are here';
+  const ns = dy < 0 ? 'N' : dy > 0 ? 'S' : '', ew = dx < 0 ? 'W' : dx > 0 ? 'E' : '';
+  const dist = Math.max(Math.abs(dx), Math.abs(dy));
+  return `${ns}${ew} · ${dist} tile${dist === 1 ? '' : 's'}`;
+}
 function map() {
   const g = S.game; if (!g) return title();
   const here = tileAt(g.world, g.player.x, g.player.y);
   const onRoad = roadAt(g.world, g.player.x, g.player.y);
   const near = g.world.enemies.filter(e => Math.abs(e.x - g.player.x) <= 1 && Math.abs(e.y - g.player.y) <= 1);
+  const sieged = g.world.cities.filter(c => c.siege > 0 || c.captured).sort((a, b) => (b.captured - a.captured) || (b.siege - a.siege));
+  const fallen = g.world.cities.filter(c => c.captured).length;
   const panel = `<canvas id="minimap" class="minimap"></canvas>
       <h2>${esc(g.name)}</h2>
       <p>Standing in the <b>${BIOME[here].name}</b> (${COLOR_NAME[here]}).${onRoad ? ' <b class="onroad">On a road — you travel it swiftly and pursuers lose your trail.</b>' : ''} ${near.length ? `<br>${near.map(e => `${enemyById(e.template)?.name || 'a mage'} (Lvl ${roamLevel(e)})`).join(', ')} nearby.` : ''}</p>
+      ${sieged.length ? `<div class="siegehud"><b>⚔ Under siege (${fallen}/4 fallen)</b>
+      <ul>${sieged.map(c => `<li><i class="sw" style="background:${BIOME[c.color].fill}"></i> <b>${esc(c.name)}</b> — ${c.captured ? '<span class="fallenmark">FALLEN</span>' : `${c.siege}/3`}, <span class="bearing">${compassTo(g, c)}</span></li>`).join('')}</ul>
+      <span class="small">Reach a besieged city to break the siege and reclaim it. Lose four and the realm collapses.</span></div>` : ''}
       <p class="small">Move with WASD or the arrow keys, or click a neighbouring tile. Walking costs food. Blue crystals are mana links (+2 life). Landmarks marked ? ask a riddle about a card: answer right for a card of that region's color, wrong and you lose life, food or, rarely, a card. Pits with a torch are dungeons: revealed by clues from beaten foes, fought room by room with your life carried over. Faint sparks are mana motes — walk over one for gold or an amulet. Dirt roads link the cities: stay on one and you move too fast for pursuing mages to close in. The five dark fortresses are the Warden guilds; storm them to find the one the Usurper wears.</p>
       ${(g.world.dungeons || []).some(d => d.revealed) ? `<p class="small">Known dungeons: ${g.world.dungeons.filter(d => d.revealed).map(d => `${dungeonTemplate(d.id).name}${d.cleared ? ' (cleared)' : ''}`).join(', ')}.</p>` : ''}
       <div class="btnrow"><button class="btn" id="b-rest" ${g.player.food < 3 || g.player.life >= g.player.maxLife ? 'disabled' : ''}>Rest (3 food, +5 life)</button><button class="btn ghost" data-go="title">Menu</button></div>

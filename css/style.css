@@ -143,6 +143,12 @@ tr.st-unsupported td:nth-child(7), tr.st-unsupported td:nth-child(3), tr.st-miss
 .sw { display: inline-block; width: 12px; height: 12px; margin-right: 5px; vertical-align: -1px; border: 1px solid rgba(0,0,0,.4); }
 .taunt { font-style: italic; color: var(--ink2); }
 .onroad { color: #c9a367; }
+.siegehud { border: 1px solid #7a3b1e; background: rgba(70,30,12,.35); border-radius: 6px; padding: 8px 10px; margin: 8px 0; }
+.siegehud > b { color: #ffb46a; }
+.siegehud ul { list-style: none; margin: 5px 0; padding: 0; }
+.siegehud li { padding: 1px 0; font-size: 13px; }
+.siegehud .bearing { color: var(--ink2); }
+.siegehud .fallenmark { color: #ff8a8a; font-weight: 700; }
 
 /* modal / toast */
 .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: grid; place-items: center; z-index: 20; }
