@@ -4,6 +4,8 @@ import { needsTarget } from './cards.js';
 
 const value = c => power(c) + toughness(c) + (has(c, 'Flying') ? 1.5 : 0) + (has(c, 'First strike') ? 1 : 0) + (has(c, 'Trample') ? 0.5 : 0) + c.def.cmc * 0.25 + (c.def.abilities.length ? 0.75 : 0);
 const cardValue = c => (isCreatureDef(c) ? c.def.power + c.def.toughness + 1 : 2) + c.def.cmc * 0.3;
+// A creature whose tap ability pumps OTHER attackers/blockers (Angelic Page): better kept back.
+const isCombatUtility = c => abilitiesOf(c).some(ab => ab.type === 'activated' && ab.cost.tap && ab.effects[0] && (ab.effects[0].type === 'pump' || ab.effects[0].type === 'grant') && ab.effects[0].sel !== 'self');
 
 // ---- targeting -----------------------------------------------------------------------
 const HOSTILE = new Set(['damage', 'damageEqualPower', 'fight', 'destroy', 'exile', 'bounce', 'tap', 'freeze', 'control', 'flag', 'counter', 'lose', 'discard', 'mill', 'sacrifice', 'poison']);
@@ -144,6 +146,23 @@ function abilityOpts(duel, p, c, i) {
   return opts;
 }
 
+// Combat pumps p can produce right now: pump/grant spells in hand, plus pump/grant activated
+// abilities on the battlefield (Vampire Bats' {B}: +1/+0, Angelic Page's {T}: +1/+1, ...).
+function pumpSources(duel, p) {
+  const out = [];
+  for (const c of p.hand) { const e = c.def.spell?.effects[0]; if (e && (e.type === 'pump' || e.type === 'grant') && duel.canCast(p, c)) out.push({ kind: 'cast', card: c, e, p: e.type === 'pump' ? (e.p | 0) : 0, t: e.type === 'pump' ? (e.t | 0) : 0 }); }
+  for (const c of p.battlefield) abilitiesOf(c).forEach((ab, i) => { if (ab.type !== 'activated') return; const e = ab.effects[0]; if (!e || (e.type !== 'pump' && e.type !== 'grant')) return; if (!duel.canActivate(p, c, i)) return; out.push({ kind: 'activate', card: c, index: i, e, self: e.sel === 'self', p: e.type === 'pump' ? (e.p | 0) : 0, t: e.type === 'pump' ? (e.t | 0) : 0 }); });
+  return out;
+}
+// The action that applies a pump source to `target`, or null if it can't legally hit it.
+function pumpAction(duel, p, src, target) {
+  if (src.kind === 'activate' && src.self) { if (src.card.id !== target.id) return null; const opts = { targets: [] }; return duel.canActivate(p, src.card, src.index, opts) ? { type: 'activate', card: src.card, index: src.index, opts } : null; }
+  if (!duel.legalTargets(p, src.e, src.card).some(t => t.id === target.id)) return null;
+  const opts = { targets: [{ type: 'perm', id: target.id }] };
+  if (src.kind === 'cast') return duel.canCast(p, src.card, opts) ? { type: 'cast', card: src.card, opts } : null;
+  return duel.canActivate(p, src.card, src.index, opts) ? { type: 'activate', card: src.card, index: src.index, opts } : null;
+}
+
 function instantAction(duel, p) {
   const opp = duel.opponentOf(p);
   const top = duel.stack[duel.stack.length - 1];
@@ -168,22 +187,39 @@ function instantAction(duel, p) {
   const step = duel.step;
   const inCombat = step === 'blockers' && duel.attackers.length;
   if (inCombat) {
-    // Pump to win a fight
     const fights = [];
     for (const [aid, bids] of Object.entries(duel.blocks)) {
       const a = duel.card(Number(aid)); if (!a) continue;
       for (const bid of bids) { const b = duel.card(bid); if (b) fights.push({ a, b }); }
     }
-    for (const c of p.hand) {
-      const e = c.def.spell?.effects[0]; if (!e || (e.type !== 'pump' && e.type !== 'grant') || !duel.canCast(p, c)) continue;
-      for (const f of fights) {
-        const mine = f.a.controller === p.idx ? f.a : f.b.controller === p.idx ? f.b : null; if (!mine) continue;
-        const other = mine === f.a ? f.b : f.a;
-        const dp = e.type === 'pump' ? e.p : 0, dt = e.type === 'pump' ? e.t : 0;
-        const winsNow = power(mine) >= toughness(other) - other.damage && toughness(mine) - mine.damage > power(other);
-        const winsAfter = power(mine) + dp >= toughness(other) - other.damage && toughness(mine) + dt - mine.damage > power(other);
-        if (!winsNow && winsAfter && duel.legalTargets(p, e, c).some(t => t.id === mine.id)) return { type: 'cast', card: c, opts: { targets: [{ type: 'perm', id: mine.id }] } };
+    // Combat pumps (spells AND activated abilities): use one that wins a fight or saves a creature.
+    const pumps = pumpSources(duel, p);
+    for (const f of fights) {
+      const mine = f.a.controller === p.idx ? f.a : f.b.controller === p.idx ? f.b : null; if (!mine) continue;
+      const other = mine === f.a ? f.b : f.a;
+      const wins = (dp, dt) => power(mine) + dp >= toughness(other) - other.damage && toughness(mine) + dt - mine.damage > power(other);
+      const survives = dt => toughness(mine) + dt - mine.damage > power(other);
+      const winsNow = wins(0, 0), survivesNow = survives(0);
+      for (const src of pumps) {
+        if (src.p + src.t <= 0) continue;                                  // grant with no stat change
+        if ((winsNow || !wins(src.p, src.t)) && (survivesNow || !survives(src.t))) continue;
+        const act = pumpAction(duel, p, src, mine); if (act) return act;   // turns a loss/tie into a win, or saves it
       }
+    }
+    // Push extra damage through unblocked attackers when pumping can reach lethal — even across
+    // several activations (Vampire Bats' {B}:+1/+0 twice). Fire one pump per pass; it chains.
+    if (duel.active === p.idx) {
+      const unblocked = duel.attackers.map(id => duel.card(id)).filter(a => a && a.controller === p.idx && !(duel.blocks[a.id] || []).length);
+      const through = unblocked.reduce((s, a) => s + power(a), 0);
+      let maxExtra = 0;
+      for (const src of pumps) {
+        if (src.p <= 0) continue;
+        let times = 1;
+        if (src.kind === 'activate') { const ab = abilitiesOf(src.card)[src.index]; const lim = ab.limit || (ab.once ? 1 : 0); if (lim) times = Math.max(1, lim - (src.card.uses?.turn === duel.turn ? (src.card.uses.n[src.index] || 0) : 0)); }
+        maxExtra += src.p * times;
+      }
+      if (through < opp.life && through + maxExtra >= opp.life)
+        for (const a of unblocked) for (const src of pumps) { if (src.p <= 0) continue; const act = pumpAction(duel, p, src, a); if (act) return act; }
     }
     // Regenerate a blocked/blocking creature about to die
     for (const f of fights) { const mine = f.a.controller === p.idx ? f.a : f.b.controller === p.idx ? f.b : null; if (!mine) continue; const other = mine === f.a ? f.b : f.a; if (power(other) >= toughness(mine) - mine.damage && mine.regen === 0) { const i = abilitiesOf(mine).findIndex(ab => ab.type === 'activated' && ab.effects[0]?.type === 'regenerate'); if (i >= 0 && duel.canActivate(p, mine, i)) return { type: 'activate', card: mine, index: i, opts: { targets: [] } }; } }
@@ -213,75 +249,129 @@ function isHostileToMe(duel, p, item) {
   return (item.targets || []).some(t => (t.type === 'perm' && duel.card(t.id)?.controller === p.idx) || (t.type === 'player' && t.idx === p.idx)) || (item.effects || []).some(e => e.type === 'destroyAll' || (e.sel === 'each' && e.type === 'damage'));
 }
 
-// Simulate one attacker against one blocker: who dies, honouring first strike, double strike,
-// deathtouch, damage already marked, protection, indestructible and regeneration shields.
-export function outcome(duel, a, b) {
-  const fs = c => has(c, 'First strike') || has(c, 'Double strike');
-  const aFS = fs(a), bFS = fs(b), aDS = has(a, 'Double strike'), bDS = has(b, 'Double strike');
-  const aPow = duel.protectedFrom(b, a) ? 0 : power(a), bPow = duel.protectedFrom(a, b) ? 0 : power(b);
+// Full combat resolution for ONE attacker against ANY NUMBER of blockers. Respects first-strike /
+// double-strike timing (both sides deal simultaneously within a step), deathtouch, protection,
+// indestructible and regeneration. The attacker assigns its damage cheapest-lethal-first, exactly
+// like the engine — so ganging several blockers can kill it before it kills anything back (e.g. a
+// 3/3 into two 2/1 first strikers: it takes 4 first-strike damage and dies having dealt nothing).
+export function combatOutcome(duel, a, bs) {
+  const FS = c => has(c, 'First strike') || has(c, 'Double strike');
+  const DS = c => has(c, 'Double strike');
   const survives = c => has(c, 'Indestructible') || c.regen > 0;
-  const lethal = (victim, dmg, src) => dmg >= toughness(victim) || (dmg > 0 && has(src, 'Deathtouch'));
-  let aDmg = a.damage, bDmg = b.damage, aDead = false, bDead = false;
-  if (aFS || bFS) {
-    if (aFS) bDmg += aPow;
-    if (bFS) aDmg += bPow;
-    if (aFS && lethal(b, bDmg, a) && !survives(b)) bDead = true;
-    if (bFS && lethal(a, aDmg, b) && !survives(a)) aDead = true;
+  const aDeath = has(a, 'Deathtouch');
+  const state = bs.map(b => ({ b, dmg: b.damage, dead: false, aHit: false }));
+  let aDmg = a.damage, aDead = false, aDeathMark = false;
+  // Attacker allocates power(a) among the living blockers it can damage, killing the cheapest first.
+  const attackerAssign = () => {
+    let rem = power(a);
+    const targets = state.filter(s => !s.dead && !duel.protectedFrom(a, s.b))
+      .sort((x, y) => (toughness(x.b) - x.dmg) - (toughness(y.b) - y.dmg));
+    for (const s of targets) {
+      if (rem <= 0) break;
+      const need = aDeath ? 1 : Math.max(1, toughness(s.b) - s.dmg);
+      const put = Math.min(rem, need); s.dmg += put; s.aHit = true; rem -= put;
+    }
+  };
+  const blockerAssign = pass => {
+    for (const s of state) {
+      if (s.dead) continue;
+      const strikes = pass === 'fs' ? FS(s.b) : (!FS(s.b) || DS(s.b));
+      if (!strikes || duel.protectedFrom(s.b, a)) continue;
+      aDmg += power(s.b);
+      if (has(s.b, 'Deathtouch') && power(s.b) > 0) aDeathMark = true;
+    }
+  };
+  const resolve = () => {
+    for (const s of state) if (!s.dead && !survives(s.b) && (s.dmg >= toughness(s.b) || (aDeath && s.aHit))) s.dead = true;
+    if (!aDead && !survives(a) && (aDmg >= toughness(a) || aDeathMark)) aDead = true;
+  };
+  if (FS(a) || state.some(s => FS(s.b))) {   // first-strike step (simultaneous)
+    if (FS(a)) attackerAssign();
+    blockerAssign('fs');
+    resolve();
   }
-  if (!aDead && (!aFS || aDS)) bDmg += aPow;
-  if (!bDead && (!bFS || bDS)) aDmg += bPow;
-  if (!bDead && lethal(b, bDmg, a) && !survives(b)) bDead = true;
-  if (!aDead && lethal(a, aDmg, b) && !survives(a)) aDead = true;
-  return { attackerDies: aDead, blockerDies: bDead };
+  if (!aDead) {                              // regular step (simultaneous)
+    if (!FS(a) || DS(a)) attackerAssign();
+    blockerAssign('normal');
+    resolve();
+  }
+  return { attackerDies: aDead, blockersKilled: state.filter(s => s.dead).map(s => s.b) };
+}
+
+// Every combination of `arr` up to `maxSize` elements, including the empty set (no block).
+function subsets(arr, maxSize) {
+  const res = [[]];
+  const rec = (start, cur) => {
+    if (cur.length >= maxSize) return;
+    for (let i = start; i < arr.length; i++) { cur.push(arr[i]); res.push(cur.slice()); rec(i + 1, cur); cur.pop(); }
+  };
+  rec(0, []);
+  return res;
 }
 
 function chooseAttackers(duel, p) {
   const opp = duel.opponentOf(p);
   const mine = p.battlefield.filter(c => duel.canAttack(c));
-  const blockers = opp.battlefield.filter(c => isCreature(c) && !c.tapped);
+  if (!mine.length) return [];
+  const allBlockers = opp.battlefield.filter(c => isCreature(c) && !c.tapped);
   const total = mine.reduce((s, c) => s + power(c), 0);
-  if (mine.length && total >= opp.life && blockers.length < mine.length) return mine.map(c => c.id);
+  // Alpha strike: swing with everything when it's lethal and they cannot block us all.
+  if (total >= opp.life && allBlockers.length < mine.length) return mine.map(c => c.id);
+  // Worth of pushing `d` unblocked damage through — huge when it's lethal, a little extra near-lethal.
+  const faceValue = d => d <= 0 ? 0 : d >= opp.life ? 40 : d + (opp.life - d <= 3 ? 3 : 0);
   const out = [];
-  for (const a of mine) {
+  // The defender commits blockers to our scariest creatures first; approximate by consuming them so
+  // the same blocker isn't assumed to guard two of our attackers at once.
+  let avail = allBlockers.slice();
+  for (const a of mine.slice().sort((x, y) => value(y) - value(x))) {
     if (a.cur.flags.has('mustAttack')) { out.push(a.id); continue; }
-    const legal = blockers.filter(b => duel.canBlock(b, a));
-    const results = legal.map(b => ({ b, ...outcome(duel, a, b) }));
-    const killedBy = results.filter(r => r.attackerDies);
-    const eaten = killedBy.filter(r => !r.blockerDies);            // a blocker that kills it and lives
-    const badTrade = killedBy.filter(r => r.blockerDies && value(r.b) < value(a) - 1); // trades down
-    if (!legal.length || !killedBy.length) { out.push(a.id); continue; }
-    if (eaten.length) { if (opp.life <= power(a) && killedBy.length <= 1 && legal.length <= 1) out.push(a.id); continue; }
-    if (!badTrade.length && value(a) <= 4) out.push(a.id);            // happy to trade evenly with small stuff
-    else if (opp.life <= power(a) * 2) out.push(a.id);
+    // Keep a tap-to-pump helper (e.g. Angelic Page) back and untapped so it can boost our fights.
+    if (mine.length > 1 && isCombatUtility(a)) continue;
+    const legal = avail.filter(b => duel.canBlock(b, a));
+    // Find the defender's BEST block (the one that minimizes our net gain), gang blocks included.
+    let worst = Infinity, worstBlock = [];
+    for (const S of subsets(legal, Math.min(3, legal.length))) {
+      if (has(a, 'Menace') && S.length === 1) continue;       // one blocker can't legally stop menace
+      const oc = combatOutcome(duel, a, S);
+      let gain = oc.blockersKilled.reduce((s, b) => s + value(b), 0);
+      if (oc.attackerDies) gain -= value(a);
+      if (!S.length) gain += faceValue(power(a));             // got through: count the face damage
+      if (gain < worst) { worst = gain; worstBlock = S; }
+    }
+    const tol = value(a) <= 4.5 ? -1.6 : -0.25;               // small creatures accept near-even trades
+    if (worst >= tol) { out.push(a.id); for (const b of worstBlock) { const i = avail.indexOf(b); if (i >= 0) avail.splice(i, 1); } }
   }
   return out;
 }
 function chooseBlocks(duel, p) {
   const atk = duel.activePlayer;
   const attackers = duel.attackers.map(id => atk.battlefield.find(c => c.id === id)).filter(Boolean).sort((a, b) => power(b) - power(a));
-  const free = p.battlefield.filter(c => isCreature(c) && !c.tapped);
+  let free = p.battlefield.filter(c => isCreature(c) && !c.tapped);
   const blocks = {};
-  const incoming = attackers.reduce((s, a) => s + power(a), 0);
-  let unblocked = incoming;
-  // Lure: must block that creature with everything able
+  let unblocked = attackers.reduce((s, a) => s + power(a), 0);
+  // Lure: every creature able to block it must block it.
   const lure = attackers.find(a => a.cur.flags.has('lure'));
-  if (lure) { const bs = free.filter(b => duel.canBlock(b, lure)); if (bs.length) { blocks[lure.id] = bs.map(b => b.id); for (const b of bs) free.splice(free.indexOf(b), 1); } }
-  const byValue = list => list.sort((x, y) => value(x.b) - value(y.b));
+  if (lure) { const bs = free.filter(b => duel.canBlock(b, lure)); if (bs.length) { blocks[lure.id] = bs.map(b => b.id); free = free.filter(b => !bs.includes(b)); unblocked -= power(lure); } }
   for (const a of attackers) {
     if (blocks[a.id]) continue;
-    const cands = free.filter(b => duel.canBlock(b, a)).map(b => ({ b, ...outcome(duel, a, b) }));
-    if (!cands.length) continue;
-    let pick = byValue(cands.filter(r => r.attackerDies && !r.blockerDies))[0];                       // kill and survive
-    if (!pick) pick = byValue(cands.filter(r => r.attackerDies && r.blockerDies && value(a) >= value(r.b)))[0]; // even or better trade
-    if (!pick) pick = byValue(cands.filter(r => !r.blockerDies))[0];                                    // free wall
-    if (!pick && unblocked >= p.life) pick = byValue(cands)[0];                                         // chump only when it would be lethal
-    if (!pick && has(a, 'Trample') === false && unblocked - power(a) < p.life && unblocked >= p.life - 2) pick = byValue(cands)[0]; // desperate
-    if (pick) {
-      const b = pick.b;
-      if (has(a, 'Menace')) { const second = cands.find(r => r.b !== b); if (!second) continue; blocks[a.id] = [b.id, second.b.id]; free.splice(free.indexOf(second.b), 1); }
-      else blocks[a.id] = [b.id];
-      free.splice(free.indexOf(b), 1); unblocked -= power(a);
+    const legal = free.filter(b => duel.canBlock(b, a));
+    if (!legal.length) continue;
+    const mustStop = unblocked >= p.life;   // letting this attacker through could be lethal
+    // Weigh every block (including gang blocks). Baseline 0 = "don't block"; block only when better.
+    let best = null, bestScore = 0;
+    for (const S of subsets(legal, Math.min(3, legal.length))) {
+      if (!S.length) continue;
+      if (has(a, 'Menace') && S.length < 2) continue;
+      const oc = combatOutcome(duel, a, S);
+      const killed = new Set(oc.blockersKilled);
+      const lost = S.filter(b => killed.has(b)).reduce((s, b) => s + value(b), 0);
+      let score = (oc.attackerDies ? value(a) : 0) - lost;
+      const prevented = power(a);           // damage this block keeps off our face
+      score += mustStop ? prevented * 4 : p.life <= 6 ? prevented * 0.6 : prevented * 0.2;
+      score -= S.length * 0.05;             // all else equal, don't over-commit blockers
+      if (score > bestScore) { bestScore = score; best = S; }
     }
+    if (best) { blocks[a.id] = best.map(b => b.id); free = free.filter(b => !best.includes(b)); unblocked -= power(a); }
   }
   return blocks;
 }
