@@ -223,7 +223,7 @@ function move(dx, dy) {
   save();
   if (caught) { encounter(caught); return; }
   const city = cityAt(g.world, nx, ny);
-  if (city) { if (city.siege || city.captured) { const was = city.captured; city.siege = 0; city.captured = false; save(); toast(was ? `You break the siege and reclaim ${city.name}.` : `Your arrival scatters the besiegers of ${city.name}.`); } go('city'); return; }
+  if (city) { if (city.siege || city.captured) { const was = city.captured; city.siege = 0; city.captured = false; save(); toast(was ? `You break the siege and reclaim ${city.name}.` : `Your arrival scatters the besiegers of ${city.name}.`); } enterCity(); return; }
   const lm = landmarkAt(g.world, nx, ny);
   if (lm && !lm.used) { landmarkRiddle(lm); return; }
   const sp = specialAt(g.world, nx, ny);
@@ -599,9 +599,20 @@ function addClue(color) {
   const prizeLine = prizes.length ? ` Rumoured to hoard: ${prizes.join(', ')}${dg.intel < FIND_CLUES ? ', and more' : ''}.` : '';
   return `Clue to the ${t.name} (intel ${dg.intel}/${FIND_CLUES}). ${loc} ${intelLine}${prizeLine}`;
 }
-// Offer a beaten roamer's spoils as a choice: their card, or a dungeon clue. Finalises to the result screen.
+// The outcome of an ordinary roaming-mage duel, shown as a compact popup over the map rather than a
+// full-screen result page (that heavier page is kept for dungeons and the endgame).
+function roamResult(tpl, won, lines) {
+  S.screen = 'map';   // the duel view is gone; the modal overlays the map
+  S.modal = {
+    title: won ? 'The mage yields' : 'You are bested',
+    body: `<p class="taunt">${won ? `${esc(tpl.name)} falls before you.` : `${esc(tpl.name)} stands over you.`}</p>${lines.length ? `<ul class="plain">${lines.map(l => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}`,
+    buttons: [{ label: won ? 'Onward' : 'Pick yourself up', primary: true, action: () => { S.modal = null; go('map'); } }],
+  };
+  save(); render();
+}
+// Offer a beaten roamer's spoils as a choice: their card, or a dungeon clue. Finalises to a popup outcome.
 function roamSpoils(tpl, ante, lines) {
-  const finish = extra => { S.modal = null; S.result = { won: true, tpl, lines: [...lines, extra] }; save(); go('result'); };
+  const finish = extra => roamResult(tpl, true, [...lines, extra]);
   S.screen = 'map';   // the duel view is gone; overlay the choice on a real screen so render() has something to draw
   S.modal = {
     title: 'Spoils of victory',
@@ -685,8 +696,7 @@ function finishDuel(winner) {
     g.player.life = g.player.maxLife; lines.push('You wake up some time later, restored but poorer.');
     if (tpl.boss) { bossLink(); if (g.status !== 'playing') return; }
   }
-  S.result = { won: winner === 0, tpl, lines };
-  save(); go('result');
+  roamResult(tpl, winner === 0, lines);
 }
 
 // ---- city ---------------------------------------------------------------------
@@ -1236,6 +1246,24 @@ function map() {
   };
 }
 
+// A few fantasy ways to say the inn topped you off, so a city visit always heals to full for free.
+function innFlavor(n) {
+  return rnd([
+    `The inn's hearth-witch mends you with a song and a bowl of suspiciously green stew. ${n} life restored.`,
+    `A real feather bed, no roots in your back for once — you wake ${n} life the better.`,
+    `The innkeeper pours you a tankard of something that glows faintly. You feel ${n} life braver.`,
+    `You sleep like the dead and wake like the living. The inn gives back ${n} life.`,
+    `Warm bread, warmer fire, and a bard who only knew three songs. ${n} life recovered.`,
+    `The bathhouse cauldron does wonders for a mage's aches. Healed ${n} life.`,
+  ]);
+}
+// Enter a city, resting at its inn for free on the way in: full life, with a bit of flavour to show for it.
+function enterCity() {
+  const g = S.game;
+  const healed = g.player.maxLife - g.player.life;
+  if (healed > 0) { g.player.life = g.player.maxLife; S.innMsg = innFlavor(healed); } else S.innMsg = null;
+  save(); go('city');
+}
 function city() {
   const g = S.game; const c = cityAt(g.world, g.player.x, g.player.y); if (!c) return map();
   const stock = cityStock(c);
@@ -1243,8 +1271,8 @@ function city() {
   app.innerHTML = `<section class="screen cityscreen">
     <div class="box">
       <h2>${esc(c.name)} <span class="small">· a ${COLOR_NAME[c.color].toLowerCase()} city in the ${BIOME[c.color].name.toLowerCase()}</span></h2>
+      ${S.innMsg ? `<p class="innmsg">${esc(S.innMsg)}</p>` : ''}
       <div class="btnrow">
-        <button class="btn" id="b-inn" ${g.player.life >= g.player.maxLife ? 'disabled' : ''}>Rest at the inn (free, full life)</button>
         <button class="btn" id="b-food" ${g.player.gold < 2 ? 'disabled' : ''}>Buy 20 food (2 gold)</button>
         <button class="btn primary" id="b-leave">Leave</button>
       </div>
@@ -1345,7 +1373,7 @@ app.addEventListener('submit', ev => {
 });
 document.addEventListener('click', ev => {
   if (ev.target.closest('.btn, .tab, .linkbtn')) sfx('click');
-  const t = ev.target.closest('[data-go],[data-modal],[data-filter],[data-add],[data-addmax],[data-rem],[data-remmax],[data-dec],[data-buy],[data-sell],[data-amshop],[data-audio],[data-lesson],#b-import,#b-csv,#b-rescan,#b-clear-coll,#b-fill,#b-addall,#b-clear-deck,#b-rest,#b-inn,#b-food,#b-leave,#b-newgame,#b-dleave,#b-practice,#b-bounty,#wm-heal,#wm-blink,#wm-cloak,#wm-thunder,#wm-sight,#b-reset-all');
+  const t = ev.target.closest('[data-go],[data-modal],[data-filter],[data-add],[data-addmax],[data-rem],[data-remmax],[data-dec],[data-buy],[data-sell],[data-amshop],[data-audio],[data-lesson],#b-import,#b-csv,#b-rescan,#b-clear-coll,#b-fill,#b-addall,#b-clear-deck,#b-rest,#b-food,#b-leave,#b-newgame,#b-dleave,#b-practice,#b-bounty,#wm-heal,#wm-blink,#wm-cloak,#wm-thunder,#wm-sight,#b-reset-all');
   if (!t) return;
   const g = S.game;
   if ('audio' in t.dataset) { toggleAudio(); renderTop(); return; }
@@ -1370,7 +1398,6 @@ document.addEventListener('click', ev => {
     case 'b-addall': { const q = S.deckFilter.toLowerCase(); for (const n of Object.keys(S.collection)) { const d = defOf(n); if (!d || d.kind === 'unsupported') continue; if (q && !n.toLowerCase().includes(q)) continue; const want = deckRoom(n); if (want > 0) addCards(g.deck, n, want); } save(); render(); break; }
     case 'b-clear-deck': if (deckSize(g.deck) && confirm('Remove every card from your deck?')) { g.deck = {}; save(); render(); } break;
     case 'b-rest': if (g.player.food >= 3) { g.player.food -= 3; g.player.life = Math.min(g.player.maxLife, g.player.life + 5); g.player.day++; if (g.player.day % 30 === 0) bossLink(); stepEnemies(g.world, Math.random, g.player); save(); render(); } break;
-    case 'b-inn': g.player.life = g.player.maxLife; save(); render(); break;
     case 'b-food': if (g.player.gold >= 2) { g.player.gold -= 2; g.player.food += 20; save(); render(); } break;
     case 'b-leave': go('map'); break;
     case 'b-newgame': S.game = null; save(); go('title'); break;
@@ -1379,7 +1406,7 @@ document.addEventListener('click', ev => {
     case 'b-bounty': { const c = cityAt(g.world, g.player.x, g.player.y); if (c) acceptBounty(c); break; }
     case 'b-reset-all': if (confirm('Wipe your current journey AND your entire collection so you can start completely fresh? This cannot be undone.')) { S.game = null; S.collection = {}; S.filter = 'all'; S.report = null; save(); go('title'); toast('Everything wiped. Begin a new journey with an empty collection.'); } break;
     case 'wm-heal': if (amuletCount('W') && g.player.life < g.player.maxLife) { giveAmulet('W', -1); g.player.life = g.player.maxLife; sfx('cast'); save(); toast('Healing Light: your wounds close.'); } break;
-    case 'wm-blink': if (amuletCount('U')) { const c = g.world.cities.slice().sort((a, b) => (Math.abs(a.x - g.player.x) + Math.abs(a.y - g.player.y)) - (Math.abs(b.x - g.player.x) + Math.abs(b.y - g.player.y))).find(c => c.x !== g.player.x || c.y !== g.player.y); if (c) { giveAmulet('U', -1); g.player.x = c.x; g.player.y = c.y; sfx('cast'); save(); toast(`Blink: you step out in ${c.name}.`); go('city'); return; } } break;
+    case 'wm-blink': if (amuletCount('U')) { const c = g.world.cities.slice().sort((a, b) => (Math.abs(a.x - g.player.x) + Math.abs(a.y - g.player.y)) - (Math.abs(b.x - g.player.x) + Math.abs(b.y - g.player.y))).find(c => c.x !== g.player.x || c.y !== g.player.y); if (c) { giveAmulet('U', -1); g.player.x = c.x; g.player.y = c.y; sfx('cast'); toast(`Blink: you step out in ${c.name}.`); enterCity(); return; } } break;
     case 'wm-cloak': if (amuletCount('B')) { giveAmulet('B', -1); g.player.cloak = 8; sfx('cast'); save(); toast('Shadow Cloak: you walk unseen for 8 steps.'); render(); } break;
     case 'wm-thunder': {
       if (amuletCount('R') < 1) break;
@@ -1431,7 +1458,7 @@ document.addEventListener('keydown', ev => {
 
 // ---- boot -----------------------------------------------------------------------
 // Debug handle for the console and for automated tests: window.ff.S is the app state.
-window.ff = { S, defOf, save, render, startDuel, enemyById, startTutorialDuel, riddleDefs, makeRiddle, amuletShopPool, artifactShopPool, cityPool, wardenOf, finishDuel, advanceSieges, maxSieges, collectMote, ambushFromMote, amuletPrice, tierOf, leveledEnemy, colorBombs, roamTemplate, deckRoom, copyCap, sellPrice, sellableCopies, townGold, addTownGold, sellCard, MAX_COPIES, deckProblems, addClue, clueTarget, dungeonArchetype, knownPrizes, dungeonTemplate, FIND_CLUES, relocateDungeon };
+window.ff = { S, defOf, save, render, startDuel, enemyById, startTutorialDuel, riddleDefs, makeRiddle, amuletShopPool, artifactShopPool, cityPool, wardenOf, finishDuel, advanceSieges, maxSieges, collectMote, ambushFromMote, amuletPrice, tierOf, leveledEnemy, colorBombs, roamTemplate, deckRoom, copyCap, sellPrice, sellableCopies, townGold, addTownGold, sellCard, MAX_COPIES, deckProblems, addClue, clueTarget, dungeonArchetype, knownPrizes, dungeonTemplate, FIND_CLUES, relocateDungeon, enterCity, roamResult };
 initPreview();
 load();
 render();
