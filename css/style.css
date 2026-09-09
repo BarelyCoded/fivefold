@@ -331,6 +331,12 @@ svg.arrows { position: absolute; left: 0; top: 0; pointer-events: none; z-index:
 .amushop-row .nm { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .amushop-row .nm i { color: var(--ink2); font-size: 11px; margin-left: 6px; font-style: normal; }
 .amushop-row .cost { display: inline-flex; align-items: center; gap: 3px; font-variant-numeric: tabular-nums; color: var(--gold); font-weight: 600; }
+.nowrap { white-space: nowrap; }
+.selllist { max-height: 260px; overflow-y: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--bg2); }
+.sellrow { display: grid; grid-template-columns: minmax(0,1fr) auto auto; align-items: center; gap: 10px; padding: 4px 8px; border-bottom: 1px solid var(--line); }
+.sellrow:last-child { border-bottom: 0; }
+.sellrow .nm { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sellrow .qty { color: var(--ink2); font-variant-numeric: tabular-nums; }
 
 /* ---- mana symbol pips ------------------------------------------------------------- */
 .pip { display: inline-flex; align-items: center; justify-content: center; min-width: 15px; height: 15px; padding: 0 1px; border-radius: 50%; font-size: 10px; font-weight: 700; line-height: 1; margin-left: 1px; box-shadow: inset 0 -1px 1px rgba(0,0,0,.35), 0 0 0 1px rgba(0,0,0,.25); vertical-align: middle; font-family: system-ui, sans-serif; }

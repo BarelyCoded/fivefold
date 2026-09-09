@@ -81,6 +81,18 @@ function load() {
   try { S.tierOverrides = JSON.parse(localStorage.getItem(TIER_KEY) || '{}') || {}; } catch { S.tierOverrides = {}; }
 }
 function addCards(coll, name, n = 1) { coll[name] = (coll[name] || 0) + n; if (coll[name] <= 0) delete coll[name]; }
+// Deck rule: at most four of any one card, but basic lands are unlimited.
+const MAX_COPIES = 4;
+const copyCap = name => BASIC_NAMES.has(name) ? Infinity : MAX_COPIES;
+// How many more of `name` the deck may hold: limited by copies owned and the 4-of rule.
+function deckRoom(name) {
+  const g = S.game; const owned = BASIC_NAMES.has(name) ? Infinity : (S.collection[name] || 0);
+  return Math.max(0, Math.min(owned, copyCap(name)) - (g.deck[name] || 0));
+}
+// ---- town treasuries: each city keeps a fluctuating gold reserve. Buying refills it, selling drains it.
+const TOWN_GOLD_CAP = 300, TOWN_GOLD_START = 150;
+function townGold(color) { const g = S.game; g.cityGold ||= {}; if (g.cityGold[color] == null) g.cityGold[color] = TOWN_GOLD_START; return g.cityGold[color]; }
+function addTownGold(color, delta) { const g = S.game; g.cityGold ||= {}; g.cityGold[color] = Math.max(0, Math.min(TOWN_GOLD_CAP, townGold(color) + delta)); }
 
 // ---- content ----------------------------------------------------------------------
 async function ensureContent() {
@@ -130,6 +142,7 @@ function deckProblems(deckObj) {
     if (!d) { p.push(`${name}: card data not loaded.`); continue; }
     if (d.kind === 'unsupported') p.push(`${name}: not supported by the demo engine.`);
     if (!BASIC_NAMES.has(name) && (S.collection[name] || 0) < n) p.push(`${name}: you own ${S.collection[name] || 0}, deck uses ${n}.`);
+    if (!BASIC_NAMES.has(name) && n > MAX_COPIES) p.push(`${name}: ${n} copies; at most ${MAX_COPIES} of a card are allowed.`);
   }
   return p;
 }
@@ -653,8 +666,29 @@ function cityStock(city) {
     const l = rnd(list);
     if (l) { const d = defOf(l); const dual = d.subtypes.length >= 2; const price = dual ? 30 : d.produces.length >= 2 ? 18 : 14; items.push({ name: l, price, sold: false, special: 'land' }); }
   }
+  addTownGold(city.color, 30);   // trade trickles back into the coffers as the days pass
   g.cityStock[key] = { day: g.player.day, items }; save();
   return items;
+}
+// What a town pays you for a card. Priced by power tier so a bomb sells for real money and chaff for
+// scraps; basics are worthless. The town only pays out of its own reserve.
+const SELL_TIER_GOLD = { S: 60, A: 34, B: 18, C: 10, D: 5, E: 2 };
+function sellPrice(name) {
+  if (BASIC_NAMES.has(name)) return 1;
+  const d = defOf(name); if (!d) return 1;
+  const t = tierOf(name);
+  const base = (t && SELL_TIER_GOLD[t] != null) ? SELL_TIER_GOLD[t] : Math.max(3, 4 + (d.cmc || 0) * 2);
+  return Math.max(1, Math.floor(base * 0.6));
+}
+// Copies of `name` you could sell without touching your deck (owned beyond what the deck uses).
+function sellableCopies(name) { const g = S.game; return Math.max(0, (S.collection[name] || 0) - (g.deck[name] || 0)); }
+function sellCard(name) {
+  const g = S.game; const c = cityAt(g.world, g.player.x, g.player.y); if (!c) return;
+  if (sellableCopies(name) <= 0) { toast('Every copy of that is in your deck — remove one first.'); return; }
+  const price = sellPrice(name);
+  if (townGold(c.color) < price) { toast(`${esc(c.name)}'s coffers can't cover that right now.`); return; }
+  addCards(S.collection, name, -1); addTownGold(c.color, -price); g.player.gold += price;
+  sfx('coin'); save(); render();
 }
 // Amulet card shop. Every known card is buyable with amulets; rarer / costlier cards cost more amulets.
 // A city's shop lists cards of its own color; artifacts are colorless and buyable with any amulets anywhere.
@@ -924,7 +958,7 @@ function deck() {
       <div class="box">
         <div class="rowhead"><h2>Your cards</h2><span class="rowtools"><button class="btn tiny" id="b-addall">Add all</button><input id="dfilter" placeholder="Filter…" value="${esc(S.deckFilter)}"></span></div>
         <table class="coll"><tr><th>Card</th><th>Cost</th><th>Own</th><th>In deck</th><th></th></tr>
-        ${owned.map(r => { const used = g.deck[r.n] || 0; return `<tr><td data-preview="${esc(r.n)}">${esc(r.n)}<span class="small"> ${esc(r.d.typeLine)}</span></td><td>${r.d.kind === 'land' ? '' : manaHtml(r.d.cost)}</td><td>${r.q}</td><td>${used}</td><td><button class="btn tiny" data-add="${esc(r.n)}" ${used >= r.q ? 'disabled' : ''}>+</button></td></tr>`; }).join('')}</table>
+        ${owned.map(r => { const used = g.deck[r.n] || 0; const room = deckRoom(r.n); const atCap = copyCap(r.n) !== Infinity && used >= copyCap(r.n); return `<tr><td data-preview="${esc(r.n)}">${esc(r.n)}<span class="small"> ${esc(r.d.typeLine)}</span></td><td>${r.d.kind === 'land' ? '' : manaHtml(r.d.cost)}</td><td>${r.q}</td><td>${used}${atCap ? ' <span class="small">(max)</span>' : ''}</td><td class="nowrap"><button class="btn tiny" data-add="${esc(r.n)}" ${room <= 0 ? 'disabled' : ''}>+</button><button class="btn tiny" data-addmax="${esc(r.n)}" ${room <= 0 ? 'disabled' : ''} title="Add all copies (max ${copyCap(r.n) === Infinity ? '∞' : copyCap(r.n)})">+all</button></td></tr>`; }).join('')}</table>
       </div>
       <div class="box">
         <div class="rowhead"><h2>Deck · ${size} cards, ${lands} lands</h2><span class="rowtools"><button class="btn" id="b-fill">Fill basics to 40</button><button class="btn" id="b-clear-deck"${size ? '' : ' disabled'}>Remove all</button></span></div>
@@ -932,7 +966,7 @@ function deck() {
         <div class="basics">${COLORS.map(c => `<span class="basic"><i class="dot c-${c}"></i>${BASICS[c]} <b>${g.deck[BASICS[c]] || 0}</b> <button class="btn tiny" data-rem="${BASICS[c]}">−</button><button class="btn tiny" data-add="${BASICS[c]}">+</button></span>`).join('')}</div>
         ${probs.length ? `<div class="msg">${probs.map(esc).join('<br>')}</div>` : '<div class="ok">Deck is ready.</div>'}
         <table class="coll"><tr><th>Card</th><th>Cost</th><th>Qty</th><th></th></tr>
-        ${inDeck.map(r => `<tr class="st-${r.d?.status || 'missing'}"><td data-preview="${esc(r.n)}">${esc(r.n)}</td><td>${r.d && r.d.kind !== 'land' ? manaHtml(r.d.cost) : ''}</td><td>${r.c}</td><td><button class="btn tiny" data-rem="${esc(r.n)}">−</button></td></tr>`).join('')}</table>
+        ${inDeck.map(r => `<tr class="st-${r.d?.status || 'missing'}"><td data-preview="${esc(r.n)}">${esc(r.n)}</td><td>${r.d && r.d.kind !== 'land' ? manaHtml(r.d.cost) : ''}</td><td>${r.c}</td><td class="nowrap"><button class="btn tiny" data-rem="${esc(r.n)}">−</button><button class="btn tiny" data-remmax="${esc(r.n)}" title="Remove all copies">−all</button></td></tr>`).join('')}</table>
       </div>
     </div>
   </section>`;
@@ -1068,6 +1102,13 @@ function city() {
       <h3>Market</h3>
       <div class="market">${stock.map((it, i) => { const d = defOf(it.name); return `<div class="stall${it.sold ? ' sold' : ''}">${cardHtml(d)}<div class="price">${it.sold ? 'Sold' : `${it.price} gold`}</div><button class="btn small" data-buy="${i}" ${it.sold || g.player.gold < it.price ? 'disabled' : ''}>Buy</button></div>`; }).join('')}</div>
       <p class="small">Stock changes every few days. Artifacts and rare lands pass through now and then. Bought cards go to your collection; add them to your deck from the Deck tab.</p>
+      ${(() => {
+        const reserve = townGold(c.color);
+        const sellable = Object.keys(S.collection).filter(n => !BASIC_NAMES.has(n) && sellableCopies(n) > 0 && defOf(n) && defOf(n).kind !== 'unsupported').sort((a, b) => sellPrice(b) - sellPrice(a) || a.localeCompare(b));
+        return `<h3>Sell cards <span class="small">· ${esc(c.name)}'s coffers hold ${reserve} gold</span></h3>
+        <p class="small">The town buys your spare cards — copies you own beyond what your deck uses — paying from its own reserve. Buying here refills the coffers; selling drains them${reserve === 0 ? ', and right now they are empty' : ''}.</p>
+        ${sellable.length ? `<div class="selllist">${sellable.map(n => { const price = sellPrice(n); return `<div class="sellrow"><span class="nm" data-preview="${esc(n)}">${esc(n)} ${tierChip(n)}</span><span class="small qty">${sellableCopies(n)} spare</span><button class="btn small" data-sell="${esc(n)}" ${reserve < price ? 'disabled' : ''}>Sell for ${price}g</button></div>`; }).join('')}</div>` : '<p class="small">No spare cards to sell — every card you own is in your deck.</p>'}`;
+      })()}
       <h3>Amulet exchange <span class="amurow small">${amuletGems()}</span></h3>
       ${(() => {
         const stock = amuletStockNames(c);
@@ -1155,7 +1196,7 @@ app.addEventListener('submit', ev => {
 });
 document.addEventListener('click', ev => {
   if (ev.target.closest('.btn, .tab, .linkbtn')) sfx('click');
-  const t = ev.target.closest('[data-go],[data-modal],[data-filter],[data-add],[data-rem],[data-dec],[data-buy],[data-amshop],[data-audio],[data-lesson],#b-import,#b-csv,#b-rescan,#b-clear-coll,#b-fill,#b-addall,#b-clear-deck,#b-rest,#b-inn,#b-food,#b-leave,#b-newgame,#b-dleave,#b-practice,#b-bounty,#wm-heal,#wm-blink,#wm-cloak,#wm-thunder,#wm-sight,#b-reset-all');
+  const t = ev.target.closest('[data-go],[data-modal],[data-filter],[data-add],[data-addmax],[data-rem],[data-remmax],[data-dec],[data-buy],[data-sell],[data-amshop],[data-audio],[data-lesson],#b-import,#b-csv,#b-rescan,#b-clear-coll,#b-fill,#b-addall,#b-clear-deck,#b-rest,#b-inn,#b-food,#b-leave,#b-newgame,#b-dleave,#b-practice,#b-bounty,#wm-heal,#wm-blink,#wm-cloak,#wm-thunder,#wm-sight,#b-reset-all');
   if (!t) return;
   const g = S.game;
   if ('audio' in t.dataset) { toggleAudio(); renderTop(); return; }
@@ -1163,10 +1204,13 @@ document.addEventListener('click', ev => {
   if (t.dataset.go) { if (!t.disabled) { if (t.dataset.go === 'map' && g?.status !== 'playing' && g) go('end'); else if (t.dataset.go === 'dungeon' && !currentDungeon()) go('map'); else go(t.dataset.go); } return; }
   if (t.dataset.modal != null) { const b = S.modal?.buttons[Number(t.dataset.modal)]; if (b && !b.disabled) b.action(); return; }
   if (t.dataset.filter) { S.filter = t.dataset.filter; render(); return; }
-  if (t.dataset.add) { addCards(g.deck, t.dataset.add, 1); save(); render(); return; }
+  if (t.dataset.add) { if (deckRoom(t.dataset.add) > 0) { addCards(g.deck, t.dataset.add, 1); save(); render(); } return; }
+  if (t.dataset.addmax) { const room = deckRoom(t.dataset.addmax); if (room > 0) { addCards(g.deck, t.dataset.addmax, room); save(); render(); } return; }
   if (t.dataset.rem) { addCards(g.deck, t.dataset.rem, -1); save(); render(); return; }
+  if (t.dataset.remmax) { delete g.deck[t.dataset.remmax]; save(); render(); return; }
+  if (t.dataset.sell != null) { sellCard(t.dataset.sell); return; }
   if (t.dataset.dec) { addCards(S.collection, t.dataset.dec, -1); if (g && g.deck[t.dataset.dec] > (S.collection[t.dataset.dec] || 0)) addCards(g.deck, t.dataset.dec, -1); save(); render(); return; }
-  if (t.dataset.buy != null) { const c = cityAt(g.world, g.player.x, g.player.y); const it = cityStock(c)[Number(t.dataset.buy)]; if (it && !it.sold && g.player.gold >= it.price) { g.player.gold -= it.price; it.sold = true; addCards(S.collection, it.name, 1); sfx('coin'); save(); render(); } return; }
+  if (t.dataset.buy != null) { const c = cityAt(g.world, g.player.x, g.player.y); const it = cityStock(c)[Number(t.dataset.buy)]; if (it && !it.sold && g.player.gold >= it.price) { g.player.gold -= it.price; addTownGold(c.color, it.price); it.sold = true; addCards(S.collection, it.name, 1); sfx('coin'); save(); render(); } return; }
   if (t.dataset.amshop != null) { const name = t.dataset.amshop; const color = t.dataset.amcolor || null; const cost = amuletPrice(name); if (spendAmulets(cost, color)) { addCards(S.collection, name, 1); sfx('coin'); save(); render(); toast(`${name} bought for ${cost} amulet${cost > 1 ? 's' : ''}.`); } return; }
   switch (t.id) {
     case 'b-import': S.importText = document.getElementById('imp').value; doImport(S.importText); break;
@@ -1174,7 +1218,7 @@ document.addEventListener('click', ev => {
     case 'b-rescan': loadArtIndex().then(render); break;
     case 'b-clear-coll': if (confirm('Remove every card from your collection? Your deck will need rebuilding.')) { S.collection = {}; if (g) g.deck = {}; save(); render(); } break;
     case 'b-fill': fillBasics(g.deck); save(); render(); break;
-    case 'b-addall': { const q = S.deckFilter.toLowerCase(); for (const n of Object.keys(S.collection)) { const d = defOf(n); if (!d || d.kind === 'unsupported') continue; if (q && !n.toLowerCase().includes(q)) continue; const want = S.collection[n] - (g.deck[n] || 0); if (want > 0) addCards(g.deck, n, want); } save(); render(); break; }
+    case 'b-addall': { const q = S.deckFilter.toLowerCase(); for (const n of Object.keys(S.collection)) { const d = defOf(n); if (!d || d.kind === 'unsupported') continue; if (q && !n.toLowerCase().includes(q)) continue; const want = deckRoom(n); if (want > 0) addCards(g.deck, n, want); } save(); render(); break; }
     case 'b-clear-deck': if (deckSize(g.deck) && confirm('Remove every card from your deck?')) { g.deck = {}; save(); render(); } break;
     case 'b-rest': if (g.player.food >= 3) { g.player.food -= 3; g.player.life = Math.min(g.player.maxLife, g.player.life + 5); g.player.day++; if (g.player.day % 30 === 0) bossLink(); stepEnemies(g.world, Math.random, g.player); save(); render(); } break;
     case 'b-inn': g.player.life = g.player.maxLife; save(); render(); break;
@@ -1238,7 +1282,7 @@ document.addEventListener('keydown', ev => {
 
 // ---- boot -----------------------------------------------------------------------
 // Debug handle for the console and for automated tests: window.ff.S is the app state.
-window.ff = { S, defOf, save, render, startDuel, enemyById, startTutorialDuel, riddleDefs, makeRiddle, amuletShopPool, artifactShopPool, cityPool, wardenOf, finishDuel, advanceSieges, maxSieges, collectMote, ambushFromMote, amuletPrice, tierOf, leveledEnemy, colorBombs, roamTemplate };
+window.ff = { S, defOf, save, render, startDuel, enemyById, startTutorialDuel, riddleDefs, makeRiddle, amuletShopPool, artifactShopPool, cityPool, wardenOf, finishDuel, advanceSieges, maxSieges, collectMote, ambushFromMote, amuletPrice, tierOf, leveledEnemy, colorBombs, roamTemplate, deckRoom, copyCap, sellPrice, sellableCopies, townGold, addTownGold, sellCard, MAX_COPIES, deckProblems };
 initPreview();
 load();
 render();
