@@ -690,6 +690,7 @@ export function drawMinimap(canvas, world, player, cam) {
   for (const ct of world.cities) dot(ct.x, ct.y, '#f3ecd8', 2.5);
   for (const d of world.dungeons || []) if (d.revealed) dot(d.x, d.y, '#ffb347', 2);
   for (const l of world.links) if (!l.taken) dot(l.x, l.y, '#9fe7ff', 1.5);
+  for (const e of world.enemies) if (e.bounty) dot(e.x, e.y, '#ffd54a', 2);
   for (const lm of world.landmarks || []) if (!lm.used) dot(lm.x, lm.y, '#ffe9a8', 1.5);
   for (const sp of world.specials || []) dot(sp.x, sp.y, { gemcutter: '#7fe0ff', lostcity: '#ffd76a', diamondmine: '#e6b3ff' }[sp.kind] || '#fff', 2);
   dot(world.castle.x, world.castle.y, '#ff3b3b', 3);
@@ -718,7 +719,7 @@ export function drawWorld(canvas, world, player, opts = {}) {
   for (const ct of world.cities) if (vis(ct.x, ct.y)) { const [cx, cy] = c(ct.x, ct.y); objs.push({ y: cy, draw: () => drawCity(f, cx, cy, ct.color, ct.name) }); }
   if (vis(world.castle.x, world.castle.y)) { const [cx, cy] = c(world.castle.x, world.castle.y); objs.push({ y: cy, draw: () => drawFortress(f, cx, cy) }); }
   const robes = { W: ['#d9d2b8', '#f0ead6'], U: ['#2f5f9c', '#5e8cc9'], B: ['#3a2d4a', '#5e4d75'], R: ['#a33a2a', '#d0604a'], G: ['#3f6f2f', '#6a9a4a'] };
-  for (const e of world.enemies) if (vis(e.x, e.y)) { const [cx, cy] = c(e.x, e.y); const [r, rl] = robes[e.color] || robes.B; const sp = (SPRITES.mage[e.color] || SPRITES.mage.M)[e.tier >= 2 ? 1 : 0]; objs.push({ y: cy, draw: () => drawFigure(f, cx, cy, r, rl, r, { tier: e.tier, sprite: sp }) }); }
+  for (const e of world.enemies) if (vis(e.x, e.y)) { const [cx, cy] = c(e.x, e.y); const [r, rl] = robes[e.color] || robes.B; const sp = (SPRITES.mage[e.color] || SPRITES.mage.M)[e.tier >= 2 ? 1 : 0]; objs.push({ y: cy, draw: () => { drawFigure(f, cx, cy, r, rl, r, { tier: e.tier, sprite: sp }); if (e.bounty) labels.push({ x: cx, y: cy - PX / 2 - 10, text: '\u2605', size: 10, color: '#ffd54a', bg: 'rgba(60,40,10,.9)' }); } }); }
   { const [cx, cy] = c(player.x, player.y); objs.push({ y: cy + 0.1, draw: () => drawFigure(f, cx, cy, '#c8322a', '#e0604a', null, { legs: '#2f4f9c', staff: true, ring: true, sprite: SPRITES.hero }) }); }
   objs.sort((a, b) => a.y - b.y);
   for (const o of objs) o.draw();

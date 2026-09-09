@@ -241,7 +241,7 @@ function encounter(enemy) {
     body: `<p class="taunt">“${esc(tpl.taunt)}”</p><p>Life ${tpl.life + DIFF[g.difficulty].enemyBonus}. Win: ${tpl.gold} gold and their ante card. Lose: your ante card.</p>`,
     buttons: [
       { label: 'Duel', primary: true, action: () => { S.modal = null; startDuel(tpl, enemy.uid); } },
-      { label: `Bribe (${tpl.bribe} gold)`, disabled: g.player.gold < tpl.bribe, action: () => { g.player.gold -= tpl.bribe; g.world.enemies = g.world.enemies.filter(e => e.uid !== enemy.uid); S.modal = null; save(); render(); } },
+      { label: `Bribe (${tpl.bribe} gold)`, disabled: g.player.gold < tpl.bribe, action: () => { g.player.gold -= tpl.bribe; g.world.enemies = g.world.enemies.filter(e => e.uid !== enemy.uid); if (g.quests) g.quests = g.quests.filter(q => q.enemyUid !== enemy.uid); S.modal = null; save(); render(); } },
       { label: 'Back away', action: () => { S.modal = null; render(); } },
     ],
   };
@@ -520,13 +520,24 @@ function amuletRow(name, payColor) {
   return `<div class="amushop-row"><span class="mini" data-preview="${esc(name)}" style="${artFor(d) ? `background-image:url('${artFor(d)}')` : ''}"></span><span class="nm" data-preview="${esc(name)}">${esc(name)}<i>${esc(d.typeLine)}</i></span><span class="cost">${cost}<i class="amu-chip" style="background:${gem}"></i></span><button class="btn small" data-amshop="${esc(name)}" data-amcolor="${payColor || ''}" ${afford ? '' : 'disabled'}>Buy</button></div>`;
 }
 // A bounty: defeat a specific roaming foe near this city for an amulet of its color.
-function postBounty(city) {
+// The nearest un-bountied foe a city will post a bounty on (deterministic, so the offer is stable on a visit).
+function cityBountyOffer(city) {
   const g = S.game;
-  const near = g.world.enemies.filter(e => Math.abs(e.x - city.x) <= 7 && Math.abs(e.y - city.y) <= 7 && !g.quests.some(q => q.enemyUid === e.uid));
-  if (!near.length) { toast('No worthy foe roams near this city right now.'); return; }
-  const e = rnd(near); const tpl = enemyById(e.template);
+  const cand = g.world.enemies
+    .filter(e => !e.bounty && !g.quests.some(q => q.enemyUid === e.uid) && Math.abs(e.x - city.x) <= 9 && Math.abs(e.y - city.y) <= 9)
+    .sort((a, b) => (Math.abs(a.x - city.x) + Math.abs(a.y - city.y)) - (Math.abs(b.x - city.x) + Math.abs(b.y - city.y)));
+  return cand[0] || null;
+}
+function bearing(from, to) {
+  const dx = to.x - from.x, dy = to.y - from.y;
+  return (Math.abs(dy) > Math.abs(dx) / 2 ? (dy < 0 ? 'north' : 'south') : '') + (Math.abs(dx) > Math.abs(dy) / 2 ? (dx < 0 ? 'west' : 'east') : '') || 'nearby';
+}
+function acceptBounty(city) {
+  const g = S.game; const e = cityBountyOffer(city); if (!e) { toast('No worthy foe roams near this city right now.'); return; }
+  const tpl = enemyById(e.template);
+  e.bounty = true;
   g.quests.push({ enemyUid: e.uid, color: tpl.color, city: city.name, enemyName: tpl.name });
-  save(); render();
+  sfx('coin'); save(); render();
 }
 
 // ---- import ------------------------------------------------------------------------
@@ -750,7 +761,14 @@ function city() {
         <div class="amushop-list">${artifactShopPool().map(n => amuletRow(n, null)).join('') || '<p class="small">No artifacts known yet.</p>'}</div>
       </div>
       <h3>Bounty board</h3>
-      ${(() => { const q = g.quests.find(q => q.city === c.name); return q ? `<p class="small">Active bounty: defeat <b>${esc(q.enemyName)}</b> for a ${COLOR_NAME[q.color]} amulet.</p>` : `<p class="small">Post a bounty on a foe roaming near ${esc(c.name)}; beat them for an amulet.</p><div class="btnrow"><button class="btn" id="b-bounty">Post a bounty</button></div>`; })()}
+      ${(() => {
+        const q = g.quests.find(q => q.city === c.name);
+        if (q) return `<p class="small">Active bounty: defeat <b>${esc(q.enemyName)}</b> for a ${COLOR_NAME[q.color]} amulet. They are marked with a <span style="color:#ffd54a">\u2605</span> on the map.</p>`;
+        const offer = cityBountyOffer(c);
+        if (!offer) return '<p class="small">The watch has no bounty to offer right now; no foe roams nearby.</p>';
+        const tpl = enemyById(offer.template);
+        return `<p class="small">The town watch will pay a ${COLOR_NAME[tpl.color]} amulet for the head of <b>${esc(tpl.name)}</b>, a ${COLOR_NAME[tpl.color].toLowerCase()} mage roaming to the ${bearing(c, offer)}.</p><div class="btnrow"><button class="btn" id="b-bounty">Accept the bounty</button></div>`;
+      })()}
     </div>
   </section>`;
 }
@@ -844,7 +862,7 @@ document.addEventListener('click', ev => {
     case 'b-newgame': S.game = null; save(); go('title'); break;
     case 'b-dleave': dungeonExitPrompt(false); break;
     case 'b-practice': startTutorialDuel().catch(e => setBusy('Could not load card data: ' + e.message)); break;
-    case 'b-bounty': { const c = cityAt(g.world, g.player.x, g.player.y); if (c) postBounty(c); break; }
+    case 'b-bounty': { const c = cityAt(g.world, g.player.x, g.player.y); if (c) acceptBounty(c); break; }
     case 'b-worldmagic': {
       if (amuletCount('R') < 1) break;
       const before = g.world.enemies.length;
