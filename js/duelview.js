@@ -160,19 +160,13 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
       </div>
     </div>`;
   }
-  let portraitFrame = 0;
   function portraitHtml(p) {
     const pr = portraits && (p.idx === 0 ? portraits.me : portraits.foe);
     if (!pr || !atlasReady()) return '';
-    const rect = pr.frames[portraitFrame % pr.frames.length];
-    return `<div class="portrait" data-portrait="${p.idx}" style="${spriteStyle(rect, pr.scale || 2)}"></div>`;
+    // Static portrait: always the first frame. The idle frame-swap animation is disabled because
+    // frames of different sizes resized the portrait box and shifted the duel layout.
+    return `<div class="portrait" data-portrait="${p.idx}" style="${spriteStyle(pr.frames[0], pr.scale || 2)}"></div>`;
   }
-  // Idle animation: swap frames in place without re-rendering the table.
-  const portraitTimer = setInterval(() => {
-    if (!root.isConnected) { clearInterval(portraitTimer); return; }
-    portraitFrame++;
-    for (const el of root.querySelectorAll('.portrait')) { const pr = portraits && (el.dataset.portrait === '0' ? portraits.me : portraits.foe); if (pr && pr.frames.length > 1) el.style.cssText = spriteStyle(pr.frames[portraitFrame % pr.frames.length], pr.scale || 2); }
-  }, 700);
   function landStack(p) {
     const groups = new Map();
     for (const c of p.battlefield.filter(isLand)) { const g = groups.get(c.def.name) || { name: c.def.name, def: c.def, all: [] }; g.all.push(c); groups.set(c.def.name, g); }
