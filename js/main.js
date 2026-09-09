@@ -2,7 +2,7 @@
 import { parseList, importNames, defOf, forgetDefs, loadArtIndex, artFor, artCount, hasOwnArt, hasServer } from './collection.js';
 import { fetchCards, cacheSize, cached as cachedCard, allCached } from './scryfall.js';
 import { COLORS, COLOR_NAME, manaHtml, statusLabel } from './cards.js';
-import { generateWorld, drawWorld, drawMinimap, tileAt, inBounds, cityAt, linkAt, enemyAt, stepEnemies, BIOME, TILE, VIEW, placeDungeons, dungeonAt, placeLandmarks, landmarkAt, placeSpecials, specialAt, placeMotes, moteAt, spawnMote, castleAt, WARDEN_HOLD, roadAt, ensureRoads } from './world.js';
+import { generateWorld, drawWorld, drawMinimap, tileAt, inBounds, cityAt, linkAt, enemyAt, stepEnemies, BIOME, TILE, VIEW, placeDungeons, dungeonAt, relocateDungeon, placeLandmarks, landmarkAt, placeSpecials, specialAt, placeMotes, moteAt, spawnMote, castleAt, WARDEN_HOLD, roadAt, ensureRoads } from './world.js';
 import { Duel } from './engine.js';
 import { mountDuel, cardHtml } from './duelview.js';
 import { aiHooks } from './ai.js';
@@ -443,7 +443,7 @@ function dungeonPrompt(dg) {
   const resume = !!dg.layout;
   S.modal = {
     title: t.name,
-    body: `<p class="taunt">${esc(t.intro)}</p><p><b>${esc(rule.label)}:</b> ${esc(rule.text)} Your life carries from fight to fight. Monsters block the corridors until beaten; piles hold life, gold and cards; scrolls hold riddles. The guardian before the exit keeps the vault.</p><p>You have ${g.player.life} life.${dg.cleared ? ' The guardian is already dead; only leftovers remain.' : resume ? ' You have been here before, and the maze remembers.' : ''}</p>`,
+    body: `<p class="taunt">${esc(t.intro)}</p><p><b>${esc(rule.label)}:</b> ${esc(rule.text)} Your life carries from fight to fight. Monsters block the corridors until beaten; piles hold life, gold and cards; scrolls hold riddles. The guardian before the exit keeps the vault.</p><p class="small">A lair of ${esc(dungeonArchetype(t))}.${knownPrizes(dg, t).length ? ` Prizes glimpsed by your clues: ${knownPrizes(dg, t).map(esc).join(', ')}${(dg.intel || 0) < FIND_CLUES ? ' …' : ''}.` : ''}</p><p>You have ${g.player.life} life.${dg.cleared ? ' The guardian is already dead; only leftovers remain.' : resume ? ' You have been here before, and the maze remembers.' : ''}</p>`,
     buttons: [{ label: resume ? 'Go back in' : 'Enter', primary: true, action: () => {
       S.modal = null;
       sfx('open');
@@ -525,10 +525,18 @@ function dungeonRiddle(cell) {
 function dungeonExitPrompt(atEntrance) {
   const { layout, dg, tpl } = currentDungeon(); const g = S.game;
   const left = remainingMonsters(layout);
+  // Leaving a dungeon you have not fully cleared makes it sink and resurface elsewhere: its exact
+  // spot is lost (re-find it with fresh clues) but what you cleared and learned is kept.
+  const willMove = !dg.cleared;
+  const leave = () => {
+    S.modal = null; g.dungeon = null;
+    if (willMove) { relocateDungeon(g.world, Math.random, dg); toast(`As you climb out, the ${tpl.name} sinks into the earth and surfaces somewhere new. Fresh clues will find it again — what you cleared and learned is kept.`); }
+    save(); go('map');
+  };
   S.modal = {
     title: atEntrance ? 'Back to the surface?' : 'The way out',
-    body: `<p>${left ? `${left} monster${left > 1 ? 's' : ''} still lurk${left > 1 ? '' : 's'} in the ${tpl.name}.` : 'The halls are quiet.'} You keep whatever you found and your ${g.player.life} life. The maze stays as you left it.</p>`,
-    buttons: [{ label: 'Leave', primary: true, action: () => { S.modal = null; g.dungeon = null; save(); go('map'); } }, { label: 'Stay', action: () => { S.modal = null; render(); } }],
+    body: `<p>${left ? `${left} monster${left > 1 ? 's' : ''} still lurk${left > 1 ? '' : 's'} in the ${tpl.name}.` : 'The halls are quiet.'} You keep whatever you found and your ${g.player.life} life.</p>${willMove ? `<p class="small warn">The vault is not yet claimed — leave now and the ${tpl.name} will vanish and move. Your cleared rooms and intel survive, but you must locate it anew.</p>` : '<p class="small">Its vault is emptied; it will stay where it is.</p>'}`,
+    buttons: [{ label: 'Leave', primary: true, action: leave }, { label: 'Stay', action: () => { S.modal = null; render(); } }],
   };
   render();
 }
@@ -546,15 +554,64 @@ function dungeonTreasureDrop() {
   S.result = { won: true, tpl: { name: tpl.name }, lines, title: 'The vault is yours', flavour: `The Guardian of the ${tpl.name} is dead. The exit is open.`, back: 'dungeon' };
   save(); go('result');
 }
-function revealClue(color) {
-  const g = S.game; const hidden = (g.world.dungeons || []).filter(d => !d.revealed);
-  if (!hidden.length) return null;
-  const dg = hidden.find(d => d.color === color) || rnd(hidden);
-  dg.revealed = true;
-  const t = dungeonTemplate(dg.id);
-  const dx = dg.x - g.player.x, dy = dg.y - g.player.y;
-  const dir = (Math.abs(dy) > Math.abs(dx) / 2 ? (dy < 0 ? 'north' : 'south') : '') + (Math.abs(dx) > Math.abs(dy) / 2 ? (dx < 0 ? 'west' : 'east') : '');
-  return `Your beaten foe buys mercy with a clue: the ${t.name} lies to the ${dir}, about ${Math.max(Math.abs(dx), Math.abs(dy))} days' walk. It is marked on your map.`;
+// ---- dungeon clues & intel --------------------------------------------------------
+const FIND_CLUES = 3;   // location clues needed to pinpoint a dungeon's exact tile
+const randInt = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo + 1));
+// A one-line read on the foes waiting inside, derived from the colour's enemy decks.
+function dungeonArchetype(t) {
+  const col = COLOR_NAME[t.color].toLowerCase();
+  const creatures = S.content.enemies.filter(e => e.color === t.color && !e.boss).flatMap(e => Object.keys(e.deck)).map(defOf).filter(d => d && d.power != null);
+  const avg = creatures.length ? creatures.reduce((s, d) => s + (d.cmc || 0), 0) / creatures.length : 3;
+  const size = avg < 2.6 ? 'small' : avg < 4 ? 'seasoned' : 'towering';
+  return `${size} ${col} creatures`;
+}
+// How many prize cards the gathered intel has named so far.
+function knownPrizes(dg, t) { return t.treasure.slice(0, dg.intel >= FIND_CLUES ? t.treasure.length : dg.intel * 2); }
+// Which not-yet-cleared dungeon a fresh clue should advance: prefer one of the foe's colour that still
+// needs locating, then the least-located, then anything incomplete.
+function clueTarget(color) {
+  const dgs = (S.game.world.dungeons || []).filter(d => !d.cleared);
+  if (!dgs.length) return null;
+  const unlocated = dgs.filter(d => !d.revealed);
+  return unlocated.find(d => d.color === color) || unlocated.sort((a, b) => (b.locClues || 0) - (a.locClues || 0))[0] || dgs.find(d => d.color === color) || dgs.sort((a, b) => (a.intel || 0) - (b.intel || 0))[0];
+}
+// Advance a dungeon's intel and location by one clue; returns a plain-text report of what it told you.
+function addClue(color) {
+  const g = S.game; const dg = clueTarget(color); if (!dg) return null;
+  const t = dungeonTemplate(dg.id), w = g.world;
+  const first = (dg.intel || 0) === 0 && (dg.locClues || 0) === 0;
+  dg.intel = Math.min(FIND_CLUES, (dg.intel || 0) + 1);
+  let loc;
+  if (dg.revealed) loc = `Its mouth is already marked — ${compassTo(g, dg)}.`;
+  else {
+    dg.locClues = (dg.locClues || 0) + 1; dg.sensed = true;
+    if (dg.locClues >= FIND_CLUES) { dg.revealed = true; dg.hint = null; loc = `Its exact mouth is now marked on your map — ${compassTo(g, dg)}.`; }
+    else {
+      const r = (FIND_CLUES - dg.locClues) * 3;   // 6 tiles, then 3
+      const jit = Math.max(0, r - 2);
+      dg.hint = { x: Math.max(0, Math.min(w.w - 1, dg.x + randInt(-jit, jit))), y: Math.max(0, Math.min(w.h - 1, dg.y + randInt(-jit, jit))), r };
+      loc = `${first ? 'A dungeon surfaces' : 'It draws closer'}: sensed ${compassTo(g, dg.hint)}, somewhere within ${r} tiles.`;
+    }
+  }
+  const prizes = knownPrizes(dg, t);
+  const rule = S.dungeons.rules[t.rule];
+  const intelLine = `It is a lair of ${dungeonArchetype(t)}. ${rule.label}: ${rule.text}`;
+  const prizeLine = prizes.length ? ` Rumoured to hoard: ${prizes.join(', ')}${dg.intel < FIND_CLUES ? ', and more' : ''}.` : '';
+  return `Clue to the ${t.name} (intel ${dg.intel}/${FIND_CLUES}). ${loc} ${intelLine}${prizeLine}`;
+}
+// Offer a beaten roamer's spoils as a choice: their card, or a dungeon clue. Finalises to the result screen.
+function roamSpoils(tpl, ante, lines) {
+  const finish = extra => { S.modal = null; S.result = { won: true, tpl, lines: [...lines, extra] }; save(); go('result'); };
+  S.modal = {
+    title: 'Spoils of victory',
+    body: `<p class="taunt">“Spare me — I can give you the card from my deck, or tell you what I know of the dark places.”</p>
+      <p>Take <b>${esc(ante.theirs)}</b> for your collection, or wring out a <b>dungeon clue</b>. Clues surface a hidden dungeon, and — gathered — pinpoint it and lay bare its foes, its rules and its prizes.</p>`,
+    buttons: [
+      { label: `Take ${ante.theirs}`, primary: true, action: () => { addCards(S.collection, ante.theirs, 1); finish(`You take ${ante.theirs} as ante.`); } },
+      { label: 'Wring out a clue', action: () => { const c = addClue(tpl.color); finish(c || 'They knew nothing of any dungeon — you take their card instead.' + (ante.theirs ? (addCards(S.collection, ante.theirs, 1), ` (${ante.theirs})`) : '')); } },
+    ],
+  };
+  render();
 }
 function finishDuel(winner) {
   const g = S.game; const { duel, tpl, ante, roamUid, dungeon, tutorial } = S.duel; S.duel = null;
@@ -598,9 +655,8 @@ function finishDuel(winner) {
   }
   if (winner === 0) {
     g.wins++; g.player.gold += tpl.gold; g.player.food += 5; lines.push(`You win ${tpl.gold} gold and take 5 food from their pack.`);
-    if (ante.theirs) { addCards(S.collection, ante.theirs, 1); lines.push(`You take ${ante.theirs} as ante.`); }
     g.player.life = Math.max(duel.players[0].life, Math.ceil(g.player.maxLife / 2));
-    if (roamUid != null) { g.world.enemies = g.world.enemies.filter(e => e.uid !== roamUid); if (Math.random() < 0.45) { const clue = revealClue(tpl.color); if (clue) lines.push(clue); } }
+    if (roamUid != null) g.world.enemies = g.world.enemies.filter(e => e.uid !== roamUid);
     // Tougher mages drop amulets more often, and a high-level foe may also cough up a spare card from
     // its deck — so seeking out level 2-3+ mages pays off. A matching bounty pays an amulet too.
     const lvl = tpl.level || (tpl.tier >= 2 ? 2 : 1);
@@ -613,10 +669,14 @@ function finishDuel(winner) {
     if (roamUid != null && g.quests?.length) { const q = g.quests.find(q => q.enemyUid === roamUid); if (q) { giveAmulet(q.color); g.quests = g.quests.filter(x => x !== q); lines.push(`Bounty claimed: ${q.city} rewards you a ${COLOR_NAME[q.color]} amulet.`); } }
     if (tpl.warden) {
       const castle = (g.world.castles || []).find(c => c.color === tpl.warden); if (castle) castle.fallen = true;
+      if (ante.theirs) { addCards(S.collection, ante.theirs, 1); lines.push(`You take ${ante.theirs} as ante.`); }
       if (tpl.warden === g.usurper) { lines.push('You tear the Warden’s mask away — and the Usurper’s own face stares back. The masquerade ends here.'); g.status = 'won'; save(); go('end'); return; }
       lines.push(`${cap(WARDEN_NAME[tpl.warden])} falls — but the face beneath is a true Warden, not the impostor. The guild is broken; its sieges end. A ${COLOR_NAME[tpl.warden]} amulet is your spoil.`);
       giveAmulet(tpl.warden);
-    } else if (tpl.boss) { g.status = 'won'; save(); go('end'); return; }
+    } else if (tpl.boss) { if (ante.theirs) { addCards(S.collection, ante.theirs, 1); lines.push(`You take ${ante.theirs} as ante.`); } g.status = 'won'; save(); go('end'); return; }
+    // An ordinary roamer: choose their ante card, or wring out a dungeon clue.
+    else if (roamUid != null && ante.theirs && (g.world.dungeons || []).some(d => !d.cleared)) { save(); return roamSpoils(tpl, ante, lines); }
+    else if (ante.theirs) { addCards(S.collection, ante.theirs, 1); lines.push(`You take ${ante.theirs} as ante.`); }
   } else {
     g.losses++;
     if (ante.mine) { addCards(S.collection, ante.mine, -1); addCards(g.deck, ante.mine, -1); lines.push(`You lose ${ante.mine} as ante.`); if (deckSize(g.deck) < 40) { fillBasics(g.deck); lines.push('A basic land fills the gap so your deck stays at 40 cards.'); } }
@@ -1038,6 +1098,25 @@ function tierRow(n, c) {
   </div>`;
 }
 
+// The "Dungeon lore" panel on the map: every dungeon the clues have told you anything about, with its
+// location precision, its foes and rules, and the prizes named so far.
+function dungeonIntelHtml(g) {
+  const known = (g.world.dungeons || []).filter(d => (d.intel || 0) > 0 || d.sensed || d.revealed || d.cleared);
+  if (!known.length) return `<p class="small dgnhint">No dungeon lore yet. Beat a roaming mage and wring out a clue to sense the dark places.</p>`;
+  const row = d => {
+    const t = dungeonTemplate(d.id);
+    let where;
+    if (d.cleared && !d.revealed) where = '<span class="dgn-cleared">vault emptied</span>';
+    else if (d.revealed) where = `<span class="dgn-here">located · ${esc(compassTo(g, d))}</span>${d.cleared ? ' <span class="dgn-cleared">(cleared)</span>' : ''}`;
+    else if (d.sensed && d.hint) where = `<span class="dgn-sensed">sensed ${esc(compassTo(g, d.hint))}, within ${d.hint.r} tiles</span>`;
+    else where = '<span class="dgn-lost">location unknown — clues needed</span>';
+    const prizes = knownPrizes(d, t);
+    const intel = (d.intel || 0) >= 1 ? `<div class="small dgn-intel">${esc(dungeonArchetype(t))} · ${esc(S.dungeons.rules[t.rule].label)}: ${esc(S.dungeons.rules[t.rule].text)}</div>` : '';
+    const prize = prizes.length ? `<div class="small dgn-prize">Prizes: ${prizes.map(esc).join(', ')}${(d.intel || 0) < FIND_CLUES ? ' …' : ''}</div>` : '';
+    return `<li><i class="sw" style="background:${BIOME[t.color].fill}"></i> <b>${esc(t.name)}</b> — ${where}<span class="dgn-clue small"> (intel ${d.intel || 0}/${FIND_CLUES})</span>${intel}${prize}</li>`;
+  };
+  return `<div class="dgnhud"><b>Dungeon lore</b><ul>${known.map(row).join('')}</ul></div>`;
+}
 // Compass bearing + distance from the player to a spot on the map, so a besieged city can be found
 // even when it has scrolled out of the viewport. y grows downward, so dy>0 is south.
 function compassTo(g, spot) {
@@ -1061,7 +1140,7 @@ function map() {
       <ul>${sieged.map(c => `<li><i class="sw" style="background:${BIOME[c.color].fill}"></i> <b>${esc(c.name)}</b> — ${c.captured ? '<span class="fallenmark">FALLEN</span>' : `${c.siege}/3`}, <span class="bearing">${compassTo(g, c)}</span></li>`).join('')}</ul>
       <span class="small">Reach a besieged city to break the siege and reclaim it. Lose four and the realm collapses.</span></div>` : ''}
       <p class="small">Move with WASD or the arrow keys, or click a neighbouring tile. Walking costs food. Blue crystals are mana links (+2 life). Landmarks marked ? ask a riddle about a card: answer right for a card of that region's color, wrong and you lose life, food or, rarely, a card. Pits with a torch are dungeons: revealed by clues from beaten foes, fought room by room with your life carried over. Faint sparks are mana motes — walk over one for gold or an amulet. Dirt roads link the cities: stay on one and you move too fast for pursuing mages to close in. The five dark fortresses are the Warden guilds; storm them to find the one the Usurper wears.</p>
-      ${(g.world.dungeons || []).some(d => d.revealed) ? `<p class="small">Known dungeons: ${g.world.dungeons.filter(d => d.revealed).map(d => `${dungeonTemplate(d.id).name}${d.cleared ? ' (cleared)' : ''}`).join(', ')}.</p>` : ''}
+      ${dungeonIntelHtml(g)}
       <div class="btnrow"><button class="btn" id="b-rest" ${g.player.food < 3 || g.player.life >= g.player.maxLife ? 'disabled' : ''}>Rest (3 food, +5 life)</button><button class="btn ghost" data-go="title">Menu</button></div>
       ${totalAmulets() ? `<h3>World magic</h3><p class="small">Spend amulets to bend the world. ${g.player.cloak > 0 ? `<b>Cloaked: ${g.player.cloak} step${g.player.cloak > 1 ? 's' : ''} of shadow left.</b>` : 'Cast from anywhere on the map.'}</p>
       <div class="wmgrid">${WORLD_MAGIC.map(s => `<button class="btn wm" id="${s.id}" ${amuletCount(s.c) ? '' : 'disabled'} title="${esc(s.desc)}"><b>${s.name}</b><span class="wmd">${esc(s.desc)}</span><span class="wmcost">1 <i class="amu-chip" style="background:${AMULET_HEX[s.c]}"></i></span></button>`).join('')}</div>` : ''}
@@ -1078,6 +1157,11 @@ function map() {
   if (!g.world.motes) { placeMotes(g.world, Math.random); save(); }
   if (!g.world.castles) { migrateCastles(g); save(); }
   if (!g.world.roads) { ensureRoads(g.world); save(); }
+  // Give pre-clue saves the new dungeon intel model: a previously-revealed dungeon counts as fully located.
+  if ((g.world.dungeons || []).some(d => d.intel === undefined)) {
+    for (const d of g.world.dungeons) if (d.intel === undefined) { d.intel = d.revealed ? FIND_CLUES : 0; d.locClues = d.revealed ? FIND_CLUES : 0; d.sensed = !!d.revealed; d.collected = d.collected || []; d.hint = null; }
+    save();
+  }
   // Give pre-level saves the graded overland: assign each roaming mage a level by its distance from home.
   if (g.world.enemies.some(e => e.level == null)) {
     const w = g.world, span = Math.max(w.w, w.h);
@@ -1255,7 +1339,7 @@ document.addEventListener('click', ev => {
       toast(cleared ? `Thunder scatters ${cleared} monster${cleared > 1 ? 's' : ''}.` : 'Thunder rolls, but no monster stood near.');
       break;
     }
-    case 'wm-sight': if (amuletCount('G')) { const hidden = (g.world.dungeons || []).filter(d => !d.revealed); if (hidden.length) { giveAmulet('G', -1); hidden.forEach(d => d.revealed = true); sfx('cast'); save(); toast(`Sylvan Sight reveals ${hidden.length} hidden dungeon${hidden.length > 1 ? 's' : ''}.`); } else toast('The forest knows of no more hidden ways.'); } break;
+    case 'wm-sight': if (amuletCount('G')) { const hidden = (g.world.dungeons || []).filter(d => !d.revealed && !d.cleared); if (hidden.length) { giveAmulet('G', -1); hidden.forEach(d => { d.intel = FIND_CLUES; d.locClues = FIND_CLUES; d.sensed = true; d.revealed = true; d.hint = null; }); sfx('cast'); save(); toast(`Sylvan Sight lays bare ${hidden.length} hidden dungeon${hidden.length > 1 ? 's' : ''} — location and prizes both.`); } else toast('The forest knows of no more hidden ways.'); } break;
   }
 });
 document.addEventListener('input', ev => { if (ev.target.id === 'dfilter') { S.deckFilter = ev.target.value; deck(); document.getElementById('dfilter').focus(); const el = document.getElementById('dfilter'); el.setSelectionRange(el.value.length, el.value.length); } });
@@ -1296,7 +1380,7 @@ document.addEventListener('keydown', ev => {
 
 // ---- boot -----------------------------------------------------------------------
 // Debug handle for the console and for automated tests: window.ff.S is the app state.
-window.ff = { S, defOf, save, render, startDuel, enemyById, startTutorialDuel, riddleDefs, makeRiddle, amuletShopPool, artifactShopPool, cityPool, wardenOf, finishDuel, advanceSieges, maxSieges, collectMote, ambushFromMote, amuletPrice, tierOf, leveledEnemy, colorBombs, roamTemplate, deckRoom, copyCap, sellPrice, sellableCopies, townGold, addTownGold, sellCard, MAX_COPIES, deckProblems };
+window.ff = { S, defOf, save, render, startDuel, enemyById, startTutorialDuel, riddleDefs, makeRiddle, amuletShopPool, artifactShopPool, cityPool, wardenOf, finishDuel, advanceSieges, maxSieges, collectMote, ambushFromMote, amuletPrice, tierOf, leveledEnemy, colorBombs, roamTemplate, deckRoom, copyCap, sellPrice, sellableCopies, townGold, addTownGold, sellCard, MAX_COPIES, deckProblems, addClue, clueTarget, dungeonArchetype, knownPrizes, dungeonTemplate, FIND_CLUES, relocateDungeon };
 initPreview();
 load();
 render();

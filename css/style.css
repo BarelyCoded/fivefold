@@ -149,6 +149,19 @@ tr.st-unsupported td:nth-child(7), tr.st-unsupported td:nth-child(3), tr.st-miss
 .siegehud li { padding: 1px 0; font-size: 13px; }
 .siegehud .bearing { color: var(--ink2); }
 .siegehud .fallenmark { color: #ff8a8a; font-weight: 700; }
+.dgnhud { border: 1px solid #4a4433; background: rgba(40,36,24,.35); border-radius: 6px; padding: 8px 10px; margin: 8px 0; }
+.dgnhud > b { color: #d9c38a; }
+.dgnhud ul { list-style: none; margin: 5px 0 0; padding: 0; }
+.dgnhud li { padding: 3px 0; font-size: 13px; border-top: 1px solid rgba(255,255,255,.05); }
+.dgnhud li:first-child { border-top: 0; }
+.dgn-here { color: #ffce8a; }
+.dgn-sensed { color: #c9a367; }
+.dgn-lost, .dgn-cleared { color: var(--ink2); }
+.dgn-clue { color: var(--ink2); }
+.dgn-intel { color: var(--ink2); margin: 1px 0 0 17px; }
+.dgn-prize { color: #b9c98a; margin: 1px 0 0 17px; }
+.dgnhint { color: var(--ink2); font-style: italic; }
+.warn { color: #e6a15a; }
 
 /* modal / toast */
 .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: grid; place-items: center; z-index: 20; }

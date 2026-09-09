@@ -143,25 +143,34 @@ export function ensureRoads(world) {
 export const roadAt = (world, x, y) => !!(world.roads && world.roads.includes(`${x},${y}`));
 
 // Place one hidden dungeon per template in matching terrain. Safe to call on old saves.
+// A free tile on which a dungeon may surface: prefer the dungeon's own colour biome, well away from
+// the start, and never on top of another feature. Used both for the initial hidden placement and when
+// a half-looted dungeon sinks and resurfaces elsewhere (the relocation mechanic).
+function dungeonSpot(world, rng, color) {
+  const taken = new Set([...world.cities.map(c => `${c.x},${c.y}`), ...world.links.map(l => `${l.x},${l.y}`), ...castleKeys(world), ...world.enemies.map(e => `${e.x},${e.y}`), ...(world.dungeons || []).map(d => `${d.x},${d.y}`), ...(world.landmarks || []).map(l => `${l.x},${l.y}`), ...(world.specials || []).map(s => `${s.x},${s.y}`)]);
+  for (let i = 0; i < 600; i++) { const x = Math.floor(rng() * world.w), y = Math.floor(rng() * world.h); if (taken.has(`${x},${y}`) || tileAt(world, x, y) !== color) continue; if (dist({ x, y }, world.start) < 6) continue; return { x, y }; }
+  for (let i = 0; i < 600; i++) { const x = Math.floor(rng() * world.w), y = Math.floor(rng() * world.h); if (!taken.has(`${x},${y}`) && dist({ x, y }, world.start) >= 5) return { x, y }; }
+  return { x: Math.floor(world.w / 2), y: Math.floor(world.h / 2) };
+}
 export function placeDungeons(world, rng, templates) {
   if (world.dungeons) return world.dungeons;
-  const taken = new Set([...world.cities.map(c => `${c.x},${c.y}`), ...world.links.map(l => `${l.x},${l.y}`), ...castleKeys(world), ...world.enemies.map(e => `${e.x},${e.y}`)]);
   const out = [];
   for (const t of templates) {
-    let best = null;
-    for (let i = 0; i < 500 && !best; i++) {
-      const x = Math.floor(rng() * world.w), y = Math.floor(rng() * world.h);
-      if (taken.has(`${x},${y}`) || tileAt(world, x, y) !== t.color) continue;
-      if (dist({ x, y }, world.start) < 4) continue;
-      best = { x, y };
-    }
-    if (!best) { for (let i = 0; i < 500 && !best; i++) { const x = Math.floor(rng() * world.w), y = Math.floor(rng() * world.h); if (!taken.has(`${x},${y}`) && dist({ x, y }, world.start) >= 4) best = { x, y }; } }
-    if (!best) continue;
-    taken.add(`${best.x},${best.y}`);
-    out.push({ id: t.id, x: best.x, y: best.y, color: t.color, revealed: false, cleared: false });
+    const spot = dungeonSpot(world, rng, t.color);
+    // intel: how much the clues have told us (rule, foes, prizes) — only ever grows.
+    // locClues: clues toward the CURRENT location — reset to 0 when the dungeon relocates.
+    // hint: the fuzzy search area drawn on the map until locClues pinpoints it.
+    out.push({ id: t.id, x: spot.x, y: spot.y, color: t.color, intel: 0, locClues: 0, sensed: false, revealed: false, cleared: false, collected: [], hint: null });
   }
   world.dungeons = out;
   return out;
+}
+// Sink a not-yet-cleared dungeon and resurface it at a fresh, unknown spot. Intel and looted progress
+// (its layout, with cleared cells) survive; only the location is lost, to be re-found with new clues.
+export function relocateDungeon(world, rng, dg) {
+  const spot = dungeonSpot(world, rng, dg.color);
+  dg.x = spot.x; dg.y = spot.y; dg.locClues = 0; dg.sensed = false; dg.revealed = false; dg.hint = null;
+  return dg;
 }
 
 // Landmarks: a dozen scenery features that hold a riddle. Each sits alone on its tile; the kind fits the biome.
@@ -715,6 +724,18 @@ function drawFortress(ctx, cx, cy, color = 'M', name = '', fallen = false) {
   if (name) labels.push({ x: cx, y: cy - 40, text: fallen ? name + ' (fallen)' : name, color: fallen ? '#9a9a92' : '#f0e2c0' });
   ctx.restore();
 }
+// The fuzzy "somewhere in here" ring for a sensed-but-not-yet-located dungeon. r is in tiles.
+function drawSearchArea(ctx, cx, cy, r) {
+  const rad = r * PX;
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, rad, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,180,80,.07)'; ctx.fill();
+  ctx.setLineDash([5, 5]); ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(255,190,100,.7)'; ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = 'rgba(255,205,130,.95)'; ctx.font = 'bold 16px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('?', cx, cy);
+  ctx.restore();
+}
 function drawDungeon(ctx, cx, cy, cleared) {
   if (atlasReady()) { const k = 42 / SPRITES.pit[3]; if (cleared && SPRITES.pitCleared) { blitAt(ctx, SPRITES.pitCleared, cx, cy + PX / 2 + 2, k); return; } if (cleared) ctx.globalAlpha = 0.55; blitAt(ctx, SPRITES.pit, cx, cy + PX / 2 + 2, k); ctx.globalAlpha = 1; if (!cleared && SPRITES.pit[3] < 60) blitAt(ctx, SPRITES.torch, cx + 14, cy + 6, 0.6); return; }
   shade(ctx, cx, cy + 9, 26);
@@ -789,7 +810,7 @@ export function drawMinimap(canvas, world, player, cam) {
   ctx.drawImage(terrain, 0, 0, canvas.width, canvas.height);
   const dot = (x, y, col, r = 2) => { ctx.fillStyle = col; ctx.fillRect(x * k + k / 2 - r, y * k + k / 2 - r, r * 2, r * 2); };
   for (const ct of world.cities) dot(ct.x, ct.y, '#f3ecd8', 2.5);
-  for (const d of world.dungeons || []) if (d.revealed) dot(d.x, d.y, '#ffb347', 2);
+  for (const d of world.dungeons || []) { if (d.revealed) dot(d.x, d.y, '#ffb347', 2); else if (d.sensed && d.hint) dot(d.hint.x, d.hint.y, '#8a6a30', 2); }
   for (const m of world.motes || []) dot(m.x, m.y, '#dff4ff', 1);
   for (const l of world.links) if (!l.taken) dot(l.x, l.y, '#9fe7ff', 1.5);
   for (const e of world.enemies) if (e.bounty) dot(e.x, e.y, '#ffd54a', 2);
@@ -816,7 +837,10 @@ export function drawWorld(canvas, world, player, opts = {}) {
   const objs = [];
   for (const m of world.motes || []) if (vis(m.x, m.y)) { const [cx, cy] = c(m.x, m.y); objs.push({ y: cy - 2, draw: () => drawMote(f, cx, cy) }); }
   for (const l of world.links) if (vis(l.x, l.y)) { const [cx, cy] = c(l.x, l.y); objs.push({ y: cy, draw: () => drawCrystal(f, cx, cy, l.taken) }); }
-  for (const d of world.dungeons || []) if (d.revealed && vis(d.x, d.y)) { const [cx, cy] = c(d.x, d.y); objs.push({ y: cy, draw: () => drawDungeon(f, cx, cy, d.cleared) }); }
+  for (const d of world.dungeons || []) {
+    if (d.revealed && vis(d.x, d.y)) { const [cx, cy] = c(d.x, d.y); objs.push({ y: cy, draw: () => drawDungeon(f, cx, cy, d.cleared) }); }
+    else if (d.sensed && d.hint && vis(d.hint.x, d.hint.y)) { const [cx, cy] = c(d.hint.x, d.hint.y); objs.push({ y: cy, draw: () => drawSearchArea(f, cx, cy, d.hint.r) }); labels.push({ x: cx, y: cy - d.hint.r * PX - 6, text: '? within ' + d.hint.r, size: 8, color: '#ffcf8a', bg: 'rgba(60,40,10,.85)' }); }
+  }
   for (const lm of world.landmarks || []) if (vis(lm.x, lm.y)) { const [cx, cy] = c(lm.x, lm.y); objs.push({ y: cy - 1, draw: () => drawLandmark(f, cx, cy, lm) }); }
   for (const sp of world.specials || []) if (vis(sp.x, sp.y)) { const [cx, cy] = c(sp.x, sp.y); objs.push({ y: cy - 1, draw: () => drawSpecial(f, cx, cy, sp) }); }
   for (const ct of world.cities) if (vis(ct.x, ct.y)) { const [cx, cy] = c(ct.x, ct.y); objs.push({ y: cy, draw: () => { drawCity(f, cx, cy, ct.color, ct.name); if (ct.captured) labels.push({ x: cx, y: cy - PX / 2 - 12, text: 'BESIEGED · fallen', size: 8, color: '#ff8a8a', bg: 'rgba(70,10,10,.9)' }); else if (ct.siege) labels.push({ x: cx, y: cy - PX / 2 - 12, text: '⚔ ' + ct.siege + '/3', size: 9, color: '#ffce8a', bg: 'rgba(70,40,10,.9)' }); } }); }
