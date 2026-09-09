@@ -12,7 +12,8 @@ import { loadAtlas, onAtlas, SPRITES, MONSTERS, DUNGEON_MONSTER } from './atlas.
 import { unlock, sfx, music, toggleAudio, audioMuted } from './audio.js';
 import { LESSONS, TUTORIAL_CARDS } from './tutorial.js';
 
-const SAVE_KEY = 'ff.save.v1', COLL_KEY = 'ff.collection.v1';
+const SAVE_KEY = 'ff.save.v1', COLL_KEY = 'ff.collection.v1', TIER_KEY = 'ff.tierOverrides.v1';
+const BOSS_LINKS = 5;   // mana links the Usurper must bind to win
 loadAtlas();
 const BASICS = { W: 'Plains', U: 'Island', B: 'Swamp', R: 'Mountain', G: 'Forest' };
 const BASIC_NAMES = new Set(Object.values(BASICS));
@@ -47,18 +48,28 @@ const amuletGems = (sel = '') => COLORS.map(c => `<span class="amu${amuletCount(
 
 const app = document.getElementById('app');
 const topbar = document.getElementById('topbar');
-const S = { screen: 'title', game: null, collection: {}, content: null, ready: false, busy: null, report: null, modal: null, filter: 'all', deckFilter: '', cityStock: null, result: null, importText: '', lesson: 0 };
+const S = { screen: 'title', game: null, collection: {}, content: null, ready: false, busy: null, report: null, modal: null, filter: 'all', deckFilter: '', cityStock: null, result: null, importText: '', lesson: 0,
+  tiers: undefined, tierOverrides: {}, tierSearch: '', tierType: '', tierSort: 'tier', tierSellOnly: true, tierCurOnly: false, tierHide: {}, tierPick: null };
+const TIER_ORDER = ['S', 'A', 'B', 'C', 'D', 'E'];
+const TIER_META = { S: ['Broken', 'format-warping'], A: ['Premium', 'top staple'], B: ['Strong', 'commonly played'], C: ['Solid', 'maindeckable'], D: ['Filler', 'marginal'], E: ['Weak', 'draft chaff'] };
+// A card's effective tier = a local override if the player re-ranked it, else the shipped ranking.
+const baseTierOf = name => S.tiers?.cards?.[name]?.tier || null;
+const tierOf = name => (S.tierOverrides && S.tierOverrides[name]) || baseTierOf(name);
+function setTier(name, tier) { S.tierOverrides ||= {}; if (tier === baseTierOf(name)) delete S.tierOverrides[name]; else S.tierOverrides[name] = tier; save(); }
+async function ensureTiers() { if (S.tiers !== undefined) return S.tiers; try { S.tiers = await (await fetch('content/power-tiers.json')).json(); } catch { S.tiers = null; } return S.tiers; }
 
 // ---- persistence ----------------------------------------------------------------
 function save() {
   try {
     if (S.game) localStorage.setItem(SAVE_KEY, JSON.stringify(S.game)); else localStorage.removeItem(SAVE_KEY);
     localStorage.setItem(COLL_KEY, JSON.stringify(S.collection));
+    localStorage.setItem(TIER_KEY, JSON.stringify(S.tierOverrides || {}));
   } catch (e) { console.warn(e); }
 }
 function load() {
   try { S.collection = JSON.parse(localStorage.getItem(COLL_KEY) || '{}'); } catch { S.collection = {}; }
   try { S.game = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); } catch { S.game = null; }
+  try { S.tierOverrides = JSON.parse(localStorage.getItem(TIER_KEY) || '{}') || {}; } catch { S.tierOverrides = {}; }
 }
 function addCards(coll, name, n = 1) { coll[name] = (coll[name] || 0) + n; if (coll[name] <= 0) delete coll[name]; }
 
@@ -71,6 +82,7 @@ async function ensureContent() {
   S.dungeons = await (await fetch('content/dungeons.json')).json();
   S.shop = await (await fetch('content/shop.json')).json();
   try { S.catalog = await (await fetch('content/amulet-catalog.json')).json(); } catch { S.catalog = null; }
+  await ensureTiers();
   const names = new Set(Object.values(BASICS));
   for (const n of S.shop.artifacts) names.add(n);
   for (const list of Object.values(S.shop.lands)) for (const n of list) names.add(n);
@@ -214,8 +226,8 @@ function landmarkRiddle(lm) {
 }
 function bossLink() {
   const g = S.game; g.boss.links++;
-  if (g.boss.links >= 3) { g.status = 'lost'; save(); go('end'); return; }
-  toast(`The Usurper has bound ${g.boss.links} of 3 mana links. Hurry.`);
+  if (g.boss.links >= BOSS_LINKS) { g.status = 'lost'; save(); go('end'); return; }
+  toast(`The Usurper has bound ${g.boss.links} of ${BOSS_LINKS} mana links. Hurry.`);
 }
 function toast(msg) { S.toast = msg; render(); setTimeout(() => { if (S.toast === msg) { S.toast = null; render(); } }, 3500); }
 
@@ -553,7 +565,7 @@ function amuletRow(name, payColor) {
   const d = defOf(name); const cost = amuletPrice(name);
   const afford = payColor ? amuletCount(payColor) >= cost : totalAmulets() >= cost;
   const gem = payColor ? AMULET_HEX[payColor] : '#cbd5e1';
-  return `<div class="amushop-row"><span class="mini" data-preview="${esc(name)}" style="${artFor(d) ? `background-image:url('${artFor(d)}')` : ''}"></span><span class="nm" data-preview="${esc(name)}">${esc(name)}<i>${esc(d.typeLine)}</i></span><span class="cost">${cost}<i class="amu-chip" style="background:${gem}"></i></span><button class="btn small" data-amshop="${esc(name)}" data-amcolor="${payColor || ''}" ${afford ? '' : 'disabled'}>Buy</button></div>`;
+  return `<div class="amushop-row"><span class="mini" data-preview="${esc(name)}" style="${artFor(d) ? `background-image:url('${artFor(d)}')` : ''}"></span><span class="nm" data-preview="${esc(name)}">${esc(name)} ${tierChip(name)}<i>${esc(d.typeLine)}</i></span><span class="cost">${cost}<i class="amu-chip" style="background:${gem}"></i></span><button class="btn small" data-amshop="${esc(name)}" data-amcolor="${payColor || ''}" ${afford ? '' : 'disabled'}>Buy</button></div>`;
 }
 // A bounty: defeat a specific roaming foe near this city for an amulet of its color.
 // The nearest un-bountied foe a city will post a bounty on (deterministic, so the offer is stable on a visit).
@@ -600,14 +612,14 @@ function renderTop() {
   const tabs = [['map', 'Map'], ['collection', 'Collection'], ['deck', 'Deck']];
   topbar.innerHTML = `<div class="brand" data-go="title">Fivefold <span>demo</span></div>
     <nav>${tabs.map(([k, l]) => `<button class="tab${S.screen === k ? ' on' : ''}" data-go="${k}" ${inDuel || (k !== 'collection' && !g) ? 'disabled' : ''}>${l}</button>`).join('')}</nav>
-    ${g ? `<div class="stats"><span title="Life">♥ ${g.player.life}/${g.player.maxLife}</span><span title="Gold">◎ ${g.player.gold}</span><span title="Food" class="${g.player.food === 0 ? 'starving' : ''}">✦ ${g.player.food}${g.player.food === 0 ? ' STARVING' : ''}</span><span title="Day">Day ${g.player.day}</span><span title="Usurper's links">Links ${g.boss.links}/3</span></div>${g && totalAmulets() ? `<div class="amurow" title="Amulets">${amuletGems()}</div>` : ''}` : ''}
+    ${g ? `<div class="stats"><span title="Life">♥ ${g.player.life}/${g.player.maxLife}</span><span title="Gold">◎ ${g.player.gold}</span><span title="Food" class="${g.player.food === 0 ? 'starving' : ''}">✦ ${g.player.food}${g.player.food === 0 ? ' STARVING' : ''}</span><span title="Day">Day ${g.player.day}</span><span title="Usurper's links">Links ${g.boss.links}/${BOSS_LINKS}</span></div>${g && totalAmulets() ? `<div class="amurow" title="Amulets">${amuletGems()}</div>` : ''}` : ''}
     <button class="tab audio${g ? '' : ' solo'}" data-audio title="${audioMuted() ? 'Sound is off. Click to turn it on.' : 'Sound is on. Click to mute.'}">${audioMuted() ? '🔇' : '🔊'}</button>`;
 }
 
 function render() {
   app.classList.toggle('full', S.screen === 'duel');
   renderTop();
-  const views = { title, collection, deck, map, city, duel, result, end, dungeon, tutorial };
+  const views = { title, collection, deck, map, city, duel, result, end, dungeon, tutorial, tiers };
   music({ title: 'title', tutorial: 'title', collection: 'map', deck: 'map', map: 'map', result: 'map', end: 'title', city: 'city', duel: 'duel', dungeon: 'dungeon' }[S.screen] || 'title');
   // The map keeps its canvas between steps (re-creating a full-size canvas every keypress is what made walking feel slow).
   const keepMap = S.screen === 'map' && !!app.querySelector('.mapscreen #map');
@@ -641,7 +653,7 @@ function title() {
         <h2>${g ? 'Continue' : 'Your cards'}</h2>
         ${g ? `<p>${esc(g.name)}, day ${g.player.day}, ${g.wins} wins and ${g.losses} losses.${g.created ? ` Journey begun ${new Date(g.created).toLocaleDateString()}.` : ''} ${g.status !== 'playing' ? 'This journey is over.' : ''}</p><button class="btn primary" data-go="${g.status === 'playing' ? 'map' : 'end'}">Continue</button>` : ''}
         <p>${Object.values(S.collection).reduce((a, b) => a + b, 0)} cards in your collection${hasServer() ? `, ${artCount()} custom images in the art folder` : ''}.</p>
-        <div class="btnrow"><button class="btn" data-go="collection">Manage collection</button><button class="btn ghost" id="b-reset-all">Reset everything</button></div>
+        <div class="btnrow"><button class="btn" data-go="collection">Manage collection</button><button class="btn" data-go="tiers">Card power tiers</button><button class="btn ghost" id="b-reset-all">Reset everything</button></div>
         <p class="small">Reset everything wipes your current journey and your whole collection, so a New journey starts truly fresh.</p>
       </div>
     </div>
@@ -709,9 +721,10 @@ function collection() {
     </div>
     <div class="box">
       <div class="rowhead"><h2>Collection · ${names.length} distinct, ${Object.values(S.collection).reduce((a, b) => a + b, 0)} total</h2>
-        <div class="seg">${['all', 'playable', 'unsupported'].map(f => `<button class="seg-b${S.filter === f ? ' on' : ''}" data-filter="${f}">${f}</button>`).join('')}</div></div>
+        <div class="seg">${['all', 'playable', 'unsupported'].map(f => `<button class="seg-b${S.filter === f ? ' on' : ''}" data-filter="${f}">${f}</button>`).join('')}</div>
+        <button class="btn tiny" data-go="tiers" title="Browse and tweak card power tiers">Power tiers ›</button></div>
       ${rows.length ? `<table class="coll"><tr><th></th><th>Card</th><th>Qty</th><th>Type</th><th>Cost</th><th>Art</th><th>Status</th><th>Notes</th><th></th></tr>
-      ${rows.map(r => { const raw = r.d ? cachedCard(r.n) : null; const art = r.d && hasOwnArt(r.d) ? 'yours' : raw?.art_set ? `${raw.art_set.toUpperCase()} ${raw.art_year || ''}` : ''; return `<tr class="st-${r.d ? r.d.status : 'missing'}"><td class="thumb">${r.d ? `<div class="mini${hasOwnArt(r.d) ? ' own' : ''}" data-preview="${esc(r.n)}" style="${artFor(r.d) ? `background-image:url('${artFor(r.d)}')` : ''}"></div>` : ''}</td><td data-preview="${esc(r.n)}">${esc(r.n)}</td><td>${r.q}</td><td>${esc(r.d?.typeLine || '')}</td><td>${r.d && r.d.kind !== 'land' ? manaHtml(r.d.cost) : ''}</td><td class="small">${esc(art)}</td><td>${statusLabel(r.d)}</td><td class="notes">${esc((r.d?.notes || []).join('; '))}</td><td><button class="btn tiny" data-dec="${esc(r.n)}">−1</button></td></tr>`; }).join('')}</table>` : '<p class="small">Nothing here yet. Import a list above, or start a new journey to receive a starter deck.</p>'}
+      ${rows.map(r => { const raw = r.d ? cachedCard(r.n) : null; const art = r.d && hasOwnArt(r.d) ? 'yours' : raw?.art_set ? `${raw.art_set.toUpperCase()} ${raw.art_year || ''}` : ''; return `<tr class="st-${r.d ? r.d.status : 'missing'}"><td class="thumb">${r.d ? `<div class="mini${hasOwnArt(r.d) ? ' own' : ''}" data-preview="${esc(r.n)}" style="${artFor(r.d) ? `background-image:url('${artFor(r.d)}')` : ''}"></div>` : ''}</td><td data-preview="${esc(r.n)}">${esc(r.n)} ${tierChip(r.n)}</td><td>${r.q}</td><td>${esc(r.d?.typeLine || '')}</td><td>${r.d && r.d.kind !== 'land' ? manaHtml(r.d.cost) : ''}</td><td class="small">${esc(art)}</td><td>${statusLabel(r.d)}</td><td class="notes">${esc((r.d?.notes || []).join('; '))}</td><td><button class="btn tiny" data-dec="${esc(r.n)}">−1</button></td></tr>`; }).join('')}</table>` : '<p class="small">Nothing here yet. Import a list above, or start a new journey to receive a starter deck.</p>'}
     </div>
   </section>`;
 }
@@ -739,6 +752,72 @@ function deck() {
       </div>
     </div>
   </section>`;
+}
+
+// Small tier chip for inline use on cards elsewhere (collection, shops).
+function tierChip(name) { const t = tierOf(name); return t ? `<span class="ptb tiny pt-${t}" title="${TIER_META[t][0]} tier">${t}</span>` : ''; }
+
+function tiers() {
+  if (S.tiers === undefined) { ensureTiers().then(render); app.innerHTML = `<section class="screen"><div class="box"><p class="small">Loading power tiers…</p></div></section>`; return; }
+  if (!S.tiers || !S.tiers.cards) { app.innerHTML = `<section class="screen"><div class="box"><h2>Card power tiers</h2><p class="small">Ranking data is unavailable.</p><button class="btn" data-go="${S.game ? 'map' : 'title'}">Back</button></div></section>`; return; }
+  const cards = S.tiers.cards, price = S.tiers.price || { S: 8, A: 6, B: 4, C: 3, D: 2, E: 1 };
+  const names = Object.keys(cards);
+  const counts = {}, sell = {}; for (const t of TIER_ORDER) { counts[t] = 0; sell[t] = 0; }
+  for (const n of names) { const t = tierOf(n); if (!t) continue; counts[t]++; if (cards[n].sell) sell[t]++; }
+  const maxSell = Math.max(1, ...TIER_ORDER.map(t => sell[t]));
+  const q = S.tierSearch.toLowerCase(), hidden = S.tierHide || {};
+  const rows = names.filter(n => {
+    const c = cards[n], t = tierOf(n);
+    if (hidden[t]) return false;
+    if (S.tierSellOnly && !c.sell) return false;
+    if (S.tierCurOnly && c.src !== 'curated' && !S.tierOverrides[n]) return false;
+    if (S.tierType && !c.type.includes(S.tierType)) return false;
+    if (q && !n.toLowerCase().includes(q)) return false;
+    return true;
+  }).sort((a, b) => {
+    const s = S.tierSort;
+    if (s === 'name') return a.localeCompare(b);
+    if (s === 'cmc') return (cards[a].cmc - cards[b].cmc) || a.localeCompare(b);
+    if (s === 'rarity') { const R = { rare: 0, uncommon: 1, common: 2 }; return ((R[cards[a].rar] ?? 3) - (R[cards[b].rar] ?? 3)) || a.localeCompare(b); }
+    return (TIER_ORDER.indexOf(tierOf(a)) - TIER_ORDER.indexOf(tierOf(b))) || (cards[b].cmc - cards[a].cmc) || a.localeCompare(b);
+  });
+  const changeN = Object.keys(S.tierOverrides).length;
+  app.innerHTML = `<section class="screen tierscreen">
+    <div class="box">
+      <div class="rowhead"><h2>Card power tiers</h2><button class="btn ghost" data-go="${S.game ? 'map' : 'title'}">Back</button></div>
+      <p class="small">How good each Alpha&ndash;Alliances card is in play, strongest to weakest. Tap a tier badge to re-rank a card &mdash; your changes save on this device and collect below to hand back.${changeN ? ` <b>${changeN} re-ranked.</b>` : ''}</p>
+      <div class="tsummary">${TIER_ORDER.map(t => `
+        <button class="tsum${hidden[t] ? ' off' : ''}" data-tier-toggle="${t}" title="${hidden[t] ? 'Show' : 'Hide'} this tier">
+          <span class="ptb pt-${t}">${t}</span>
+          <span class="tsum-main"><b>${TIER_META[t][0]}</b><span class="small">${price[t]} amulets</span></span>
+          <span class="tsum-n">${sell[t]}<span class="small">/${counts[t]}</span></span>
+          <span class="tsum-bar"><i class="pt-bg-${t}" style="width:${Math.round(sell[t] / maxSell * 100)}%"></i></span>
+        </button>`).join('')}</div>
+    </div>
+    <div class="box">
+      <div class="tctrls">
+        <input id="tier-q" placeholder="Search cards&hellip;" value="${esc(S.tierSearch)}" autocomplete="off">
+        <select id="tier-type">${['', 'Creature', 'Instant', 'Sorcery', 'Enchantment', 'Artifact', 'Land'].map(t => `<option value="${t}" ${S.tierType === t ? 'selected' : ''}>${t || 'All types'}</option>`).join('')}</select>
+        <select id="tier-sort">${[['tier', 'Tier'], ['name', 'Name'], ['cmc', 'Mana value'], ['rarity', 'Rarity']].map(([v, l]) => `<option value="${v}" ${S.tierSort === v ? 'selected' : ''}>Sort: ${l}</option>`).join('')}</select>
+        <label class="tchk"><input type="checkbox" id="tier-sell" ${S.tierSellOnly ? 'checked' : ''}> Sellable only</label>
+        <label class="tchk"><input type="checkbox" id="tier-cur" ${S.tierCurOnly ? 'checked' : ''}> Curated only</label>
+        <span class="small tcount">${rows.length} of ${names.length}</span>
+      </div>
+      ${changeN ? `<div class="tchanges"><b>${changeN} card${changeN > 1 ? 's' : ''} re-ranked.</b> <button class="btn tiny" id="tier-copy">Copy changes (JSON)</button> <button class="btn tiny ghost" id="tier-clear">Reset all</button></div>` : ''}
+      <div class="tlist">${rows.length ? rows.map(n => tierRow(n, cards[n])).join('') : '<p class="small" style="padding:14px">No cards match these filters.</p>'}</div>
+    </div>
+  </section>`;
+}
+function tierRow(n, c) {
+  const t = tierOf(n), moved = !!S.tierOverrides[n], picking = S.tierPick === n;
+  return `<div class="trow${picking ? ' picking' : ''}">
+    <button class="ptb pt-${t}${moved ? ' moved' : ''}" data-tier-pick="${esc(n)}" title="Re-rank ${esc(n)}">${t}</button>
+    <span class="trow-n" data-preview="${esc(n)}">${esc(n)}${c.src === 'curated' ? ' <span class="tstar" title="Hand-ranked">★</span>' : ''}</span>
+    <span class="trow-t small">${esc(c.type)}</span>
+    <span class="trow-c">${c.pt ? esc(c.pt) : '◇' + c.cmc}</span>
+    <span class="trow-r small r-${c.rar}">${c.rar || ''}</span>
+    ${picking ? `<span class="tpick">${TIER_ORDER.map(x => `<button class="ptb pt-${x}${x === t ? ' cur' : ''}" data-tier-set="${x}">${x}</button>`).join('')}</span>` : ''}
+  </div>`;
 }
 
 function map() {
@@ -861,7 +940,7 @@ function end() {
   const g = S.game;
   app.innerHTML = `<section class="screen resultscreen"><div class="box center">
     <h2>${g.status === 'won' ? 'The Usurper falls' : 'The Spell of Dominion is cast'}</h2>
-    <p>${g.status === 'won' ? `${esc(g.name)} unbinds the mana links on day ${g.player.day} after ${g.wins} victories. The plane is free, for now.` : `On day ${g.player.day} the Usurper binds the third link. The world dims. Your collection survives; your journey does not.`}</p>
+    <p>${g.status === 'won' ? `${esc(g.name)} unbinds the mana links on day ${g.player.day} after ${g.wins} victories. The plane is free, for now.` : `On day ${g.player.day} the Usurper binds the final link. The world dims. Your collection survives; your journey does not.`}</p>
     <button class="btn primary" id="b-newgame">Start a new journey</button>
   </div></section>`;
 }
@@ -914,6 +993,24 @@ document.addEventListener('click', ev => {
   }
 });
 document.addEventListener('input', ev => { if (ev.target.id === 'dfilter') { S.deckFilter = ev.target.value; deck(); document.getElementById('dfilter').focus(); const el = document.getElementById('dfilter'); el.setSelectionRange(el.value.length, el.value.length); } });
+// ---- power-tier screen: re-ranking, filters, export ----
+document.addEventListener('input', ev => { if (ev.target.id === 'tier-q') { S.tierSearch = ev.target.value; tiers(); const el = document.getElementById('tier-q'); el.focus(); el.setSelectionRange(el.value.length, el.value.length); } });
+document.addEventListener('change', ev => {
+  const id = ev.target.id;
+  if (id === 'tier-type') { S.tierType = ev.target.value; tiers(); }
+  else if (id === 'tier-sort') { S.tierSort = ev.target.value; tiers(); }
+  else if (id === 'tier-sell') { S.tierSellOnly = ev.target.checked; tiers(); }
+  else if (id === 'tier-cur') { S.tierCurOnly = ev.target.checked; tiers(); }
+});
+document.addEventListener('click', ev => {
+  const el = ev.target.closest('[data-tier-pick],[data-tier-set],[data-tier-toggle],#tier-copy,#tier-clear');
+  if (!el) { if (S.tierPick && S.screen === 'tiers' && !ev.target.closest('.tpick,[data-tier-pick]')) { S.tierPick = null; tiers(); } return; }
+  if (el.dataset.tierPick != null) { const n = el.dataset.tierPick; S.tierPick = S.tierPick === n ? null : n; tiers(); return; }
+  if (el.dataset.tierSet != null) { if (S.tierPick) { setTier(S.tierPick, el.dataset.tierSet); S.tierPick = null; tiers(); } return; }
+  if (el.dataset.tierToggle != null) { const t = el.dataset.tierToggle; S.tierHide[t] = !S.tierHide[t]; tiers(); return; }
+  if (el.id === 'tier-copy') { const json = JSON.stringify(S.tierOverrides, null, 2); navigator.clipboard?.writeText(json).then(() => toast('Tier changes copied to clipboard.')).catch(() => toast('Could not copy.')); return; }
+  if (el.id === 'tier-clear') { if (confirm('Reset all your tier changes back to the shipped ranking?')) { S.tierOverrides = {}; S.tierPick = null; save(); tiers(); } return; }
+});
 // Web Audio starts only after a gesture; the first click or key unlocks it and starts the score for the current screen.
 document.addEventListener('pointerdown', () => unlock(), { capture: true });
 document.addEventListener('keydown', () => unlock(), { capture: true });

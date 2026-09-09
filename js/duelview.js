@@ -404,9 +404,12 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
   }
   function permMenu(card) {
     const items = [];
-    card.def.manaAbilities.forEach((ma, i) => { const ok = !card.tapped || !ma.cost.tap; for (const col of (ma.produces.length > 1 ? ma.produces : [ma.produces[0]])) items.push({ label: `Add ${ma.amount || 1} ${col} mana (${costText(ma.cost)})`, disabled: !ok, action: () => { ui.menu = null; duel.humanMana(card, i, col); render(); } }); });
+    card.def.manaAbilities.forEach((ma, i) => { const ok = !card.tapped || !ma.cost.tap; for (const col of (ma.produces.length > 1 ? ma.produces : [ma.produces[0]])) items.push({ label: `Add ${ma.amount || 1} ${col} mana (${costText(ma.cost)})`, disabled: !ok, mana: true, action: () => { ui.menu = null; duel.humanMana(card, i, col); render(); } }); });
     abilitiesOf(card).forEach((ab, i) => { if (ab.type !== 'activated') return; items.push({ label: `${costText(ab.cost)}: ${ab.text.split(': ').slice(1).join(': ').slice(0, 60) || 'ability'}`, disabled: !duel.canActivate(me, card, i), action: () => { ui.menu = null; startActivate(card, i); } }); });
     if (!items.length) return;
+    // A land / mana rock with a single unambiguous mana ability: tap it straight for mana, no menu.
+    const enabled = items.filter(it => !it.disabled);
+    if (enabled.length === 1 && enabled[0].mana) { enabled[0].action(); return; }
     ui.menu = { title: card.def.name, items }; render();
   }
   function handMenu(card) {
