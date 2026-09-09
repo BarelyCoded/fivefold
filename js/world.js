@@ -176,7 +176,7 @@ export function stepEnemies(world, rng, player) {
   for (const e of world.enemies) {
     const pd = Math.abs(e.x - player.x) + Math.abs(e.y - player.y);
     const sight = e.tier >= 2 ? 6 : 4;                 // tougher foes notice you from farther off
-    const chase = pd <= sight;
+    const chase = pd <= sight && !player.cloak;        // a Shadow Cloak hides you from pursuit
     if (!chase && rng() > 0.45) continue;              // idle enemies only amble
     let opts;
     if (chase) {

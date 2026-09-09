@@ -40,6 +40,14 @@ function prefetchCatalog() {
 }
 // ---- amulets: a colored gem currency, earned from tough foes and lairs, spent on cards and world magic
 const AMULET_HEX = { W: '#efe9cf', U: '#5e8cc9', B: '#7a6a95', R: '#d0604a', G: '#6a9a4a' };
+// World magic: one map-wide spell per colour, each costing a single amulet of that colour.
+const WORLD_MAGIC = [
+  { c: 'W', id: 'wm-heal', name: 'Healing Light', desc: 'restore your life to full' },
+  { c: 'U', id: 'wm-blink', name: 'Blink', desc: 'teleport to the nearest city' },
+  { c: 'B', id: 'wm-cloak', name: 'Shadow Cloak', desc: 'walk unseen for 8 steps — no pursuit' },
+  { c: 'R', id: 'wm-thunder', name: 'Staff of Thunder', desc: 'scatter every monster within 3 tiles' },
+  { c: 'G', id: 'wm-sight', name: 'Sylvan Sight', desc: 'reveal every dungeon on the map' },
+];
 const newAmulets = () => ({ W: 0, U: 0, B: 0, R: 0, G: 0 });
 function giveAmulet(color, n = 1) { const g = S.game; if (!g) return; g.player.amulets ||= newAmulets(); g.player.amulets[color] = (g.player.amulets[color] || 0) + n; }
 const amuletCount = color => (S.game?.player.amulets?.[color] || 0);
@@ -91,6 +99,7 @@ async function ensureContent() {
   for (const n of Object.values(S.dungeons.walls)) names.add(n);
   for (const e of S.content.enemies) for (const n of Object.keys(e.deck)) names.add(n);
   for (const n of TUTORIAL_CARDS) names.add(n);
+  for (const n of POWER_NINE) names.add(n);   // pre-cache the ultra-rares so a dungeon vault can grant them
   for (const n of Object.keys(S.collection)) names.add(n);
   if (S.game) for (const n of Object.keys(S.game.deck)) names.add(n);
   setBusy('Fetching card data from Scryfall…');
@@ -180,6 +189,7 @@ function move(dx, dy) {
   const dg = dungeonAt(g.world, nx, ny);
   if (dg && dg.revealed) { g.player.x = nx; g.player.y = ny; save(); dungeonPrompt(dg); return; }
   g.player.x = nx; g.player.y = ny; g.player.steps++; sfx('step');
+  if (g.player.cloak > 0) g.player.cloak--;
   if (g.player.food > 0) g.player.food--;
   else if (g.player.steps % 2 === 0 && g.player.life > 1) { g.player.life--; toast('You are starving: 1 life lost. Buy food in any city.'); }
   if (g.player.steps % 5 === 0) { g.player.day++; if (g.player.day % 30 === 0) bossLink(); }
@@ -409,6 +419,8 @@ function dungeonTreasureDrop() {
   if (Math.random() < 0.5) { const art = rnd(S.dungeons.artifacts.filter(n => defOf(n) && defOf(n).kind !== 'unsupported')); if (art) { addCards(S.collection, art, 1); lines.push(`A relic: ${art}.`); } }
   const gold = 20 + Math.floor(Math.random() * 21); g.player.gold += gold; lines.push(`${gold} gold in an old chest.`); sfx('coin');
   giveAmulet(tpl.color); lines.push(`The Guardian's ${COLOR_NAME[tpl.color]} amulet is yours.`);
+  // The rarest relics in the world are hidden nowhere else: a slim chance the vault holds one.
+  if (!dg.cleared && Math.random() < 0.16) { const p9 = rnd([...POWER_NINE].filter(n => defOf(n))); if (p9) { addCards(S.collection, p9, 1); lines.push(`Something older gleams beneath the coins — <b>${p9}</b>. No shop has ever sold its like.`); sfx('open'); } }
   dg.cleared = true;
   S.result = { won: true, tpl: { name: tpl.name }, lines, title: 'The vault is yours', flavour: `The Guardian of the ${tpl.name} is dead. The exit is open.`, back: 'dungeon' };
   save(); go('result');
@@ -487,7 +499,9 @@ function engineFunctional(d) {
   if (d.abilities && d.abilities.some(a => a.type !== 'static' || !DRAWBACK_STATICS.has(a.kind))) return true;
   return false;
 }
-const shopOk = n => engineFunctional(defOf(n));
+// The ultra-rares are never for sale — they can only be pried from a dungeon vault.
+const POWER_NINE = new Set(['Black Lotus', 'Mox Pearl', 'Mox Sapphire', 'Mox Jet', 'Mox Ruby', 'Mox Emerald', 'Ancestral Recall', 'Time Walk', 'Timetwister']);
+const shopOk = n => !POWER_NINE.has(n) && engineFunctional(defOf(n));
 function cityPool(color) {
   const names = new Set();
   for (const e of S.content.enemies) if (e.color === color) for (const n of Object.keys(e.deck)) { const d = defOf(n); if (engineFunctional(d) && d.kind !== 'land') names.add(n); }
@@ -867,7 +881,8 @@ function map() {
       <p class="small">Move with WASD or the arrow keys, or click a neighbouring tile. Walking costs food. Blue crystals are mana links (+2 life). Landmarks marked ? ask a riddle about a card: answer right for a card of that region's color, wrong and you lose life, food or, rarely, a card. Pits with a torch are dungeons: revealed by clues from beaten foes, fought room by room with your life carried over. The dark fortress is the Usurper.</p>
       ${(g.world.dungeons || []).some(d => d.revealed) ? `<p class="small">Known dungeons: ${g.world.dungeons.filter(d => d.revealed).map(d => `${dungeonTemplate(d.id).name}${d.cleared ? ' (cleared)' : ''}`).join(', ')}.</p>` : ''}
       <div class="btnrow"><button class="btn" id="b-rest" ${g.player.food < 3 || g.player.life >= g.player.maxLife ? 'disabled' : ''}>Rest (3 food, +5 life)</button><button class="btn ghost" data-go="title">Menu</button></div>
-      ${amuletCount('R') ? `<h3>World magic</h3><p class="small">Staff of Thunder: spend a red amulet to scatter every monster within three tiles.</p><div class="btnrow"><button class="btn" id="b-worldmagic">Staff of Thunder (1 <i class="amu-chip" style="background:${AMULET_HEX.R}"></i>)</button></div>` : ''}
+      ${totalAmulets() ? `<h3>World magic</h3><p class="small">Spend amulets to bend the world. ${g.player.cloak > 0 ? `<b>Cloaked: ${g.player.cloak} step${g.player.cloak > 1 ? 's' : ''} of shadow left.</b>` : 'Cast from anywhere on the map.'}</p>
+      <div class="wmgrid">${WORLD_MAGIC.map(s => `<button class="btn wm" id="${s.id}" ${amuletCount(s.c) ? '' : 'disabled'} title="${esc(s.desc)}"><b>${s.name}</b><span class="wmd">${esc(s.desc)}</span><span class="wmcost">1 <i class="amu-chip" style="background:${AMULET_HEX[s.c]}"></i></span></button>`).join('')}</div>` : ''}
       <h3>Legend</h3>
       <div class="legend">${COLORS.map(c => `<span><i class="sw" style="background:${BIOME[c].fill}"></i>${BIOME[c].name}</span>`).join('')}</div>`;
   let canvas = app.querySelector('.mapscreen #map');
@@ -989,7 +1004,7 @@ app.addEventListener('submit', ev => {
 });
 document.addEventListener('click', ev => {
   if (ev.target.closest('.btn, .tab, .linkbtn')) sfx('click');
-  const t = ev.target.closest('[data-go],[data-modal],[data-filter],[data-add],[data-rem],[data-dec],[data-buy],[data-amshop],[data-audio],[data-lesson],#b-import,#b-csv,#b-rescan,#b-clear-coll,#b-fill,#b-addall,#b-clear-deck,#b-rest,#b-inn,#b-food,#b-leave,#b-newgame,#b-dleave,#b-practice,#b-bounty,#b-worldmagic,#b-reset-all');
+  const t = ev.target.closest('[data-go],[data-modal],[data-filter],[data-add],[data-rem],[data-dec],[data-buy],[data-amshop],[data-audio],[data-lesson],#b-import,#b-csv,#b-rescan,#b-clear-coll,#b-fill,#b-addall,#b-clear-deck,#b-rest,#b-inn,#b-food,#b-leave,#b-newgame,#b-dleave,#b-practice,#b-bounty,#wm-heal,#wm-blink,#wm-cloak,#wm-thunder,#wm-sight,#b-reset-all');
   if (!t) return;
   const g = S.game;
   if ('audio' in t.dataset) { toggleAudio(); renderTop(); return; }
@@ -1019,7 +1034,10 @@ document.addEventListener('click', ev => {
     case 'b-practice': startTutorialDuel().catch(e => setBusy('Could not load card data: ' + e.message)); break;
     case 'b-bounty': { const c = cityAt(g.world, g.player.x, g.player.y); if (c) acceptBounty(c); break; }
     case 'b-reset-all': if (confirm('Wipe your current journey AND your entire collection so you can start completely fresh? This cannot be undone.')) { S.game = null; S.collection = {}; S.filter = 'all'; S.report = null; save(); go('title'); toast('Everything wiped. Begin a new journey with an empty collection.'); } break;
-    case 'b-worldmagic': {
+    case 'wm-heal': if (amuletCount('W') && g.player.life < g.player.maxLife) { giveAmulet('W', -1); g.player.life = g.player.maxLife; sfx('cast'); save(); toast('Healing Light: your wounds close.'); } break;
+    case 'wm-blink': if (amuletCount('U')) { const c = g.world.cities.slice().sort((a, b) => (Math.abs(a.x - g.player.x) + Math.abs(a.y - g.player.y)) - (Math.abs(b.x - g.player.x) + Math.abs(b.y - g.player.y))).find(c => c.x !== g.player.x || c.y !== g.player.y); if (c) { giveAmulet('U', -1); g.player.x = c.x; g.player.y = c.y; sfx('cast'); save(); toast(`Blink: you step out in ${c.name}.`); go('city'); return; } } break;
+    case 'wm-cloak': if (amuletCount('B')) { giveAmulet('B', -1); g.player.cloak = 8; sfx('cast'); save(); toast('Shadow Cloak: you walk unseen for 8 steps.'); render(); } break;
+    case 'wm-thunder': {
       if (amuletCount('R') < 1) break;
       const before = g.world.enemies.length;
       g.world.enemies = g.world.enemies.filter(e => Math.abs(e.x - g.player.x) > 3 || Math.abs(e.y - g.player.y) > 3);
@@ -1028,6 +1046,7 @@ document.addEventListener('click', ev => {
       toast(cleared ? `Thunder scatters ${cleared} monster${cleared > 1 ? 's' : ''}.` : 'Thunder rolls, but no monster stood near.');
       break;
     }
+    case 'wm-sight': if (amuletCount('G')) { const hidden = (g.world.dungeons || []).filter(d => !d.revealed); if (hidden.length) { giveAmulet('G', -1); hidden.forEach(d => d.revealed = true); sfx('cast'); save(); toast(`Sylvan Sight reveals ${hidden.length} hidden dungeon${hidden.length > 1 ? 's' : ''}.`); } else toast('The forest knows of no more hidden ways.'); } break;
   }
 });
 document.addEventListener('input', ev => { if (ev.target.id === 'dfilter') { S.deckFilter = ev.target.value; deck(); document.getElementById('dfilter').focus(); const el = document.getElementById('dfilter'); el.setSelectionRange(el.value.length, el.value.length); } });
