@@ -38,7 +38,7 @@ function trim(c) {
     colors: face.colors || c.colors || [],
     keywords: c.keywords || [],
     image: imageOf(c),
-    art_set: c.set, art_year: (c.released_at || '').slice(0, 4),
+    art_set: c.set, art_year: (c.released_at || '').slice(0, 4), rarity: c.rarity,
     scryfall_uri: c.scryfall_uri,
   };
 }
@@ -83,7 +83,7 @@ async function earliestPrintings(names, onProgress) {
 }
 
 // names: array of card names. Returns Map(norm(name) -> trimmed card | null)
-export async function fetchCards(names, onProgress) {
+export async function fetchCards(names, onProgress, opts = {}) {
   load();
   const wanted = [...new Set(names.map(norm))];
   const missing = wanted.filter(n => !(n in cache));
@@ -104,7 +104,7 @@ export async function fetchCards(names, onProgress) {
     if (i + 75 < missing.length) await pause(120);
   }
   // Era-appropriate art: swap in the earliest printing's image for anything not yet checked.
-  const needArt = wanted.filter(n => cache[n] && !cache[n].artChecked);
+  const needArt = opts.skipArt ? [] : wanted.filter(n => cache[n] && !cache[n].artChecked);
   if (needArt.length) {
     onProgress?.(0, needArt.length, 'art');
     const found = await earliestPrintings(needArt, onProgress);

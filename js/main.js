@@ -56,6 +56,7 @@ async function ensureContent() {
   S.content = await res.json();
   S.dungeons = await (await fetch('content/dungeons.json')).json();
   S.shop = await (await fetch('content/shop.json')).json();
+  try { S.catalog = await (await fetch('content/amulet-catalog.json')).json(); } catch { S.catalog = null; }
   const names = new Set(Object.values(BASICS));
   for (const n of S.shop.artifacts) names.add(n);
   for (const list of Object.values(S.shop.lands)) for (const n of list) names.add(n);
@@ -457,15 +458,66 @@ function cityStock(city) {
   g.cityStock[key] = { day: g.player.day, items }; save();
   return items;
 }
-// Cards a city offers for amulets of its color (the "named cities for cards" exchange).
-function cityAmuletStock(city) {
-  const g = S.game; const st = g.cityStock[city.color];
-  if (st && st.amu && g.player.day - st.day < 6) return st.amu;
-  const pool = cityPool(city.color).filter(n => { const d = defOf(n); return d && d.kind !== 'unsupported'; });
-  const amu = [];
-  for (let i = 0; i < 2 && pool.length; i++) { const n = pool.splice(Math.floor(Math.random() * pool.length), 1)[0]; amu.push({ name: n, sold: false }); }
-  if (st) st.amu = amu; else g.cityStock[city.color] = { day: g.player.day, items: [], amu };
-  save(); return amu;
+// Amulet card shop. Every known card is buyable with amulets; rarer / costlier cards cost more amulets.
+// A city's shop lists cards of its own color; artifacts are colorless and buyable with any amulets anywhere.
+function knownCardNames() {
+  const names = new Set();
+  for (const e of S.content?.enemies || []) for (const n of Object.keys(e.deck)) names.add(n);
+  for (const n of S.shop?.artifacts || []) names.add(n);
+  for (const list of Object.values(S.shop?.lands || {})) for (const n of list) names.add(n);
+  for (const d of S.dungeons?.dungeons || []) for (const n of d.treasure) names.add(n);
+  for (const n of S.dungeons?.artifacts || []) names.add(n);
+  for (const n of Object.keys(S.collection)) names.add(n);
+  return [...names];
+}
+function amuletPrice(name) {
+  const d = defOf(name); if (!d) return 3;
+  let cost = 1 + Math.floor((d.cmc || 0) / 2);         // mana value as the quality proxy
+  const rar = cachedCard(name)?.rarity;
+  if (rar === 'mythic' || rar === 'rare') cost += 2;
+  else if (rar === 'uncommon') cost += 1;
+  if (d.kind === 'artifact' || d.legendary) cost += 1;
+  return Math.max(1, Math.min(7, cost));
+}
+const SHOP_CAP = 80;
+function shopNames(color) {
+  const cat = (S.catalog?.[color] || []).slice(0, SHOP_CAP);
+  const own = knownCardNames().filter(n => { const d = defOf(n); return d && d.kind !== 'unsupported' && d.kind !== 'land' && !d.types.includes('Artifact') && d.colors?.includes(color); });
+  return [...new Set([...cat, ...own])];
+}
+function artifactNames() {
+  const cat = (S.catalog?.artifact || []).slice(0, SHOP_CAP);
+  const own = knownCardNames().filter(n => { const d = defOf(n); return d && d.kind !== 'unsupported' && d.types.includes('Artifact') && d.colors?.length === 0; });
+  return [...new Set([...cat, ...own])];
+}
+function amuletShopPool(color) {
+  return shopNames(color).filter(n => defOf(n)).sort((a, b) => (defOf(a).cmc - defOf(b).cmc) || a.localeCompare(b));
+}
+function artifactShopPool() {
+  return artifactNames().filter(n => defOf(n)).sort((a, b) => (defOf(a).cmc - defOf(b).cmc) || a.localeCompare(b));
+}
+// On opening a city, pull card data (not the slow era-art) for that color's shelf, then re-render.
+function stockAmuletShop(color) {
+  const want = [...shopNames(color), ...artifactNames()];
+  const uncached = want.filter(n => !cachedCard(n));
+  if (!uncached.length || S.shopFetching) return;
+  S.shopFetching = color;
+  fetchCards(uncached, null, { skipArt: true }).then(() => { S.shopFetching = null; forgetDefs(); if (S.screen === 'city') render(); }).catch(() => { S.shopFetching = null; });
+}
+// Spend `cost` amulets: a single color for colored cards, or across any colors (largest first) for artifacts.
+function spendAmulets(cost, color) {
+  const g = S.game;
+  if (color) { if (amuletCount(color) < cost) return false; g.player.amulets[color] -= cost; return true; }
+  if (totalAmulets() < cost) return false;
+  let left = cost;
+  for (const c of COLORS.slice().sort((a, b) => amuletCount(b) - amuletCount(a))) { const take = Math.min(left, amuletCount(c)); g.player.amulets[c] -= take; left -= take; if (left <= 0) break; }
+  return true;
+}
+function amuletRow(name, payColor) {
+  const d = defOf(name); const cost = amuletPrice(name);
+  const afford = payColor ? amuletCount(payColor) >= cost : totalAmulets() >= cost;
+  const gem = payColor ? AMULET_HEX[payColor] : '#cbd5e1';
+  return `<div class="amushop-row"><span class="mini" data-preview="${esc(name)}" style="${artFor(d) ? `background-image:url('${artFor(d)}')` : ''}"></span><span class="nm" data-preview="${esc(name)}">${esc(name)}<i>${esc(d.typeLine)}</i></span><span class="cost">${cost}<i class="amu-chip" style="background:${gem}"></i></span><button class="btn small" data-amshop="${esc(name)}" data-amcolor="${payColor || ''}" ${afford ? '' : 'disabled'}>Buy</button></div>`;
 }
 // A bounty: defeat a specific roaming foe near this city for an amulet of its color.
 function postBounty(city) {
@@ -677,6 +729,7 @@ function map() {
 function city() {
   const g = S.game; const c = cityAt(g.world, g.player.x, g.player.y); if (!c) return map();
   const stock = cityStock(c);
+  stockAmuletShop(c.color);
   app.innerHTML = `<section class="screen cityscreen">
     <div class="box">
       <h2>${esc(c.name)} <span class="small">· a ${COLOR_NAME[c.color].toLowerCase()} city in the ${BIOME[c.color].name.toLowerCase()}</span></h2>
@@ -689,8 +742,13 @@ function city() {
       <div class="market">${stock.map((it, i) => { const d = defOf(it.name); return `<div class="stall${it.sold ? ' sold' : ''}">${cardHtml(d)}<div class="price">${it.sold ? 'Sold' : `${it.price} gold`}</div><button class="btn small" data-buy="${i}" ${it.sold || g.player.gold < it.price ? 'disabled' : ''}>Buy</button></div>`; }).join('')}</div>
       <p class="small">Stock changes every few days. Artifacts and rare lands pass through now and then. Bought cards go to your collection; add them to your deck from the Deck tab.</p>
       <h3>Amulet exchange <span class="amurow small">${amuletGems()}</span></h3>
-      <p class="small">This city trades ${COLOR_NAME[c.color]} cards for ${COLOR_NAME[c.color]} amulets, one apiece.</p>
-      <div class="market">${cityAmuletStock(c).map((it, i) => { const d = defOf(it.name); return `<div class="stall${it.sold ? ' sold' : ''}">${cardHtml(d)}<div class="price"><i class="amu-chip" style="background:${AMULET_HEX[c.color]}"></i>${it.sold ? 'Sold' : '1 amulet'}</div><button class="btn small" data-abuy="${i}" ${it.sold || amuletCount(c.color) < 1 ? 'disabled' : ''}>Trade</button></div>`; }).join('')}</div>
+      <p class="small">Spend ${COLOR_NAME[c.color]} amulets on ${COLOR_NAME[c.color]} cards, or amulets of any color on artifacts. Rarer, costlier cards ask more amulets. Hover a name to see the card.</p>
+      <div class="amushop">
+        <h4>${COLOR_NAME[c.color]} cards <i class="amu-chip" style="background:${AMULET_HEX[c.color]}"></i>${S.shopFetching === c.color ? ' <span class="small">stocking the shelves\u2026</span>' : ''}</h4>
+        <div class="amushop-list">${amuletShopPool(c.color).map(n => amuletRow(n, c.color)).join('') || '<p class="small">No cards of this color known yet.</p>'}</div>
+        <h4>Artifacts <span class="small">(any amulets)</span></h4>
+        <div class="amushop-list">${artifactShopPool().map(n => amuletRow(n, null)).join('') || '<p class="small">No artifacts known yet.</p>'}</div>
+      </div>
       <h3>Bounty board</h3>
       ${(() => { const q = g.quests.find(q => q.city === c.name); return q ? `<p class="small">Active bounty: defeat <b>${esc(q.enemyName)}</b> for a ${COLOR_NAME[q.color]} amulet.</p>` : `<p class="small">Post a bounty on a foe roaming near ${esc(c.name)}; beat them for an amulet.</p><div class="btnrow"><button class="btn" id="b-bounty">Post a bounty</button></div>`; })()}
     </div>
@@ -760,7 +818,7 @@ app.addEventListener('submit', ev => {
 });
 document.addEventListener('click', ev => {
   if (ev.target.closest('.btn, .tab, .linkbtn')) sfx('click');
-  const t = ev.target.closest('[data-go],[data-modal],[data-filter],[data-add],[data-rem],[data-dec],[data-buy],[data-abuy],[data-audio],[data-lesson],#b-import,#b-csv,#b-rescan,#b-clear-coll,#b-fill,#b-rest,#b-inn,#b-food,#b-leave,#b-newgame,#b-dleave,#b-practice,#b-bounty,#b-worldmagic');
+  const t = ev.target.closest('[data-go],[data-modal],[data-filter],[data-add],[data-rem],[data-dec],[data-buy],[data-amshop],[data-audio],[data-lesson],#b-import,#b-csv,#b-rescan,#b-clear-coll,#b-fill,#b-rest,#b-inn,#b-food,#b-leave,#b-newgame,#b-dleave,#b-practice,#b-bounty,#b-worldmagic');
   if (!t) return;
   const g = S.game;
   if ('audio' in t.dataset) { toggleAudio(); renderTop(); return; }
@@ -772,7 +830,7 @@ document.addEventListener('click', ev => {
   if (t.dataset.rem) { addCards(g.deck, t.dataset.rem, -1); save(); render(); return; }
   if (t.dataset.dec) { addCards(S.collection, t.dataset.dec, -1); if (g && g.deck[t.dataset.dec] > (S.collection[t.dataset.dec] || 0)) addCards(g.deck, t.dataset.dec, -1); save(); render(); return; }
   if (t.dataset.buy != null) { const c = cityAt(g.world, g.player.x, g.player.y); const it = cityStock(c)[Number(t.dataset.buy)]; if (it && !it.sold && g.player.gold >= it.price) { g.player.gold -= it.price; it.sold = true; addCards(S.collection, it.name, 1); sfx('coin'); save(); render(); } return; }
-  if (t.dataset.abuy != null) { const c = cityAt(g.world, g.player.x, g.player.y); const it = cityAmuletStock(c)[Number(t.dataset.abuy)]; if (it && !it.sold && amuletCount(c.color) >= 1) { giveAmulet(c.color, -1); it.sold = true; addCards(S.collection, it.name, 1); sfx('coin'); save(); render(); } return; }
+  if (t.dataset.amshop != null) { const name = t.dataset.amshop; const color = t.dataset.amcolor || null; const cost = amuletPrice(name); if (spendAmulets(cost, color)) { addCards(S.collection, name, 1); sfx('coin'); save(); render(); toast(`${name} bought for ${cost} amulet${cost > 1 ? 's' : ''}.`); } return; }
   switch (t.id) {
     case 'b-import': S.importText = document.getElementById('imp').value; doImport(S.importText); break;
     case 'b-csv': fetch('api/collection').then(r => r.ok ? r.text() : Promise.reject(new Error('collection.csv not found next to server.js'))).then(txt => { S.importText = txt; doImport(txt); }).catch(e => { S.report = { error: e.message }; render(); }); break;
