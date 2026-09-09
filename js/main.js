@@ -602,6 +602,7 @@ function addClue(color) {
 // Offer a beaten roamer's spoils as a choice: their card, or a dungeon clue. Finalises to the result screen.
 function roamSpoils(tpl, ante, lines) {
   const finish = extra => { S.modal = null; S.result = { won: true, tpl, lines: [...lines, extra] }; save(); go('result'); };
+  S.screen = 'map';   // the duel view is gone; overlay the choice on a real screen so render() has something to draw
   S.modal = {
     title: 'Spoils of victory',
     body: `<p class="taunt">“Spare me — I can give you the card from my deck, or tell you what I know of the dark places.”</p>
