@@ -117,6 +117,12 @@ tr.st-unsupported td:nth-child(7), tr.st-unsupported td:nth-child(3), tr.st-miss
 .xrow input { width: 70px; }
 .modal.wide { max-width: 900px; }
 .viewer { display: flex; flex-wrap: wrap; gap: 8px; max-height: 60vh; overflow: auto; margin: 10px 0; }
+.pickmodal { max-width: min(94vw, 1000px); }
+.pickrow { display: flex; flex-wrap: nowrap; gap: 8px; overflow-x: auto; overflow-y: hidden; padding: 10px 2px 14px; margin: 8px 0; scrollbar-width: thin; }
+.pickrow .card { flex: 0 0 auto; cursor: pointer; transition: transform .08s ease; }
+.pickrow .card:hover { transform: translateY(-3px); }
+.pickrow .card.chosen { outline: 3px solid #6fe08a; box-shadow: 0 0 14px rgba(111,224,138,.6); transform: translateY(-4px); }
+.pickfoot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 4px; }
 .link { cursor: pointer; text-decoration: underline dotted; }
 
 /* big hover preview */

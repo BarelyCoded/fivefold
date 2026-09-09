@@ -320,7 +320,7 @@ export class Duel {
   endOfTurnCleanup() {
     for (const p of this.players) { p.shield = 0; p.cop = []; }
     for (const p of this.players) for (const c of p.battlefield) {
-      c.damage = 0; c.temp = { p: 0, t: 0, kw: [], flags: [], animate: null }; c.damaged = new Set(); c.shield = 0;
+      c.damage = 0; c.temp = { p: 0, t: 0, kw: [], flags: [], animate: null }; c.damaged = new Set(); c.shield = 0; c.regen = 0;   // regeneration shields last only until end of turn
       for (const f of ['cantBlock', 'cantAttack', 'cantAttackOrBlock', 'unblockable', 'noCombatDamage', 'dealsNoCombatDamage', 'dealsNoDamage', 'noDamage', 'cantBeBlockedByWalls', 'blockableOnlyByWalls']) c.flags.delete(f);
       if (c.controlUntilEot !== null) { const orig = c.controlUntilEot; c.controlUntilEot = null; this.changeControl(c, orig); }
     }

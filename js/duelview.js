@@ -364,6 +364,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
         return `<div class="hint">${esc(req.text)}. ${esc(req.note || 'The first card is drawn first.')}</div><div class="choices">${ui.order.map((id, i) => `<div class="choice" data-preview="${esc(label(id))}"><button class="btn small" data-order="up" data-idx="${i}" ${i === 0 ? 'disabled' : ''} title="Move up">▲</button><button class="btn small" data-order="down" data-idx="${i}" ${i === ui.order.length - 1 ? 'disabled' : ''} title="Move down">▼</button> ${i + 1}. ${esc(label(id))}</div>`).join('')}</div><button class="btn primary" id="b-order">OK</button>`;
       }
       case 'choose': {
+        if (cardChoiceActive()) return `<div class="hint">${esc(req.text)} — pick from the cards shown, then Confirm.</div>`;
         const sel = ui.choice || new Set();
         return `<div class="hint">${esc(req.text)}${req.min === req.max ? '' : ` (${req.min}–${req.max})`}</div><div class="choices">${req.options.map(o => `<label class="choice" data-preview="${esc(o.label)}"><input type="checkbox" data-choice="${o.id}" ${sel.has(o.id) ? 'checked' : ''}> ${esc(o.label)}</label>`).join('')}</div><button class="btn primary" id="b-choose" ${sel.size < req.min || sel.size > req.max ? 'disabled' : ''}>OK</button>`;
       }
@@ -417,7 +418,28 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
       </aside>
       ${ui.viewer !== null ? viewerHtml() : ''}
       ${ui.mulligan ? mulliganHtml() : ''}
+      ${cardChoiceActive() ? cardChoiceHtml() : ''}
     </div>`;
+  }
+  // A card-selection request (search your library, discard, sacrifice, scry…) shown like the graveyard:
+  // the cards laid out in a row you scroll through and click, instead of a cramped checkbox list.
+  function cardChoiceActive() {
+    const req = duel.pending?.req;
+    return !!(req && req.kind === 'choose' && req.options && req.options.length && req.options.every(o => o && o.id != null && cardOf(o.id)));
+  }
+  function cardChoiceHtml() {
+    const req = duel.pending.req;
+    if (ui.choice && [...ui.choice].some(id => !req.options.some(o => o.id === id))) ui.choice = null;   // stale from a prior request
+    const sel = ui.choice || new Set();
+    const cards = req.options.map(o => cardOf(o.id)).filter(Boolean);
+    const rangeTxt = req.min === req.max ? (req.max === 1 ? 'Choose one' : `Choose ${req.max}`) : req.min === 0 ? `Choose up to ${req.max}` : `Choose ${req.min}–${req.max}`;
+    const okN = sel.size >= req.min && sel.size <= req.max;
+    return `<div class="overlay"><div class="modal wide pickmodal">
+      <h3>${esc(req.text)}</h3>
+      <div class="pickrow">${cards.length ? cards.map(c => cardHtml(c.def, { id: c.id, zone: 'pick', classes: sel.has(c.id) ? ['chosen'] : [] })).join('') : '<p class="small">No matching cards.</p>'}</div>
+      <div class="pickfoot"><span class="small">${rangeTxt}${req.secret ? ' · shuffled afterward' : ''} · ${sel.size} selected</span>
+        <button class="btn primary" id="b-choose" ${okN ? '' : 'disabled'}>${req.min === 0 && sel.size === 0 ? 'Take none' : 'Confirm'}</button></div>
+    </div></div>`;
   }
   function mulliganHtml() {
     const lands = me.hand.filter(isLand).length;
@@ -604,6 +626,12 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
       if (btn.id === 'b-pay-cancel') { ui.paying = null; render(); return; }
       if (btn.id === 'b-pay-cast') { castPoolOnly(ui.paying.card, ui.paying.opts); return; }
       if ((btn.classList.contains('card') || btn.classList.contains('pill')) && btn.dataset.zone === 'bf') { const c = cardOf(btn.dataset.id); if (c && c.controller === 0 && !c.tapped && c.def.manaAbilities.length) tapToward(c); }
+      return;
+    }
+    if (cardChoiceActive()) {   // card-picker overlay: click cards to select, then Confirm
+      const req = duel.pending.req;
+      if (btn.id === 'b-choose') { const sel = ui.choice || new Set(); if (sel.size >= req.min && sel.size <= req.max) { ui.choice = null; duel.humanAnswer([...sel]); run(); } return; }
+      if (btn.classList.contains('card') && btn.dataset.zone === 'pick') { const c = cardOf(btn.dataset.id); if (c) { ui.choice ||= new Set(); if (ui.choice.has(c.id)) ui.choice.delete(c.id); else if (req.max === 1) ui.choice = new Set([c.id]); else if (ui.choice.size < req.max) ui.choice.add(c.id); render(); } return; }
       return;
     }
     if (btn.dataset.menu !== undefined) { if (btn.dataset.menu === 'cancel') { ui.menu = null; ui.wizard = null; render(); } else { const it = ui.menu.items[Number(btn.dataset.menu)]; if (it && !it.disabled) it.action(); } return; }
