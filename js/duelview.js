@@ -367,6 +367,28 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
         const sel = ui.choice || new Set();
         return `<div class="hint">${esc(req.text)}${req.min === req.max ? '' : ` (${req.min}–${req.max})`}</div><div class="choices">${req.options.map(o => `<label class="choice" data-preview="${esc(o.label)}"><input type="checkbox" data-choice="${o.id}" ${sel.has(o.id) ? 'checked' : ''}> ${esc(o.label)}</label>`).join('')}</div><button class="btn primary" id="b-choose" ${sel.size < req.min || sel.size > req.max ? 'disabled' : ''}>OK</button>`;
       }
+      case 'divide': {
+        // Divide the attacker's power among its blockers (modern rules — no ordering). Default to lethal on
+        // the cheapest blockers first so a straight "kill them" only needs a confirm.
+        if (!ui.divide || ui.divide.reqId !== req.source || ui.divide.total !== req.total) {
+          const map = {}; let rem = req.total;
+          req.targets.slice().sort((a, b) => a.lethal - b.lethal).forEach((t, i, arr) => { if (rem <= 0) return; let give = Math.min(rem, t.lethal); if (i === arr.length - 1 && !req.trample) give = rem; map[t.id] = give; rem -= give; });
+          ui.divide = { reqId: req.source, total: req.total, map, player: req.trample ? rem : 0 };
+        }
+        const d = ui.divide;
+        const onBlockers = req.targets.reduce((s, t) => s + (d.map[t.id] || 0), 0);
+        const assigned = onBlockers + (req.trample ? d.player : 0);
+        const remaining = req.total - assigned;
+        const allLethal = req.targets.every(t => (d.map[t.id] || 0) >= t.lethal);
+        const legal = remaining === 0 && (!req.trample || d.player === 0 || allLethal);
+        const oppName = duel.opponentOf(me).name;
+        const row = (id, name, lethalTxt, val, plusOff) => `<div class="divrow"><span class="nm">${esc(name)}</span><span class="lth small">${lethalTxt}</span><span class="stp"><button class="btn tiny" data-div="${id}" data-dir="-1" ${val <= 0 ? 'disabled' : ''}>−</button><b>${val}</b><button class="btn tiny" data-div="${id}" data-dir="1" ${plusOff ? 'disabled' : ''}>+</button></span></div>`;
+        return `<div class="hint">${esc(req.note)}</div>
+          <div class="divlist">${req.targets.map(t => row(String(t.id), t.label, `lethal ${t.lethal}`, d.map[t.id] || 0, remaining <= 0)).join('')}
+          ${req.trample ? row('player', `${oppName} (trample)`, allLethal ? 'ready' : 'lethal each blocker first', d.player, remaining <= 0 || !allLethal) : ''}</div>
+          ${remaining !== 0 ? `<div class="msg">Remaining to assign: ${remaining}</div>` : req.trample && !legal ? '<div class="msg">Give each blocker lethal before trampling over.</div>' : '<div class="hint">All damage assigned.</div>'}
+          <button class="btn primary" id="b-divide" ${legal ? '' : 'disabled'}>Deal damage</button>`;
+      }
     }
     return '';
   }
@@ -591,6 +613,16 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     if (btn.dataset.reqref) { const [type, id] = btn.dataset.reqref.split(':'); pickRef({ type, id: Number(id) }); return; }
     if (btn.dataset.answer) { duel.humanAnswer(btn.dataset.answer === 'yes'); run(); return; }
     if (btn.dataset.order && ui.order) { const i = Number(btn.dataset.idx), j = btn.dataset.order === 'up' ? i - 1 : i + 1; if (j >= 0 && j < ui.order.length) { [ui.order[i], ui.order[j]] = [ui.order[j], ui.order[i]]; render(); } return; }
+    if (btn.dataset.div && ui.divide) {
+      const req = duel.pending?.req; if (!req || req.kind !== 'divide') return;
+      const d = ui.divide, key = btn.dataset.div, dir = Number(btn.dataset.dir);
+      const onBlockers = req.targets.reduce((s, t) => s + (d.map[t.id] || 0), 0);
+      const remaining = req.total - onBlockers - (req.trample ? d.player : 0);
+      if (dir > 0 && remaining <= 0) return;
+      if (key === 'player') { if (dir > 0 && !req.targets.every(t => (d.map[t.id] || 0) >= t.lethal)) return; d.player = Math.max(0, d.player + dir); }
+      else { const id = Number(key); d.map[id] = Math.max(0, (d.map[id] || 0) + dir); if (dir < 0 && req.trample && !req.targets.every(t => (d.map[t.id] || 0) >= t.lethal)) d.player = 0; }
+      render(); return;
+    }
     if (btn.dataset.color) { duel.humanAnswer(btn.dataset.color); run(); return; }
     if (btn.hasAttribute('data-close-viewer') && (btn === ev.target || btn.tagName === 'BUTTON')) { ui.viewer = null; render(); return; }
     if (btn.dataset.grave !== undefined) { ui.viewer = Number(btn.dataset.grave); render(); return; }
@@ -602,6 +634,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
       case 'b-block': { if (!duel.validBlocks(ui.blocks)) { ui.message = 'Those blocks are not legal.'; render(); return; } const b = ui.blocks; ui.blocks = {}; ui.blocker = null; ui.message = ''; duel.humanAnswer(b); run(); return; }
       case 'b-choose': { const ids = [...(ui.choice || [])]; ui.choice = null; duel.humanAnswer(ids); run(); return; }
       case 'b-order': { const ids = (ui.order || []).slice(); ui.order = null; duel.humanAnswer(ids); run(); return; }
+      case 'b-divide': { const d = ui.divide; if (!d) return; const plan = { ...d.map }; if (d.player) plan.player = d.player; ui.divide = null; duel.humanAnswer(plan); run(); return; }
       case 'b-look': { duel.humanAnswer(null); run(); return; }
       case 'b-concede': if (confirm('Concede this duel? You will lose your ante card.')) { duel.end(1, `${me.name} concedes.`); run(); } return;
     }

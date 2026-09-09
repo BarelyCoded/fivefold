@@ -1387,26 +1387,34 @@ export class Duel {
         else {
           const trample = has(a, 'Trample');
           const lethalOf = b => has(a, 'Deathtouch') ? 1 : Math.max(0, toughness(b) - b.damage);
-          // The attacker assigns damage down an order of its choosing. When you're the attacker and more
-          // than one creature blocks — and you can't kill them all — you pick who dies; otherwise the AI
-          // (or a trivial split) uses the "cheapest to kill first" heuristic.
-          let ordered;
-          const totalLethal = blockers.reduce((s, b) => s + lethalOf(b), 0);
-          if (a.controller === 0 && blockers.length >= 2 && dmg < totalLethal) {
-            const ids = yield { kind: 'order', player: 0, note: `Assign ${a.def.name}'s ${dmg} combat damage: order the blockers — each takes lethal before the next.`, text: `${a.def.name} is blocked by ${blockers.length}. Choose the order damage is dealt`, options: blockers.map(b => ({ id: b.id, label: `${b.def.name} (${power(b)}/${toughness(b) - b.damage})` })) };
-            const byId = new Map(blockers.map(b => [b.id, b]));
-            ordered = (ids || []).map(id => byId.get(id)).filter(Boolean);
-            for (const b of blockers) if (!ordered.includes(b)) ordered.push(b);
-          } else {
-            ordered = blockers.slice().sort((x, y) => lethalOf(x) - lethalOf(y));
+          // Modern rules: the attacker divides its power freely among the blockers (no ordering). Without
+          // Trample all of it must land on the blockers; with Trample, each blocker must be assigned lethal
+          // before any spills over to the player. You choose the split for your own attacker; the AI (and
+          // trivial single-outcome cases) auto-divide, killing the cheapest blockers first.
+          let plan = null;   // { [blockerId]: amount, player?: amount }
+          if (a.controller === 0 && blockers.length >= 2) {
+            const ans = yield {
+              kind: 'divide', player: 0, source: a.id, total: dmg, trample,
+              note: `Divide ${a.def.name}'s ${dmg} damage among its blockers${trample ? ' — each needs lethal before you can trample the rest through' : ''}.`,
+              targets: blockers.map(b => ({ id: b.id, label: `${b.def.name} (${power(b)}/${toughness(b) - b.damage})`, lethal: lethalOf(b) })),
+            };
+            if (ans && typeof ans === 'object') plan = ans;
           }
-          ordered.forEach((b, i) => {
-            if (dmg <= 0) return;
-            let give = Math.min(dmg, lethalOf(b));
-            if (i === ordered.length - 1 && !trample) give = dmg;
-            this.dealDamage(a, b, give, { combat: true }); dmg -= give;
-          });
-          if (dmg > 0 && trample) this.dealDamage(a, def, dmg, { combat: true });
+          if (!plan) {   // auto-divide: lethal to the cheapest blockers first, then spill (trample) or dump on the last
+            plan = {}; let rem = dmg;
+            const ordered = blockers.slice().sort((x, y) => lethalOf(x) - lethalOf(y));
+            ordered.forEach((b, i) => {
+              if (rem <= 0) return;
+              let give = Math.min(rem, lethalOf(b));
+              if (i === ordered.length - 1 && !trample) give = rem;   // last blocker soaks the remainder
+              plan[b.id] = (plan[b.id] || 0) + give; rem -= give;
+            });
+            if (rem > 0 && trample) plan.player = rem;
+          }
+          // Apply the division (defensively clamped: never more than the attacker's power, trample only overflow).
+          let spent = 0;
+          for (const b of blockers) { const give = Math.max(0, Math.min(plan[b.id] || 0, dmg - spent)); if (give > 0) { this.dealDamage(a, b, give, { combat: true }); spent += give; } }
+          if (trample && plan.player) { const over = Math.max(0, Math.min(plan.player, dmg - spent)); if (over > 0) this.dealDamage(a, def, over, { combat: true }); }
         }
       }
       for (const b of blockers) if (deals(b)) this.dealDamage(b, a, power(b), { combat: true });
