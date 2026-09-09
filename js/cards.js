@@ -424,6 +424,15 @@ const rules = [
   [/^each player shuffles their hand and graveyard into their library, then draws seven cards$/, () => [{ type: 'twister' }]],
   [/^(target .+?) can't be regenerated this turn$/, () => []],
   [/^~ can't be countered$/, () => []],
+  // Manlands: "~ becomes a 2/2 Assembly-Worker artifact creature until end of turn" (Mishra's Factory, etc.)
+  [/^~ becomes a (\d+)\/(\d+)(.*?) creature until end of turn(?:\. it's still a land)?$/, m => {
+    const words = (m[3] || '').trim().split(/\s+/).filter(Boolean);
+    const SUPER = ['artifact', 'enchantment', 'land'];
+    const types = ['creature', ...words.filter(w => SUPER.includes(w))];
+    const subtypes = words.filter(w => !SUPER.includes(w));
+    return [{ type: 'animateSelf', p: Number(m[1]), t: Number(m[2]), types, subtypes }];
+  }],
+  [/^it's still a land$/, () => []],   // reminder text: manlands remain lands in the engine anyway
 ];
 
 function parseClause(t) {

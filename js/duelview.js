@@ -184,7 +184,9 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
   }
   function landStack(p) {
     const groups = new Map();
-    for (const c of p.battlefield.filter(isLand)) { const g = groups.get(c.def.name) || { name: c.def.name, def: c.def, all: [] }; g.all.push(c); groups.set(c.def.name, g); }
+    // A land that is currently a creature (an animated manland like Mishra's Factory) shows in the
+    // creature row instead, so it can be declared as an attacker/blocker — not twice here as well.
+    for (const c of p.battlefield.filter(c => isLand(c) && !isCreature(c))) { const g = groups.get(c.def.name) || { name: c.def.name, def: c.def, all: [] }; g.all.push(c); groups.set(c.def.name, g); }
     const items = [...groups.values()].map(g => {
       const untapped = g.all.filter(c => !c.tapped);
       const first = untapped[0] || g.all[0];

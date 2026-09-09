@@ -308,7 +308,7 @@ export class Duel {
   endOfTurnCleanup() {
     for (const p of this.players) { p.shield = 0; p.cop = []; }
     for (const p of this.players) for (const c of p.battlefield) {
-      c.damage = 0; c.temp = { p: 0, t: 0, kw: [], flags: [] }; c.damaged = new Set(); c.shield = 0;
+      c.damage = 0; c.temp = { p: 0, t: 0, kw: [], flags: [], animate: null }; c.damaged = new Set(); c.shield = 0;
       for (const f of ['cantBlock', 'cantAttack', 'cantAttackOrBlock', 'unblockable', 'noCombatDamage', 'dealsNoCombatDamage', 'dealsNoDamage', 'noDamage', 'cantBeBlockedByWalls', 'blockableOnlyByWalls']) c.flags.delete(f);
       if (c.controlUntilEot !== null) { const orig = c.controlUntilEot; c.controlUntilEot = null; this.changeControl(c, orig); }
     }
@@ -965,6 +965,7 @@ export class Duel {
       case 'fromGraveyard': for (const s of subs) if (s.card && s.card.zone === 'graveyard') { this.moveTo(s.card, e.to === 'hand' ? 'hand' : 'battlefield', { controller: p.idx }); if (e.tapped) s.card.tapped = true; } break;
       case 'pump': { const dp = this.amount(e.p, ctx), dt = this.amount(e.t, ctx); for (const s of subs) if (s.card && isCreature(s.card)) { if (e.whileTapped) s.card.linked.push({ src: src.id, p: dp, t: dt }); else { s.card.temp.p += dp; s.card.temp.t += dt; } this.say(`${s.card.def.name} gets ${dp >= 0 ? '+' : ''}${dp}/${dt >= 0 ? '+' : ''}${dt}${e.whileTapped ? ` while ${src.def.name} stays tapped` : ''}.`); } break; }
       case 'grant': for (const s of subs) if (s.card) { s.card.temp.kw.push(e.keyword); this.say(`${s.card.def.name} gains ${kwName(e.keyword).toLowerCase()}.`); } break;
+      case 'animateSelf': src.temp.animate = { p: e.p, t: e.t, types: e.types || ['creature'] }; this.say(`${src.def.name} becomes a ${e.p}/${e.t} creature until end of turn.`); break;
       case 'flag': for (const s of subs) if (s.card) { if (e.temp) s.card.temp.flags.push(e.flag); else s.card.flags.add(e.flag); } break;
       case 'loseTemp': for (const s of subs) if (s.card) s.card.temp.flags.push('lose:' + e.keyword); break;
       case 'removeFromCombat': for (const s of subs) if (s.card) { removeFrom(this.attackers, s.card.id); delete this.blocks[s.card.id]; for (const k of Object.keys(this.blocks)) this.blocks[k] = this.blocks[k].filter(id => id !== s.card.id); this.say(`${s.card.def.name} is removed from combat.`); } break;
@@ -1172,7 +1173,7 @@ export class Duel {
     else if (from === 'exile') removeFrom(owner.exile, c);
     else if (from === 'stack') { const i = this.stack.findIndex(it => it.card === c); if (i >= 0) this.stack.splice(i, 1); }
     // reset state
-    c.tapped = false; c.damage = 0; c.temp = { p: 0, t: 0, kw: [], flags: [] }; c.regen = 0; c.flags = new Set(); c.counters = {}; c.controlUntilEot = null; c.damaged = new Set(); c.attachedTo = null; c.shield = 0; c.linked = []; c.controlLink = null;
+    c.tapped = false; c.damage = 0; c.temp = { p: 0, t: 0, kw: [], flags: [], animate: null }; c.regen = 0; c.flags = new Set(); c.counters = {}; c.controlUntilEot = null; c.damaged = new Set(); c.attachedTo = null; c.shield = 0; c.linked = []; c.controlLink = null;
     if (c.token && zone !== 'battlefield') { c.zone = 'gone'; return; }
     if (zone === 'battlefield' && c.def.entersSacrifice) {
       const es = c.def.entersSacrifice, ctrl = this.players[opts.controller ?? c.owner];
@@ -1395,6 +1396,7 @@ export class Duel {
       if (cda) { const n = this.cdaCount(c, cda); if (cda.which !== 't') cur.p = n; if (cda.which !== 'p') cur.t = n + (cda.plusT || 0); }
       for (const [k, n] of Object.entries(c.counters)) { const mm = k.match(/^([+-]\d+)\/([+-]\d+)$/); if (mm && n > 0) { cur.p += Number(mm[1]) * n; cur.t += Number(mm[2]) * n; } }
       cur.p += c.temp.p; cur.t += c.temp.t;
+      if (c.temp.animate) { for (const t of c.temp.animate.types) cur.types.add(t); cur.p += c.temp.animate.p; cur.t += c.temp.animate.t; }   // manland animated until end of turn
       c.linked = c.linked.filter(l => { const s = this.card(l.src); return s && s.zone === 'battlefield' && s.tapped; });
       for (const l of c.linked) { cur.p += l.p; cur.t += l.t; }
       c.cur = cur;
