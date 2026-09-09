@@ -523,15 +523,17 @@ function artifactNames() {
   const own = knownCardNames().filter(n => { const d = defOf(n); return d && d.kind !== 'unsupported' && d.types.includes('Artifact') && d.colors?.length === 0; });
   return [...new Set([...cat, ...own])];
 }
+// Engine-ignored (unsupported) cards can't go in a deck, so they're never offered for sale.
+const shopSellable = n => { const d = defOf(n); return d && d.kind !== 'unsupported' && d.kind !== 'land'; };
 function amuletShopPool(color) {
-  return shopNames(color).filter(n => defOf(n)).sort((a, b) => (defOf(a).cmc - defOf(b).cmc) || a.localeCompare(b));
+  return shopNames(color).filter(shopSellable).sort((a, b) => (defOf(a).cmc - defOf(b).cmc) || a.localeCompare(b));
 }
 // A shop shows a random 15 that stays put until the player wins or loses a battle (wins+losses is the nonce).
 function amuletStockNames(city) {
   const g = S.game; const color = city.color; const bc = g.wins + g.losses;
   g.amuletStock ||= {};
   const st = g.amuletStock[color];
-  if (st && st.bc === bc && st.names && st.names.length) return st.names;
+  if (st && st.bc === bc && st.names && st.names.length) return st.names.filter(n => { const d = defOf(n); return d && d.kind !== 'unsupported'; });
   if (S.shopFetching === color) return null;                 // still loading; don't lock in a thin stock
   const pool = [...amuletShopPool(color), ...artifactShopPool()];
   if (!pool.length) return null;
@@ -542,7 +544,7 @@ function amuletStockNames(city) {
 }
 const isColorlessArtifact = n => { const d = defOf(n); return !!d && d.types.includes('Artifact') && (!d.colors || d.colors.length === 0); };
 function artifactShopPool() {
-  return artifactNames().filter(n => defOf(n)).sort((a, b) => (defOf(a).cmc - defOf(b).cmc) || a.localeCompare(b));
+  return artifactNames().filter(n => { const d = defOf(n); return d && d.kind !== 'unsupported'; }).sort((a, b) => (defOf(a).cmc - defOf(b).cmc) || a.localeCompare(b));
 }
 // On opening a city, pull card data (not the slow era-art) for that color's shelf, then re-render.
 function stockAmuletShop(color) {
@@ -1041,7 +1043,7 @@ document.addEventListener('keydown', ev => {
 
 // ---- boot -----------------------------------------------------------------------
 // Debug handle for the console and for automated tests: window.ff.S is the app state.
-window.ff = { S, defOf, save, render, startDuel, enemyById, startTutorialDuel, riddleDefs, makeRiddle };
+window.ff = { S, defOf, save, render, startDuel, enemyById, startTutorialDuel, riddleDefs, makeRiddle, amuletShopPool, artifactShopPool, cityPool };
 initPreview();
 load();
 render();
