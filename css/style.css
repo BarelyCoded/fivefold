@@ -424,17 +424,32 @@ svg.arrows { position: absolute; left: 0; top: 0; pointer-events: none; z-index:
 @media (max-width:760px){ .tsummary{ grid-template-columns:repeat(3,1fr);} .trow{ grid-template-columns:30px minmax(0,1fr) 48px 60px; } .trow-t{ display:none; } }
 
 /* ---- deck mana curve ---- */
-.curve { margin: 10px 0 12px; }
-.curve-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
-.curve-head > span:first-child { font-family: Garamond, Georgia, serif; font-size: 15px; color: var(--ink); }
+.deckstats { display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0 12px; }
+.deckstats > * { border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; background: color-mix(in srgb, var(--bg2) 55%, transparent); }
+.deckstats > .curve { flex: 2 1 260px; }
+.deckstats > .pie-box { flex: 1 1 232px; }
+.statmsg { color: var(--ink3); margin: 8px 0 2px; }
+.curve { margin: 0; }
+.curve-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 7px; }
+.curve-head > span:first-child { font-family: Garamond, Georgia, serif; font-size: 14px; color: var(--ink); }
 .curve-head .small { color: var(--ink3); font-variant-numeric: tabular-nums; }
-.curve-plot { display: flex; align-items: flex-end; gap: 6px; height: 96px; padding: 0 2px; border-bottom: 1px solid var(--line); }
+.curve-plot { position: relative; display: flex; align-items: flex-end; gap: 4px; height: 76px; padding: 0 1px; border-bottom: 1px solid var(--line); }
 .curve-col { flex: 1 1 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
-.curve-n { font-size: 11px; color: var(--ink2); font-variant-numeric: tabular-nums; line-height: 1; margin-bottom: 3px; min-height: 11px; }
-.curve-bar { width: 100%; max-width: 30px; border-radius: 4px 4px 0 0; background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 62%, var(--bg2))); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent); }
-.curve-bar:hover { background: linear-gradient(180deg, var(--gold), color-mix(in srgb, var(--gold) 62%, var(--bg2))); }
-.curve-axis { display: flex; gap: 6px; padding: 4px 2px 0; }
-.curve-axis span { flex: 1 1 0; text-align: center; font-size: 11px; color: var(--ink3); font-variant-numeric: tabular-nums; }
+.curve-n { font-size: 10px; color: var(--ink2); font-variant-numeric: tabular-nums; line-height: 1; margin-bottom: 2px; min-height: 10px; }
+.curve-bar { width: 100%; max-width: 26px; min-height: 2px; border-radius: 3px 3px 0 0; background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 60%, var(--bg2))); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent); transition: background .12s; }
+.curve-bar.empty { background: var(--line); box-shadow: none; opacity: .5; }
+.curve-col:hover .curve-bar:not(.empty) { background: linear-gradient(180deg, var(--gold), color-mix(in srgb, var(--gold) 60%, var(--bg2))); }
+.curve-avg { position: absolute; top: -2px; bottom: 0; width: 0; border-left: 1px dashed var(--gold); opacity: .7; pointer-events: none; z-index: 1; }
+.curve-axis { display: flex; gap: 4px; padding: 3px 1px 0; }
+.curve-axis span { flex: 1 1 0; text-align: center; font-size: 10px; color: var(--ink3); font-variant-numeric: tabular-nums; }
+.pie-row { display: flex; align-items: center; gap: 11px; margin-top: 2px; }
+.pie { flex: 0 0 auto; width: 74px; height: 74px; border-radius: 50%; display: grid; place-items: center; box-shadow: inset 0 0 0 1px rgba(0,0,0,.25); }
+.pie-hole { width: 42px; height: 42px; border-radius: 50%; background: var(--panel); display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1; font-size: 15px; font-weight: 700; color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
+.pie-hole small { font-size: 8.5px; font-weight: 400; color: var(--ink3); margin-top: 1px; }
+.pie-legend { list-style: none; margin: 0; padding: 0; min-width: 0; flex: 1 1 auto; }
+.pie-legend li { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink2); padding: 1px 0; white-space: nowrap; }
+.pie-legend .dot { width: 10px; height: 10px; flex: 0 0 auto; }
+.pie-pct { margin-left: auto; color: var(--ink3); font-variant-numeric: tabular-nums; }
 
 /* ---- world magic menu ---- */
 .wmgrid { display: grid; gap: 6px; margin: 6px 0 4px; }

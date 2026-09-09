@@ -1006,14 +1006,32 @@ function deck() {
   const size = deckSize(g.deck), lands = inDeck.filter(r => r.d?.kind === 'land').reduce((a, r) => a + r.c, 0);
   // Mana curve: nonland spells bucketed by mana value (0..6, 7+).
   const curve = new Array(8).fill(0); let spells = 0, cmcSum = 0;
-  for (const r of inDeck) { if (!r.d || r.d.kind === 'land') continue; const cv = Math.min(7, r.d.cmc || 0); curve[cv] += r.c; spells += r.c; cmcSum += (r.d.cmc || 0) * r.c; }
-  const maxC = Math.max(1, ...curve), avg = spells ? (cmcSum / spells) : 0, BH = 78;
+  // Colour pie: coloured mana symbols demanded across nonland spells (hybrids split evenly).
+  const pip = { W: 0, U: 0, B: 0, R: 0, G: 0 };
+  for (const r of inDeck) {
+    if (!r.d || r.d.kind === 'land') continue;
+    const cv = Math.min(7, r.d.cmc || 0); curve[cv] += r.c; spells += r.c; cmcSum += (r.d.cmc || 0) * r.c;
+    for (const grp of (r.d.cost?.pips || [])) { const cols = grp.filter(c => pip[c] !== undefined); for (const c of cols) pip[c] += r.c / cols.length; }
+  }
+  const maxC = Math.max(1, ...curve), avg = spells ? (cmcSum / spells) : 0, BH = 64;
+  const avgLeft = spells ? (Math.min(7, avg) / 7 * 100) : 0;   // avg marker position across the 0..7 axis
   const curveHtml = `<div class="curve">
     <div class="curve-head"><span>Mana curve</span><span class="small">${spells} spell${spells === 1 ? '' : 's'}${spells ? ` · avg ${avg.toFixed(1)}` : ''}</span></div>
-    ${spells ? `<div class="curve-plot">${curve.map((n, i) => `<div class="curve-col"><span class="curve-n">${n || ''}</span><div class="curve-bar" style="height:${n ? Math.max(4, Math.round(n / maxC * BH)) : 0}px" title="${n} spell${n === 1 ? '' : 's'} at ${i === 7 ? '7+' : i} mana"></div></div>`).join('')}</div>
+    ${spells ? `<div class="curve-plot">${spells ? `<span class="curve-avg" style="left:${avgLeft}%" title="Average mana value ${avg.toFixed(2)}"></span>` : ''}${curve.map((n, i) => `<div class="curve-col"><span class="curve-n">${n || ''}</span><div class="curve-bar${n ? '' : ' empty'}" style="height:${n ? Math.max(4, Math.round(n / maxC * BH)) : 0}px" title="${n} spell${n === 1 ? '' : 's'} at ${i === 7 ? '7+' : i} mana"></div></div>`).join('')}</div>
     <div class="curve-axis">${curve.map((n, i) => `<span>${i === 7 ? '7+' : i}</span>`).join('')}</div>`
-    : '<p class="small" style="margin:6px 0 0">Add some nonland cards to see the curve.</p>'}
+    : '<p class="small statmsg">Add nonland cards to see the curve.</p>'}
   </div>`;
+  const pipTotal = COLORS.reduce((a, c) => a + pip[c], 0);
+  let acc = 0; const stops = [];
+  for (const c of COLORS) { if (pip[c] <= 0) continue; const s = acc / pipTotal * 360, e = (acc + pip[c]) / pipTotal * 360; stops.push(`var(--${c}) ${s.toFixed(2)}deg ${e.toFixed(2)}deg`); acc += pip[c]; }
+  const pieHtml = `<div class="pie-box">
+    <div class="curve-head"><span>Colors</span><span class="small">${pipTotal ? Math.round(pipTotal) + ' symbol' + (Math.round(pipTotal) === 1 ? '' : 's') : ''}</span></div>
+    ${pipTotal ? `<div class="pie-row">
+      <div class="pie" style="background:conic-gradient(${stops.join(',')})"><div class="pie-hole">${COLORS.filter(c => pip[c] > 0).length}<small>color${COLORS.filter(c => pip[c] > 0).length === 1 ? '' : 's'}</small></div></div>
+      <ul class="pie-legend">${COLORS.filter(c => pip[c] > 0).sort((a, b) => pip[b] - pip[a]).map(c => `<li><i class="dot c-${c}"></i>${COLOR_NAME[c]}<span class="pie-pct">${Math.round(pip[c])} · ${Math.round(pip[c] / pipTotal * 100)}%</span></li>`).join('')}</ul>
+    </div>` : '<p class="small statmsg">Colored spells show your color split here.</p>'}
+  </div>`;
+  const statsHtml = `<div class="deckstats">${curveHtml}${pieHtml}</div>`;
   app.innerHTML = `<section class="screen deckb">
     <div class="cols wide">
       <div class="box">
@@ -1023,7 +1041,7 @@ function deck() {
       </div>
       <div class="box">
         <div class="rowhead"><h2>Deck · ${size} cards, ${lands} lands</h2><span class="rowtools"><button class="btn" id="b-fill">Fill basics to 40</button><button class="btn" id="b-clear-deck"${size ? '' : ' disabled'}>Remove all</button></span></div>
-        ${curveHtml}
+        ${statsHtml}
         <div class="basics">${COLORS.map(c => `<span class="basic"><i class="dot c-${c}"></i>${BASICS[c]} <b>${g.deck[BASICS[c]] || 0}</b> <button class="btn tiny" data-rem="${BASICS[c]}">−</button><button class="btn tiny" data-add="${BASICS[c]}">+</button></span>`).join('')}</div>
         ${probs.length ? `<div class="msg">${probs.map(esc).join('<br>')}</div>` : '<div class="ok">Deck is ready.</div>'}
         <table class="coll"><tr><th>Card</th><th>Cost</th><th>Qty</th><th></th></tr>
