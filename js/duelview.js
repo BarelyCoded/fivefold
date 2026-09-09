@@ -334,7 +334,18 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
         <button id="b-concede" class="btn small ghost">Concede</button>
       </aside>
       ${ui.viewer !== null ? viewerHtml() : ''}
+      ${ui.mulligan ? mulliganHtml() : ''}
     </div>`;
+  }
+  function mulliganHtml() {
+    const lands = me.hand.filter(isLand).length;
+    const canMull = lands <= 1;
+    return `<div class="overlay"><div class="modal wide">
+      <h3>Opening hand</h3>
+      <p class="small">You drew <b>${lands} land${lands === 1 ? '' : 's'}</b> in ${me.hand.length} cards.${canMull ? ' A land-light hand — you may shuffle it back and redraw, free of charge.' : ' A workable hand.'}</p>
+      <div class="viewer">${me.hand.map(c => cardHtml(c.def, { id: c.id, zone: 'mull' })).join('')}</div>
+      <div class="btnrow"><button class="btn primary" id="b-mull-keep">Keep this hand</button><button class="btn" id="b-mull-again" ${canMull ? '' : 'disabled'}>Mulligan</button></div>
+    </div></div>`;
   }
   function viewerHtml() {
     const p = duel.players[ui.viewer];
@@ -427,6 +438,11 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
   root.addEventListener('click', ev => {
     const btn = ev.target.closest('button, [data-grave], [data-close-viewer], .stack-item, .pbox, .card, .pill');
     if (!btn) return;
+    if (ui.mulligan) {   // the opening-hand overlay swallows all other clicks
+      if (btn.id === 'b-mull-keep') { ui.mulligan = false; render(); run(); }
+      else if (btn.id === 'b-mull-again') { duel.mulligan(0); ui.mulligan = me.hand.filter(isLand).length <= 1; render(); if (!ui.mulligan) run(); }
+      return;
+    }
     if (btn.dataset.menu !== undefined) { if (btn.dataset.menu === 'cancel') { ui.menu = null; ui.wizard = null; render(); } else { const it = ui.menu.items[Number(btn.dataset.menu)]; if (it && !it.disabled) it.action(); } return; }
     if (btn.dataset.wiz === 'cancel') { ui.wizard = null; ui.menu = null; render(); return; }
     if (btn.dataset.wiz === 'x') { const v = Math.max(0, Math.min(ui.wizard.maxX, Number(root.querySelector('#xval').value) || 0)); if (ui.wizard.ability !== undefined) ui.wizard.onX(v); else { ui.wizard.opts.x = v; next(ui.wizard); } return; }
@@ -491,5 +507,8 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
 
   duel.onChange(() => { ui.message = ''; render(); if (duel.winner !== null) run(); });
   duel.start();
-  run();
+  // Offer a free mulligan on a land-starved opening hand (one land or none).
+  const openingLands = () => me.hand.filter(isLand).length;
+  if (!tutorial && me.hand.length && openingLands() <= 1) { ui.mulligan = true; render(); }
+  else run();
 }

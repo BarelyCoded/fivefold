@@ -72,6 +72,16 @@ export class Duel {
     this.jobs.push({ gen: this.nextStep() });
     this.refresh(); this.emit();
   }
+  // A free opening-hand mulligan: shuffle the hand back and redraw the same number of cards. Meant to be
+  // called right after start(), before the game proceeds; the duel view offers it on a land-starved hand.
+  mulligan(idx = 0) {
+    const p = this.players[idx];
+    for (const c of p.hand.slice()) this.moveTo(c, 'library');
+    shuffle(p.library, this.rng);
+    this.drawCards(p, idx === 0 ? (this.rules.handSize || 7) : 7);
+    this.say(`${p.name} takes a mulligan.`);
+    this.refresh(); this.emit();
+  }
   end(winnerIdx, why) {
     if (this.winner !== null) return;
     this.winner = winnerIdx; this.pending = null;
