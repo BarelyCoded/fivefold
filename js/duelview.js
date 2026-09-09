@@ -519,10 +519,17 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     }
     if (duel.pending?.req?.kind === 'target') { if (!isLegal(ref)) return; duel.humanAnswer(ref); run(); }
   }
+  // Menu label for an activated ability: cost, then the effect with ~ resolved to the card's own name
+  // and a capital first letter — so "{b}: regenerate ~." reads as "Regenerate Drudge Skeletons ({B})".
+  function abilityLabel(card, ab) {
+    let body = (ab.text || '').split(': ').slice(1).join(': ').replace(/~/g, card.def.name).replace(/\s*\.\s*$/, '').trim();
+    if (body) body = body.charAt(0).toUpperCase() + body.slice(1);
+    return `${body || 'Ability'} (${costText(ab.cost)})`.slice(0, 90);
+  }
   function permMenu(card) {
     const items = [];
     card.def.manaAbilities.forEach((ma, i) => { const ok = !card.tapped || !ma.cost.tap; for (const col of (ma.produces.length > 1 ? ma.produces : [ma.produces[0]])) items.push({ label: `Add ${ma.amount || 1} ${col} mana (${costText(ma.cost)})`, disabled: !ok, mana: true, action: () => { ui.menu = null; duel.humanMana(card, i, col); render(); } }); });
-    abilitiesOf(card).forEach((ab, i) => { if (ab.type !== 'activated') return; items.push({ label: `${costText(ab.cost)}: ${ab.text.split(': ').slice(1).join(': ').slice(0, 60) || 'ability'}`, disabled: !duel.canActivate(me, card, i), action: () => { ui.menu = null; startActivate(card, i); } }); });
+    abilitiesOf(card).forEach((ab, i) => { if (ab.type !== 'activated') return; items.push({ label: abilityLabel(card, ab), disabled: !duel.canActivate(me, card, i), action: () => { ui.menu = null; startActivate(card, i); } }); });
     if (!items.length) return;
     // A land / mana rock with a single unambiguous mana ability: tap it straight for mana, no menu.
     const enabled = items.filter(it => !it.disabled);
