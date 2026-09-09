@@ -413,7 +413,7 @@ export class Duel {
       case 'becomesTapped': return ev.type === 'tapped' && ev.card === c;
       case 'targeted': return ev.type === 'targeted' && ev.card === c;
       case 'anyCreatureDies': return ev.type === 'dies' && isCreatureDef(ev.card) && (!ab.other || ev.card !== c);
-      case 'damagedByDies': return ev.type === 'dies' && ev.card.damaged.has(c.id);
+      case 'damagedByDies': return ev.type === 'dies' && !!ev.damaged && ev.damaged.has(c.id);
       case 'anyCreatureEtb': return ev.type === 'etb' && isCreatureDef(ev.card) && (!ab.yours || ev.card.controller === c.controller) && (!ab.other || ev.card !== c);
       case 'enchantedDealsDamage': return ev.type === 'damage' && ev.source === c.attachedTo && !!c.attachedTo && (!ab.toYou || ev.target === this.players[c.controller]);
       case 'enchantedDies': return false; // fired directly from moveTo (see enchantedGone)
@@ -1200,7 +1200,9 @@ export class Duel {
       removeFrom(this.attackers, c.id); delete this.blocks[c.id];
       for (const k of Object.keys(this.blocks)) this.blocks[k] = this.blocks[k].filter(id => id !== c.id);
       const counters = { ...c.counters };
-      this.fireEvent({ type: zone === 'graveyard' ? 'dies' : 'leaves', card: c, counters, sacrificed: !!opts.sacrificed });
+      // Snapshot `damaged` too: moveTo resets it below, so triggers that read who dealt this
+      // creature damage (e.g. Sengir Vampire's) must see the set as it was at death, not after.
+      this.fireEvent({ type: zone === 'graveyard' ? 'dies' : 'leaves', card: c, counters, damaged: new Set(c.damaged), sacrificed: !!opts.sacrificed });
       if (zone === 'graveyard') this.fireEvent({ type: 'leaves', card: c });
       const onLeave = this.delayed.filter(d => d.kind === 'scheduled' && d.when === 'leaves' && d.targetId === c.id);
       if (onLeave.length) { this.delayed = this.delayed.filter(d => !onLeave.includes(d)); for (const item of onLeave) this.runDelayed(item); }
