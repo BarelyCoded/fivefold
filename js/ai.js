@@ -28,6 +28,20 @@ function pickTarget(duel, p, e, options, x = 0) {
   }
   if (e.type === 'counters' && e.kind === '-1/-1') { const b = best(oppPerms.filter(t => isCreature(t.c))); return b ? b.o : null; }
   if (e.type === 'counters' && e.kind === '+1/+1') { const b = best(mine.filter(t => isCreature(t.c))); return b ? b.o : null; }
+  if (e.type === 'bounce') {
+    // Bounce is tempo, not removal: the owner just recasts the creature, re-triggering any
+    // enter-the-battlefield effect (bouncing a Sage Owl hands them a free look at their deck).
+    // So only spend it on an expensive threat — or defensively, when a swing could near-kill us.
+    const boardPow = opp.battlefield.filter(isCreature).reduce((s, c) => s + power(c), 0);
+    const pressure = boardPow > 0 && boardPow >= p.life - 3;
+    const hasETB = c => c.def.abilities?.some(a => a.type === 'triggered' && a.event === 'etb');
+    const cre = oppPerms.filter(t => isCreature(t.c));
+    const pool = pressure ? cre : cre.filter(t => (t.c.def.cmc || 0) >= 4 && !hasETB(t.c));
+    const pick = pool.slice().sort((a, b) => (pressure ? power(b.c) - power(a.c) : (b.c.def.cmc || 0) - (a.c.def.cmc || 0)) || value(b.c) - value(a.c))[0];
+    if (pick) return pick.o;
+    const nb = best(oppPerms.filter(t => !isCreature(t.c)));   // otherwise a hostile noncreature (land, enchantment) is fine
+    return nb ? nb.o : null;
+  }
   if (HOSTILE.has(e.type)) {
     if (e.type === 'counter') { const s = options.find(o => o.type === 'spell' && duel.stack.find(i => i.id === o.id)?.controller !== p.idx); return s || null; }
     if (['lose', 'discard', 'mill', 'sacrifice', 'poison'].includes(e.type)) return players.find(o => o.idx === opp.idx) || null;
