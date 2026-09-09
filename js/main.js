@@ -195,7 +195,7 @@ function move(dx, dy) {
   if (g.player.cloak > 0) g.player.cloak--;
   if (g.player.food > 0) g.player.food--;
   else if (g.player.steps % 2 === 0 && g.player.life > 1) { g.player.life--; toast('You are starving: 1 life lost. Buy food in any city.'); }
-  if (g.player.steps % 5 === 0) { g.player.day++; if (g.player.day % 30 === 0) bossLink(); }
+  if (g.player.steps % 5 === 0) { g.player.day++; advanceSieges(g); if (g.status !== 'playing') return; if (g.player.day % 30 === 0) bossLink(); if (g.status !== 'playing') return; }
   const link = linkAt(g.world, nx, ny);
   if (link && !link.taken) { link.taken = true; g.player.maxLife += 2; g.player.life += 2; toast(`Mana link claimed. Maximum life is now ${g.player.maxLife}.`); }
   const mote = moteAt(g.world, nx, ny);
@@ -210,7 +210,7 @@ function move(dx, dy) {
   save();
   if (caught) { encounter(caught); return; }
   const city = cityAt(g.world, nx, ny);
-  if (city) { go('city'); return; }
+  if (city) { if (city.siege || city.captured) { const was = city.captured; city.siege = 0; city.captured = false; save(); toast(was ? `You break the siege and reclaim ${city.name}.` : `Your arrival scatters the besiegers of ${city.name}.`); } go('city'); return; }
   const lm = landmarkAt(g.world, nx, ny);
   if (lm && !lm.used) { landmarkRiddle(lm); return; }
   const sp = specialAt(g.world, nx, ny);
@@ -249,8 +249,23 @@ function landmarkRiddle(lm) {
 }
 function bossLink() {
   const g = S.game; g.boss.links++;
-  if (g.boss.links >= BOSS_LINKS) { g.status = 'lost'; save(); go('end'); return; }
+  if (g.boss.links >= BOSS_LINKS) { g.status = 'lost'; g.lostBy = 'seal'; save(); go('end'); return; }
   toast(`The Usurper has bound ${g.boss.links} of ${BOSS_LINKS} mana links. Hurry.`);
+}
+// The surviving Wardens march on your cities. A besieged city, unrelieved, is captured; lose four
+// and the realm collapses. Visiting a city drives the besiegers off and reclaims it.
+function advanceSieges(g) {
+  const w = g.world;
+  const alive = COLORS.filter(col => !(w.castles || []).find(c => c.color === col)?.fallen);
+  if (!alive.length || Math.random() > 0.34) return;   // a Warden makes a move every few days
+  const besieged = w.cities.filter(c => c.siege > 0 && !c.captured);
+  const open = w.cities.filter(c => !c.siege && !c.captured);
+  const target = (besieged.length && Math.random() < 0.6) ? rnd(besieged) : (open.length ? rnd(open) : (besieged.length ? rnd(besieged) : null));
+  if (!target) return;
+  target.siege = (target.siege || 0) + 1;
+  if (target.siege >= 3) { target.siege = 3; target.captured = true; toast(`${target.name} falls to a Warden's siege! Reclaim it before the realm collapses.`); sfx('lose'); }
+  else toast(`A Warden's host besieges ${target.name} (${target.siege}/3). Relieve it before it falls.`);
+  if (w.cities.filter(c => c.captured).length >= 4) { g.status = 'lost'; g.lostBy = 'siege'; save(); go('end'); }
 }
 function toast(msg) { S.toast = msg; render(); setTimeout(() => { if (S.toast === msg) { S.toast = null; render(); } }, 3500); }
 
@@ -1028,8 +1043,12 @@ function result() {
 function end() {
   const g = S.game;
   app.innerHTML = `<section class="screen resultscreen"><div class="box center">
-    <h2>${g.status === 'won' ? 'The Usurper falls' : 'The Spell of Dominion is cast'}</h2>
-    <p>${g.status === 'won' ? `${esc(g.name)} unbinds the mana links on day ${g.player.day} after ${g.wins} victories. The plane is free, for now.` : `On day ${g.player.day} the Usurper binds the final link. The world dims. Your collection survives; your journey does not.`}</p>
+    <h2>${g.status === 'won' ? 'The Usurper falls' : g.lostBy === 'siege' ? 'The realm is overrun' : 'The Spell of Dominion is cast'}</h2>
+    <p>${g.status === 'won'
+      ? `${esc(g.name)} unbinds the mana links on day ${g.player.day} after ${g.wins} victories. The plane is free, for now.`
+      : g.lostBy === 'siege'
+        ? `On day ${g.player.day} the Wardens' hosts take a fourth city. With the free realms fallen the Usurper rules unopposed. Your collection survives; your journey does not.`
+        : `On day ${g.player.day} the Usurper binds the final link. The world dims. Your collection survives; your journey does not.`}</p>
     <button class="btn primary" id="b-newgame">Start a new journey</button>
   </div></section>`;
 }
@@ -1123,7 +1142,7 @@ document.addEventListener('keydown', ev => {
 
 // ---- boot -----------------------------------------------------------------------
 // Debug handle for the console and for automated tests: window.ff.S is the app state.
-window.ff = { S, defOf, save, render, startDuel, enemyById, startTutorialDuel, riddleDefs, makeRiddle, amuletShopPool, artifactShopPool, cityPool, wardenOf, finishDuel };
+window.ff = { S, defOf, save, render, startDuel, enemyById, startTutorialDuel, riddleDefs, makeRiddle, amuletShopPool, artifactShopPool, cityPool, wardenOf, finishDuel, advanceSieges };
 initPreview();
 load();
 render();
