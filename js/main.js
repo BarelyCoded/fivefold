@@ -252,15 +252,28 @@ function bossLink() {
   if (g.boss.links >= BOSS_LINKS) { g.status = 'lost'; g.lostBy = 'seal'; save(); go('end'); return; }
   toast(`The Usurper has bound ${g.boss.links} of ${BOSS_LINKS} mana links. Hurry.`);
 }
+// How many cities the Wardens may besiege at once. Just one for the opening fortnight so the early
+// overland isn't swarmed; the war then widens as days pass, but never beyond the Wardens still standing.
+function maxSieges(day) {
+  if (day < 15) return 1;
+  if (day < 35) return 2;
+  if (day < 60) return 3;
+  return 4;
+}
 // The surviving Wardens march on your cities. A besieged city, unrelieved, is captured; lose four
 // and the realm collapses. Visiting a city drives the besiegers off and reclaims it.
 function advanceSieges(g) {
   const w = g.world;
-  const alive = COLORS.filter(col => !(w.castles || []).find(c => c.color === col)?.fallen);
-  if (!alive.length || Math.random() > 0.34) return;   // a Warden makes a move every few days
+  const aliveWardens = COLORS.filter(col => !(w.castles || []).find(c => c.color === col)?.fallen).length;
+  if (!aliveWardens || Math.random() > 0.34) return;   // a Warden makes a move every few days
   const besieged = w.cities.filter(c => c.siege > 0 && !c.captured);
   const open = w.cities.filter(c => !c.siege && !c.captured);
-  const target = (besieged.length && Math.random() < 0.6) ? rnd(besieged) : (open.length ? rnd(open) : (besieged.length ? rnd(besieged) : null));
+  const cap = Math.min(maxSieges(g.player.day), aliveWardens);   // clearing guilds also eases the pressure
+  // At the cap the Wardens can only press the sieges already under way; below it they may open a new front.
+  let target;
+  if (besieged.length >= cap) target = besieged.length ? rnd(besieged) : null;
+  else if (!besieged.length) target = open.length ? rnd(open) : null;
+  else target = (Math.random() < 0.55 && open.length) ? rnd(open) : rnd(besieged);
   if (!target) return;
   target.siege = (target.siege || 0) + 1;
   if (target.siege >= 3) { target.siege = 3; target.captured = true; toast(`${target.name} falls to a Warden's siege! Reclaim it before the realm collapses.`); sfx('lose'); }
@@ -1165,7 +1178,7 @@ document.addEventListener('keydown', ev => {
 
 // ---- boot -----------------------------------------------------------------------
 // Debug handle for the console and for automated tests: window.ff.S is the app state.
-window.ff = { S, defOf, save, render, startDuel, enemyById, startTutorialDuel, riddleDefs, makeRiddle, amuletShopPool, artifactShopPool, cityPool, wardenOf, finishDuel, advanceSieges, collectMote, ambushFromMote };
+window.ff = { S, defOf, save, render, startDuel, enemyById, startTutorialDuel, riddleDefs, makeRiddle, amuletShopPool, artifactShopPool, cityPool, wardenOf, finishDuel, advanceSieges, maxSieges, collectMote, ambushFromMote };
 initPreview();
 load();
 render();
