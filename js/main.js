@@ -23,6 +23,7 @@ const DIFF = {
 };
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const rnd = a => a[Math.floor(Math.random() * a.length)];
+const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 // ---- amulets: a colored gem currency, earned from tough foes and lairs, spent on cards and world magic
 const AMULET_HEX = { W: '#efe9cf', U: '#5e8cc9', B: '#7a6a95', R: '#d0604a', G: '#6a9a4a' };
 const newAmulets = () => ({ W: 0, U: 0, B: 0, R: 0, G: 0 });
@@ -500,6 +501,21 @@ function artifactNames() {
 function amuletShopPool(color) {
   return shopNames(color).filter(n => defOf(n)).sort((a, b) => (defOf(a).cmc - defOf(b).cmc) || a.localeCompare(b));
 }
+// A shop shows a random 15 that stays put until the player wins or loses a battle (wins+losses is the nonce).
+function amuletStockNames(city) {
+  const g = S.game; const color = city.color; const bc = g.wins + g.losses;
+  g.amuletStock ||= {};
+  const st = g.amuletStock[color];
+  if (st && st.bc === bc && st.names && st.names.length) return st.names;
+  if (S.shopFetching === color) return null;                 // still loading; don't lock in a thin stock
+  const pool = [...amuletShopPool(color), ...artifactShopPool()];
+  if (!pool.length) return null;
+  const names = shuffle(pool.slice()).slice(0, 15).sort((a, b) => (amuletPrice(a) - amuletPrice(b)) || a.localeCompare(b));
+  g.amuletStock[color] = { bc, names };
+  save();
+  return names;
+}
+const isColorlessArtifact = n => { const d = defOf(n); return !!d && d.types.includes('Artifact') && (!d.colors || d.colors.length === 0); };
 function artifactShopPool() {
   return artifactNames().filter(n => defOf(n)).sort((a, b) => (defOf(a).cmc - defOf(b).cmc) || a.localeCompare(b));
 }
@@ -760,13 +776,12 @@ function city() {
       <div class="market">${stock.map((it, i) => { const d = defOf(it.name); return `<div class="stall${it.sold ? ' sold' : ''}">${cardHtml(d)}<div class="price">${it.sold ? 'Sold' : `${it.price} gold`}</div><button class="btn small" data-buy="${i}" ${it.sold || g.player.gold < it.price ? 'disabled' : ''}>Buy</button></div>`; }).join('')}</div>
       <p class="small">Stock changes every few days. Artifacts and rare lands pass through now and then. Bought cards go to your collection; add them to your deck from the Deck tab.</p>
       <h3>Amulet exchange <span class="amurow small">${amuletGems()}</span></h3>
-      <p class="small">Spend ${COLOR_NAME[c.color]} amulets on ${COLOR_NAME[c.color]} cards, or amulets of any color on artifacts. Rarer, costlier cards ask more amulets. Hover a name to see the card.</p>
-      <div class="amushop">
-        <h4>${COLOR_NAME[c.color]} cards <i class="amu-chip" style="background:${AMULET_HEX[c.color]}"></i>${S.shopFetching === c.color ? ' <span class="small">stocking the shelves\u2026</span>' : ''}</h4>
-        <div class="amushop-list">${amuletShopPool(c.color).map(n => amuletRow(n, c.color)).join('') || '<p class="small">No cards of this color known yet.</p>'}</div>
-        <h4>Artifacts <span class="small">(any amulets)</span></h4>
-        <div class="amushop-list">${artifactShopPool().map(n => amuletRow(n, null)).join('') || '<p class="small">No artifacts known yet.</p>'}</div>
-      </div>
+      ${(() => {
+        const stock = amuletStockNames(c);
+        if (!stock) return '<p class="small">The trader is laying out wares\u2026</p>';
+        return `<p class="small">Fifteen wares are on offer today. ${COLOR_NAME[c.color]} cards cost ${COLOR_NAME[c.color]} amulets; artifacts take amulets of any color. Rarer, costlier cards ask more. The selection changes after your next battle.</p>
+        <div class="amushop"><div class="amushop-list">${stock.map(n => amuletRow(n, isColorlessArtifact(n) ? null : c.color)).join('')}</div></div>`;
+      })()}
       <h3>Bounty board</h3>
       ${(() => {
         const q = g.quests.find(q => q.city === c.name);
