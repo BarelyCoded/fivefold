@@ -736,6 +736,16 @@ function deck() {
   const inDeck = Object.entries(g.deck).map(([n, c]) => ({ n, c, d: defOf(n) })).sort((a, b) => (a.d?.kind === 'land') - (b.d?.kind === 'land') || (a.d?.cmc || 0) - (b.d?.cmc || 0) || a.n.localeCompare(b.n));
   const probs = deckProblems(g.deck);
   const size = deckSize(g.deck), lands = inDeck.filter(r => r.d?.kind === 'land').reduce((a, r) => a + r.c, 0);
+  // Mana curve: nonland spells bucketed by mana value (0..6, 7+).
+  const curve = new Array(8).fill(0); let spells = 0, cmcSum = 0;
+  for (const r of inDeck) { if (!r.d || r.d.kind === 'land') continue; const cv = Math.min(7, r.d.cmc || 0); curve[cv] += r.c; spells += r.c; cmcSum += (r.d.cmc || 0) * r.c; }
+  const maxC = Math.max(1, ...curve), avg = spells ? (cmcSum / spells) : 0, BH = 78;
+  const curveHtml = `<div class="curve">
+    <div class="curve-head"><span>Mana curve</span><span class="small">${spells} spell${spells === 1 ? '' : 's'}${spells ? ` · avg ${avg.toFixed(1)}` : ''}</span></div>
+    ${spells ? `<div class="curve-plot">${curve.map((n, i) => `<div class="curve-col"><span class="curve-n">${n || ''}</span><div class="curve-bar" style="height:${n ? Math.max(4, Math.round(n / maxC * BH)) : 0}px" title="${n} spell${n === 1 ? '' : 's'} at ${i === 7 ? '7+' : i} mana"></div></div>`).join('')}</div>
+    <div class="curve-axis">${curve.map((n, i) => `<span>${i === 7 ? '7+' : i}</span>`).join('')}</div>`
+    : '<p class="small" style="margin:6px 0 0">Add some nonland cards to see the curve.</p>'}
+  </div>`;
   app.innerHTML = `<section class="screen deckb">
     <div class="cols wide">
       <div class="box">
@@ -745,6 +755,7 @@ function deck() {
       </div>
       <div class="box">
         <div class="rowhead"><h2>Deck · ${size} cards, ${lands} lands</h2><span class="rowtools"><button class="btn" id="b-fill">Fill basics to 40</button><button class="btn" id="b-clear-deck"${size ? '' : ' disabled'}>Remove all</button></span></div>
+        ${curveHtml}
         <div class="basics">${COLORS.map(c => `<span class="basic"><i class="dot c-${c}"></i>${BASICS[c]} <b>${g.deck[BASICS[c]] || 0}</b> <button class="btn tiny" data-rem="${BASICS[c]}">−</button><button class="btn tiny" data-add="${BASICS[c]}">+</button></span>`).join('')}</div>
         ${probs.length ? `<div class="msg">${probs.map(esc).join('<br>')}</div>` : '<div class="ok">Deck is ready.</div>'}
         <table class="coll"><tr><th>Card</th><th>Cost</th><th>Qty</th><th></th></tr>
