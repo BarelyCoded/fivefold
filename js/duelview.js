@@ -59,7 +59,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
         const fxWait = playFx();
         if (r === 'over') { if (!finished) { finished = true; await sleep(Math.max(900, fxWait)); onEnd(duel.winner); } return; }
         if (r === 'wait') {
-          if (getAutoPass() && duel.pending?.type === 'priority' && !ui.wizard && !ui.menu && !hasAnyPlay() && duel.humanPass()) continue;
+          if (getAutoPass() && duel.pending?.type === 'priority' && !ui.wizard && !ui.menu && !ui.paying && !hasAnyPlay() && duel.humanPass()) continue;
           return;
         }
         if (document.hidden) continue; // background tabs throttle timers; keep the engine moving
@@ -156,6 +156,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     if (req?.kind === 'attackers' && owner === me && req.options.includes(c.id)) classes.push('can-attack');
     if (req?.kind === 'blockers' && owner === me && isCreature(c) && !c.tapped) classes.push('can-block');
     if (owner === me && duel.pending?.type === 'priority' && (abilitiesOf(c).some((ab, i) => ab.type === 'activated' && duel.canActivate(me, c, i)) || c.def.manaAbilities.length)) classes.push('usable');
+    if (ui.paying && owner === me && !c.tapped && c.def.manaAbilities.length) classes.push('pay-source');
     let pt = '', ptClass = '';
     if (isCreature(c)) { pt = `${power(c)}/${toughness(c) - c.damage}`; if (c.damage || power(c) !== c.def.power || toughness(c) !== c.def.toughness) ptClass = 'mod'; }
     const kws = [...c.cur.kw].filter(k => typeof k === 'string' ? !['Changeling'].includes(k) : true);
@@ -220,6 +221,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
       if (targeting() && g.all.some(c => isLegal({ type: 'perm', id: c.id }))) cls.push('targetable');
       const target = targeting() ? (g.all.find(c => isLegal({ type: 'perm', id: c.id })) || first) : first;
       if (p === me && duel.pending?.type === 'priority' && untapped.length) cls.push('usable');
+      if (ui.paying && p === me && untapped.length && g.def.manaAbilities.length) cls.push('pay-source');
       return `<div class="${cls.join(' ')}" data-id="${target.id}" data-zone="bf" data-name="${esc(g.name)}"><i></i>${esc(g.name)}<b>${untapped.length}/${g.all.length}</b></div>`;
     });
     return `<div class="lands"><div class="lands-title">Lands</div>${items.join('') || '<div class="small">none</div>'}</div>`;
@@ -298,6 +300,15 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
   }
   function controls() {
     if (duel.winner !== null) return '';
+    if (ui.paying) {
+      const c = ui.paying.card;
+      const poolStr = COLORS.concat('C').filter(col => me.pool[col] > 0).map(col => `${me.pool[col]}${col}`).join(' ') || 'nothing';
+      const ready = duel.canCast(me, c, { ...ui.paying.opts, poolOnly: true });
+      return `<div class="hint">Casting <b>${esc(c.def.name)}</b> ${manaHtml(c.def.cost)} — tap the glowing lands to pay it yourself.</div>
+        <div class="msg">In your pool: ${poolStr}</div>
+        ${ready ? '<button class="btn primary" id="b-pay-cast">Cast it</button>' : ''}
+        <button class="btn ghost" id="b-pay-cancel">Cancel</button>`;
+    }
     if (ui.menu) return `<div class="hint">${esc(ui.menu.title)}</div>${ui.menu.items.map((it, i) => `<button class="btn${it.primary ? ' primary' : ''}" data-menu="${i}" ${it.disabled ? 'disabled' : ''}>${esc(it.label)}</button>`).join('')}<button class="btn ghost" data-menu="cancel">Cancel</button>`;
     if (ui.wizard) {
       const w = ui.wizard;
@@ -380,9 +391,9 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
   onTokenArt(() => { if (root.isConnected) render(); }); // a token's picture arrived: show it
 
   // ---- cast wizard -------------------------------------------------------------------
-  function startCast(card, base = {}) {
+  function startCast(card, base = {}, auto = false) {
     const info = duel.castOptions(me, card);
-    const w = { card, opts: { ...base }, info, stage: null, targets: [], specs: [] };
+    const w = { card, opts: { ...base }, info, stage: null, targets: [], specs: [], auto };
     ui.wizard = w; ui.message = '';
     next(w);
   }
@@ -412,8 +423,76 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     if (w.targets.length < w.specs.length) { w.stage = 'targets'; render(); return; }
     opts.targets = w.targets;
     ui.wizard = null;
-    if (!duel.humanCast(card, opts)) { ui.message = 'That could not be cast.'; render(); return; }
+    finishCast(w);
+  }
+  // Double-click (auto): let the engine tap whatever it needs. Single-click (manual): pay from the pool
+  // the player taps, so they choose which lands are used — casting the moment the pool covers the cost.
+  function finishCast(w) {
+    const { card, opts } = w;
+    if (w.auto) {
+      if (!duel.humanCast(card, opts)) { ui.message = 'That could not be cast.'; render(); return; }
+      run(); return;
+    }
+    if (duel.canCast(me, card, { ...opts, poolOnly: true })) { castPoolOnly(card, opts); return; }
+    ui.paying = { card, opts }; ui.menu = null; render();
+  }
+  function castPoolOnly(card, opts) {
+    ui.paying = null;
+    if (!duel.humanCast(card, { ...opts, poolOnly: true })) { ui.message = 'That could not be cast.'; render(); return; }
     run();
+  }
+  // Which colours / how much generic the current pool still can't cover (for glow + smart land tapping).
+  function neededMana(card) {
+    const cost = card.def.cost || { pips: [], generic: 0 };
+    const pool = { ...me.pool };
+    const colors = new Set();
+    for (const pip of (cost.pips || [])) { const col = pip.find(c => pool[c] > 0); if (col) pool[col]--; else pip.forEach(c => colors.add(c)); }
+    let generic = cost.generic || 0;
+    let spare = Object.values(pool).reduce((a, b) => a + b, 0);
+    generic = Math.max(0, generic - spare);
+    return { colors, generic };
+  }
+  function tapToward(card) {
+    if (!ui.paying) return;
+    const need = neededMana(ui.paying.card);
+    let choice = null;
+    card.def.manaAbilities.forEach((ma, i) => { if (choice || (ma.cost.tap && card.tapped)) return; const col = ma.produces.find(c => need.colors.has(c)) || ma.produces[0]; choice = { i, col }; });
+    if (!choice) return;
+    duel.humanMana(card, choice.i, choice.col);
+    if (duel.canCast(me, ui.paying.card, { ...ui.paying.opts, poolOnly: true })) castPoolOnly(ui.paying.card, ui.paying.opts);
+    else render();
+  }
+  // Single vs double click on a hand card. Auto (double) lets the engine pay; manual (single) makes you tap.
+  function handClick(card, auto) {
+    if (duel.pending?.type !== 'priority') return;
+    const canCast = duel.canCast(me, card), canCycle = duel.canCast(me, card, { cycling: true });
+    if (!canCast && !canCycle) { ui.message = card.def.kind === 'unsupported' ? 'This card is not supported by the engine yet.' : 'Cannot play that now.'; render(); return; }
+    if (canCast && canCycle) {
+      ui.menu = { title: card.def.name, items: [
+        { label: card.def.kind === 'land' ? 'Play' : (auto ? 'Cast (auto-pay)' : 'Cast (tap your own mana)'), primary: true, action: () => { ui.menu = null; startCast(card, {}, auto); } },
+        { label: 'Cycle', action: () => { ui.menu = null; duel.humanCast(card, { cycling: true }); run(); } },
+      ] }; render(); return;
+    }
+    if (canCast) { startCast(card, {}, auto); return; }
+    duel.humanCast(card, { cycling: true }); run();
+  }
+  // Double-click a permanent with exactly one unambiguous ability -> use it straight away (Vampire Bats,
+  // Llanowar Elves). Anything more (a choice of colours or several abilities) still opens the menu.
+  function permDblClick(card) {
+    if (duel.pending?.type !== 'priority' || card.controller !== 0) return;
+    const manas = []; card.def.manaAbilities.forEach((ma, i) => { if (!card.tapped || !ma.cost.tap) manas.push({ i, ma }); });
+    const acts = []; abilitiesOf(card).forEach((ab, i) => { if (ab.type === 'activated' && duel.canActivate(me, card, i)) acts.push({ i, ab }); });
+    if (acts.length === 1 && manas.length === 0) { startActivate(card, acts[0].i); return; }
+    if (manas.length === 1 && acts.length === 0 && manas[0].ma.produces.length === 1) { duel.humanMana(card, manas[0].i, manas[0].ma.produces[0]); render(); return; }
+    permMenu(card);
+  }
+  // Distinguish a single click (menu / manual cast) from a double click (auto / one-shot ability).
+  let clickTimer = null, clickId = null;
+  function scheduleCardClick(card, z) {
+    if (clickTimer && clickId === card.id) { clearTimeout(clickTimer); clickTimer = null; clickId = null; if (z === 'hand') handClick(card, true); else permDblClick(card); return; }
+    if (clickTimer) clearTimeout(clickTimer);
+    clickId = card.id;
+    clickTimer = setTimeout(() => { clickTimer = null; clickId = null; if (!root.isConnected) return; if (z === 'hand') handClick(card, false); else permMenu(card); }, 230);
   }
   function startActivate(card, i) {
     const info = duel.activateOptions(me, card, i);
@@ -468,6 +547,12 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
       else if (btn.id === 'b-mull-again') { duel.mulligan(0); ui.mulligan = me.hand.filter(isLand).length <= 1; render(); if (!ui.mulligan) run(); }
       return;
     }
+    if (ui.paying) {   // manual-mana mode: tap your own lands to pay for the pending spell
+      if (btn.id === 'b-pay-cancel') { ui.paying = null; render(); return; }
+      if (btn.id === 'b-pay-cast') { castPoolOnly(ui.paying.card, ui.paying.opts); return; }
+      if ((btn.classList.contains('card') || btn.classList.contains('pill')) && btn.dataset.zone === 'bf') { const c = cardOf(btn.dataset.id); if (c && c.controller === 0 && !c.tapped && c.def.manaAbilities.length) tapToward(c); }
+      return;
+    }
     if (btn.dataset.menu !== undefined) { if (btn.dataset.menu === 'cancel') { ui.menu = null; ui.wizard = null; render(); } else { const it = ui.menu.items[Number(btn.dataset.menu)]; if (it && !it.disabled) it.action(); } return; }
     if (btn.dataset.wiz === 'cancel') { ui.wizard = null; ui.menu = null; render(); return; }
     if (btn.dataset.wiz === 'x') { const v = Math.max(0, Math.min(ui.wizard.maxX, Number(root.querySelector('#xval').value) || 0)); if (ui.wizard.ability !== undefined) ui.wizard.onX(v); else { ui.wizard.opts.x = v; next(ui.wizard); } return; }
@@ -512,9 +597,9 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
       return;
     }
     if (duel.pending?.type !== 'priority') return;
-    if (z === 'hand' && card.controller === 0) { handMenu(card); return; }
+    if (z === 'hand' && card.controller === 0) { scheduleCardClick(card, 'hand'); return; }
     if (z === 'grave' && card.owner === 0) { if (duel.canCast(me, card)) { ui.viewer = null; startCast(card); } return; }
-    if (z === 'bf' && card.controller === 0) { permMenu(card); return; }
+    if (z === 'bf' && card.controller === 0) { scheduleCardClick(card, 'bf'); return; }
   });
   root.addEventListener('change', ev => {
     if (ev.target.id === 'cb-autopass') { setAutoPass(ev.target.checked); if (ev.target.checked) run(); return; }
@@ -526,8 +611,8 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
   });
   document.addEventListener('keydown', function onKey(ev) {
     if (!root.isConnected) { document.removeEventListener('keydown', onKey); return; }
-    if (ev.key === 'Escape') { ui.wizard = null; ui.menu = null; ui.viewer = null; render(); }
-    if (ev.key === ' ' && duel.pending?.type === 'priority' && !ui.wizard && !ui.menu) { ev.preventDefault(); duel.humanPass(); run(); }
+    if (ev.key === 'Escape') { ui.wizard = null; ui.menu = null; ui.viewer = null; ui.paying = null; render(); }
+    if (ev.key === ' ' && duel.pending?.type === 'priority' && !ui.wizard && !ui.menu && !ui.paying) { ev.preventDefault(); duel.humanPass(); run(); }
   });
 
   duel.onChange(() => { ui.message = ''; render(); if (duel.winner !== null) run(); });

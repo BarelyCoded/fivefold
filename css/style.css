@@ -96,6 +96,7 @@ tr.st-unsupported td:nth-child(7), tr.st-unsupported td:nth-child(3), tr.st-miss
 .ppool { font-size: 12px; color: #9fe7ff; margin-top: 4px; }
 .ppoison { color: #a4e07a; font-size: 13px; }
 .card.usable { outline: 1px dashed rgba(255,255,255,.35); }
+.card.pay-source, .pill.pay-source { outline: 2px solid #e6c14a; box-shadow: 0 0 12px rgba(230,193,74,.7); cursor: pointer; }
 .card-counters { position: absolute; left: 3px; top: 20px; background: rgba(0,0,0,.75); color: #ffd27a; font-size: 9px; padding: 1px 4px; border-radius: 3px; }
 .card-regen { position: absolute; right: 3px; top: 34px; background: rgba(20,80,20,.85); color: #cfc; font-size: 9px; padding: 1px 4px; border-radius: 3px; }
 .card-shield { position: absolute; right: 3px; top: 48px; background: rgba(40,60,110,.9); color: #dde8ff; font-size: 9px; padding: 1px 4px; border-radius: 3px; }

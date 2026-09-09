@@ -474,14 +474,14 @@ export class Duel {
   }
   totalMana(p) { return Object.values(p.pool).reduce((a, b) => a + b, 0) + this.manaSources(p).reduce((s, x) => s + x.amount, 0); }
   // Returns a payment plan {pool:{...}, taps:[{src,color}]} or null
-  planPayment(p, cost, x = 0) {
+  planPayment(p, cost, x = 0, poolOnly = false) {
     const pips = (cost.pips || []).slice().sort((a, b) => a.length - b.length);
     let generic = (cost.generic || 0) + (cost.x ? x : 0);
     const pool = { ...p.pool };
     const usePool = {};
     const rem = [];
     for (const pip of pips) { const col = pip.find(c => pool[c] > 0); if (col) { pool[col]--; usePool[col] = (usePool[col] || 0) + 1; } else rem.push(pip); }
-    const sources = this.manaSources(p);
+    const sources = poolOnly ? [] : this.manaSources(p);   // poolOnly: pay from the pool the player tapped, never auto-tap
     const used = new Array(sources.length).fill(null); // color chosen
     const left = sources.map(s => s.amount);
     const assign = (i) => {
@@ -507,7 +507,7 @@ export class Duel {
     const taps = sources.map((s, i) => used[i] ? { src: s, color: used[i], spare: left[i] } : null).filter(Boolean);
     return { usePool, taps };
   }
-  canPay(p, cost, x = 0) { return !!this.planPayment(p, cost, x); }
+  canPay(p, cost, x = 0, poolOnly = false) { return !!this.planPayment(p, cost, x, poolOnly); }
   payMana(p, plan) {
     if (!plan) return;
     for (const [col, n] of Object.entries(plan.usePool)) p.pool[col] -= n;
@@ -574,7 +574,7 @@ export class Duel {
     cost = this.modifiedCost(p, card, cost);
     if (opts.pitch !== undefined && d.spell?.alternativeCost?.pitch) {
       const pc = this.card(opts.pitch); if (!pc || !p.hand.includes(pc) || pc === card || !pc.def.colors.includes(d.spell.alternativeCost.pitch)) return false;
-    } else if (!this.canPay(p, cost, opts.x || 0)) return false;
+    } else if (!this.canPay(p, cost, opts.x || 0, opts.poolOnly)) return false;
     const add = d.spell?.additionalCost || d.additionalCost;
     if (add) {
       if (add.sacrifice && !p.battlefield.some(c => this.sacMatches(c, add.sacrifice))) return false;
@@ -661,7 +661,7 @@ export class Duel {
     if (opts.buyback) cost = addCosts(cost, d.keywords.find(k => k.k === 'Buyback').cost);
     cost = this.modifiedCost(p, card, cost);
     if (opts.pitch !== undefined && d.spell?.alternativeCost?.pitch) { const pc = this.card(opts.pitch); this.moveTo(pc, 'exile'); p.life -= d.spell.alternativeCost.life || 0; this.say(`${p.name} exiles ${pc.def.name} from hand.`); }
-    else this.payMana(p, this.planPayment(p, cost, opts.x || 0));
+    else this.payMana(p, this.planPayment(p, cost, opts.x || 0, opts.poolOnly));
     const add = d.spell?.additionalCost || d.additionalCost;
     if (add) {
       if (add.sacrifice) { const c = this.card(opts.sacrifice) || p.battlefield.filter(x => this.sacMatches(x, add.sacrifice)).sort((a, b) => a.def.cmc - b.def.cmc)[0]; if (c) { opts._sacrificed = c; this.sacrifice(c); } }
