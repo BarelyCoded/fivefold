@@ -470,7 +470,14 @@ function knownCardNames() {
   for (const n of Object.keys(S.collection)) names.add(n);
   return [...names];
 }
+// The Power Nine and a few other game-warpers are premium-priced, overriding the formula.
+const PREMIUM_AMULETS = {
+  'Black Lotus': 8,
+  'Mox Pearl': 5, 'Mox Sapphire': 5, 'Mox Jet': 5, 'Mox Ruby': 5, 'Mox Emerald': 5,
+  'Ancestral Recall': 7, 'Time Walk': 7, 'Timetwister': 7,
+};
 function amuletPrice(name) {
+  if (PREMIUM_AMULETS[name]) return PREMIUM_AMULETS[name];
   const d = defOf(name); if (!d) return 3;
   let cost = 1 + Math.floor((d.cmc || 0) / 2);         // mana value as the quality proxy
   const rar = cachedCard(name)?.rarity;
