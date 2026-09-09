@@ -434,6 +434,19 @@ function chooseAttackers(duel, p) {
     const tol = value(a) <= 4.5 ? -1.6 : -0.25;               // small creatures accept near-even trades
     if (worst >= tol) { out.push(a.id); for (const b of worstBlock) { const i = avail.indexOf(b); if (i >= 0) avail.splice(i, 1); } }
   }
+  // Go wide when we out-body the defender. The greedy pass above judges each attacker as if the one good
+  // blocker were free to stop IT — so a whole team can cower from a single blocker that can only block
+  // one of them. But the defender only ever makes blocks that help itself; anything it can't profitably
+  // block gets through. So when we bring more attackers than they have blockers, send the expendable
+  // extras too: the defender blocks its best few, the rest connect or trade up. This is how you race.
+  if (mine.length > allBlockers.length) {
+    for (const a of mine) {
+      if (out.includes(a.id) || a.cur.flags.has('mustAttack')) continue;
+      if (mine.length > 1 && isCombatUtility(a)) continue;     // keep a tap-pumper (Angelic Page) home
+      if (power(a) <= 0) continue;                             // 0-power does nothing by swinging
+      out.push(a.id);
+    }
+  }
   return out;
 }
 function chooseBlocks(duel, p) {
