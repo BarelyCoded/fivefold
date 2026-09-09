@@ -1,0 +1,95 @@
+================================================================================
+FIVEFOLD - PATCH NOTES
+================================================================================
+
+
+--------------------------------------------------------------------------------
+THE OVERLAND COMES ALIVE (Shandalar alignment)
+--------------------------------------------------------------------------------
+The world map was mostly static scenery. It is now a living overland with
+roaming threats, escape routes, and a ticking clock.
+
+* Roaming pursuit AI
+  Enemies notice you from a distance (tougher foes see farther) and give chase,
+  stepping toward you each move. Cities, mana links, landmarks, and castles are
+  safe havens they will not step onto.
+
+* Roads let you escape
+  The dirt roads linking cities are now mechanical: stay on one and pursuing
+  mages lose your trail and fall back to idle wandering, so you outpace them.
+  The map panel flags when you are on a road.
+
+* Five Warden guild castles
+  One dark fortress per color region, each held by a Warden built from that
+  color's roster plus two bombs. The Usurper hides behind one of them - storm
+  the guilds to find and defeat the true enemy and win.
+
+* Town sieges + a losing clock
+  The surviving Wardens march on the free cities. A siege escalates 1/3 -> 2/3
+  -> the city falls; let four cities fall and the realm collapses (its own loss
+  ending). Walking into a besieged or captured city breaks the siege and
+  reclaims it. Clearing a Warden's guild takes them off the board and eases the
+  pressure.
+
+* Mana motes
+  Collectible sparks scatter across the map and keep re-seeding as you travel.
+  Rewards now vary: gold, an amulet, a cache of provisions, or a rich vein worth
+  both. And about 14% are ambush lures - a region-appropriate foe springs out
+  (Duel / Bribe / Back away).
+
+* A world-magic menu
+  Spend amulets from anywhere on the map to bend the world (heal, blink, cloak
+  from pursuit, and more).
+
+* Power Nine from dungeon vaults
+  The nine most powerful artifacts are no longer buyable; they are earned only
+  by clearing dungeons.
+
+
+--------------------------------------------------------------------------------
+SMARTER AI DUELIST
+--------------------------------------------------------------------------------
+* Multi-blocker combat awareness
+  The AI now evaluates gang-blocks and bad trades properly (it will not throw a
+  3/3 into two 2/1 first-strikers, etc.) and uses combat abilities like Angelic
+  Page and Vampire Bats.
+
+* No more nonsense attacks
+  It will not swing a defensive creature (e.g. a 1/4) into a bigger blocker for
+  a pointless chip, and will not attack with 0-power creatures.
+
+* Bounce valued as tempo
+  It treats unsummon/bounce as a tempo play, not free removal, so it no longer
+  bounces your beneficial-ETB creature (Sage Owl) on turn 2 for no reason.
+
+
+--------------------------------------------------------------------------------
+CARDS & RULES
+--------------------------------------------------------------------------------
+* Animated manlands
+  Mishra's Factory and friends can now animate and attack, reverting at end of
+  turn, with summoning sickness respected.
+
+* Cleaner shops
+  Engine-unsupported and do-nothing cards (including Bronze Tablet) no longer
+  appear in shops or amulet purchases.
+
+* Power-tier ranking
+  An in-game Alpha-Alliances power-tier browser you can open and re-rank on the
+  fly, with card costs scaled by tier - handy for live balance tweaks.
+
+
+--------------------------------------------------------------------------------
+QUALITY OF LIFE
+--------------------------------------------------------------------------------
+* Mana symbols instead of letters in costs.
+* Deck builder: add-all / remove-all, plus a mana curve chart.
+* Auto-pass toggle and duel controls relocated under the turn-order list.
+* Click a land to tap it for mana directly - no confirmation menu.
+* Usurper mana links raised from 3 to 5.
+
+
+================================================================================
+Two knobs most likely to want feel-tuning in playtesting: the ambush rate (14%)
+and how safe roads are.
+================================================================================
