@@ -127,6 +127,7 @@ export function cached(name) {
 }
 
 export function cacheSize() { return Object.keys(load()).length; }
+export function allCached() { return Object.values(load()).filter(c => c && c.name); }
 export function clearCache() { cache = {}; save(); }
 
 // ---- token art ----------------------------------------------------------------------

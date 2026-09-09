@@ -1,6 +1,6 @@
 // Fivefold app controller: screens, world loop, persistence.
 import { parseList, importNames, defOf, forgetDefs, loadArtIndex, artFor, artCount, hasOwnArt, hasServer } from './collection.js';
-import { fetchCards, cacheSize, cached as cachedCard } from './scryfall.js';
+import { fetchCards, cacheSize, cached as cachedCard, allCached } from './scryfall.js';
 import { COLORS, COLOR_NAME, costString, statusLabel } from './cards.js';
 import { generateWorld, drawWorld, drawMinimap, tileAt, inBounds, cityAt, linkAt, enemyAt, stepEnemies, BIOME, TILE, VIEW, placeDungeons, dungeonAt, placeLandmarks, landmarkAt, placeSpecials, specialAt } from './world.js';
 import { Duel } from './engine.js';
@@ -24,6 +24,19 @@ const DIFF = {
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const rnd = a => a[Math.floor(Math.random() * a.length)];
 const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+// Riddles draw their question from every card the game has cached, not the small regional pool, so they range across the whole base.
+function riddleDefs() {
+  const out = [];
+  for (const c of allCached()) { const d = defOf(c.name); if (d && d.kind !== 'unsupported' && d.kind !== 'land') out.push(d); }
+  return out;
+}
+// Background: pull card data (no art) for the whole amulet catalogue so riddles cover the entire card base.
+function prefetchCatalog() {
+  if (!S.catalog || S._catalogPrefetched) return;
+  S._catalogPrefetched = true;
+  const names = [...new Set(Object.values(S.catalog).flat())].filter(n => !cachedCard(n));
+  if (names.length) fetchCards(names, null, { skipArt: true }).then(() => forgetDefs()).catch(() => {});
+}
 // ---- amulets: a colored gem currency, earned from tough foes and lairs, spent on cards and world magic
 const AMULET_HEX = { W: '#efe9cf', U: '#5e8cc9', B: '#7a6a95', R: '#d0604a', G: '#6a9a4a' };
 const newAmulets = () => ({ W: 0, U: 0, B: 0, R: 0, G: 0 });
@@ -175,7 +188,7 @@ function landmarkRiddle(lm) {
   const g = S.game;
   const color = lm.color || tileAt(g.world, lm.x, lm.y);
   const pool = [...new Set([...cityPool(color), ...S.dungeons.dungeons.filter(d => d.color === color).flatMap(d => d.treasure)])].filter(n => { const d = defOf(n); return d && d.kind !== 'unsupported' && d.kind !== 'land'; });
-  const r = makeRiddle(Math.random, pool.map(defOf));
+  const qDefs = riddleDefs(); const r = makeRiddle(Math.random, qDefs.length >= 12 ? qDefs : pool.map(defOf));
   if (!r) { lm.used = true; save(); render(); return; }
   S.modal = {
     title: LANDMARK_TEXT[lm.kind] || 'A landmark',
@@ -341,7 +354,7 @@ function dungeonLoot(cell) {
 function dungeonRiddle(cell) {
   const g = S.game; const { tpl, layout } = currentDungeon();
   const names = [...tpl.treasure, ...S.content.enemies.filter(e => e.color === tpl.color).flatMap(e => Object.keys(e.deck))].filter(n => !BASIC_NAMES.has(n));
-  const r = makeRiddle(Math.random, [...new Set(names)].map(defOf));
+  const qDefs = riddleDefs(); const r = makeRiddle(Math.random, qDefs.length >= 12 ? qDefs : [...new Set(names)].map(defOf));
   if (!r) { cell.done = true; save(); render(); return; }
   S.modal = {
     title: 'A scroll, pinned to the wall',
@@ -916,8 +929,8 @@ document.addEventListener('keydown', ev => {
 
 // ---- boot -----------------------------------------------------------------------
 // Debug handle for the console and for automated tests: window.ff.S is the app state.
-window.ff = { S, defOf, save, render, startDuel, enemyById, startTutorialDuel };
+window.ff = { S, defOf, save, render, startDuel, enemyById, startTutorialDuel, riddleDefs, makeRiddle };
 initPreview();
 load();
 render();
-ensureContent().then(() => { if (S.game && S.game.status === 'playing') go(S.game.dungeon ? 'dungeon' : 'map'); else render(); }).catch(e => { setBusy('Could not load card data: ' + e.message + ' (is the internet reachable?)'); });
+ensureContent().then(() => { if (S.game && S.game.status === 'playing') go(S.game.dungeon ? 'dungeon' : 'map'); else render(); prefetchCatalog(); }).catch(e => { setBusy('Could not load card data: ' + e.message + ' (is the internet reachable?)'); });
