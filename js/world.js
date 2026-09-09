@@ -161,19 +161,75 @@ function drawLandmark(ctx, cx, cy, lm) {
   else { px(ctx, cx - 6, cy - 4, 12, 12, lm.used ? '#5a5a5a' : '#c9a367'); }
   if (!lm.used) labels.push({ x: cx + 12, y: cy - 12, text: '?', size: 8, color: '#ffe9a8', bg: 'rgba(40,30,10,.85)' });
 }
+const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+// A tile an enemy may not stand on (cities/links/landmarks are safe havens; you can't be caught there).
+function blockedForEnemy(world, x, y) {
+  return !inBounds(world, x, y) || !!cityAt(world, x, y) || !!linkAt(world, x, y) || !!enemyAt(world, x, y)
+    || (world.castle.x === x && world.castle.y === y) || !!dungeonAt(world, x, y)
+    || !!landmarkAt(world, x, y) || !!specialAt(world, x, y);
+}
+// Roaming AI: enemies within sight give chase and step toward the player; otherwise they wander their
+// own terrain. An enemy that steps onto the player's tile catches them — returned so the caller can
+// start the duel. Cities, mana links and landmarks are safe: enemies never step onto them.
 export function stepEnemies(world, rng, player) {
+  let caught = null;
   for (const e of world.enemies) {
-    if (rng() > 0.45) continue;
-    const [dx, dy] = [[1, 0], [-1, 0], [0, 1], [0, -1]][Math.floor(rng() * 4)];
-    const nx = e.x + dx, ny = e.y + dy;
-    if (!inBounds(world, nx, ny)) continue;
-    if (cityAt(world, nx, ny) || linkAt(world, nx, ny) || enemyAt(world, nx, ny)) continue;
-    if (world.castle.x === nx && world.castle.y === ny) continue;
-    if (dungeonAt(world, nx, ny)) continue;
-    if (player.x === nx && player.y === ny) continue;
-    if (tileAt(world, nx, ny) !== e.color && rng() < 0.7) continue;
-    e.x = nx; e.y = ny;
+    const pd = Math.abs(e.x - player.x) + Math.abs(e.y - player.y);
+    const sight = e.tier >= 2 ? 6 : 4;                 // tougher foes notice you from farther off
+    const chase = pd <= sight;
+    if (!chase && rng() > 0.45) continue;              // idle enemies only amble
+    let opts;
+    if (chase) {
+      opts = DIRS.map(([dx, dy]) => ({ dx, dy, d: Math.abs(e.x + dx - player.x) + Math.abs(e.y + dy - player.y) })).sort((a, b) => a.d - b.d);
+    } else {
+      const [dx, dy] = DIRS[Math.floor(rng() * 4)]; opts = [{ dx, dy }];
+    }
+    for (const o of opts) {
+      const nx = e.x + o.dx, ny = e.y + o.dy;
+      if (player.x === nx && player.y === ny) { if (!blockedForEnemy(world, nx, ny)) caught = e; break; }   // safe on a city/link/landmark
+      if (blockedForEnemy(world, nx, ny)) continue;
+      if (!chase && tileAt(world, nx, ny) !== e.color && rng() < 0.7) break;   // idle: prefer home terrain
+      e.x = nx; e.y = ny; break;
+    }
+    if (caught) break;
   }
+  return caught;
+}
+
+// ---- collectible mana motes (spontaneous world drops) --------------------------------
+export const moteAt = (world, x, y) => (world.motes || []).find(m => m.x === x && m.y === y);
+function moteBlocked(world, x, y) {
+  return blockedForEnemy(world, x, y) || !!moteAt(world, x, y);
+}
+export function placeMotes(world, rng, count = 10) {
+  if (world.motes) return world.motes;
+  world.motes = [];
+  for (let n = 0; n < count; n++) spawnMote(world, rng);
+  return world.motes;
+}
+// Drop a mote on open terrain, biased near the player when one is given (keeps the map lively as you walk).
+export function spawnMote(world, rng, near = null, cap = 16) {
+  world.motes ||= [];
+  if (world.motes.length >= cap) return null;
+  for (let i = 0; i < 300; i++) {
+    let x, y;
+    if (near) { x = near.x + Math.round((rng() - 0.5) * 12); y = near.y + Math.round((rng() - 0.5) * 8); }
+    else { x = Math.floor(rng() * world.w); y = Math.floor(rng() * world.h); }
+    if (!inBounds(world, x, y) || moteBlocked(world, x, y)) continue;
+    if (near && Math.abs(x - near.x) + Math.abs(y - near.y) < 3) continue;   // not right on top of the player
+    const m = { x, y, color: tileAt(world, x, y) }; world.motes.push(m); return m;
+  }
+  return null;
+}
+function drawMote(ctx, cx, cy) {
+  const t = (Date.now() % 1600) / 1600, pulse = 0.6 + 0.4 * Math.sin(t * Math.PI * 2);
+  ctx.save(); ctx.translate(cx, cy);
+  ctx.globalAlpha = 0.85; ctx.fillStyle = 'rgba(180,230,255,' + (0.25 * pulse).toFixed(2) + ')';
+  ctx.beginPath(); ctx.arc(0, 0, 9, 0, Math.PI * 2); ctx.fill();
+  ctx.globalAlpha = 1; ctx.fillStyle = '#eafaff';
+  for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2 + t * Math.PI; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(a) * (4 + 2 * pulse), Math.sin(a) * (4 + 2 * pulse)); ctx.lineWidth = 1.6; ctx.strokeStyle = '#bfe9ff'; ctx.stroke(); }
+  ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(0, 0, 2.2, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
 }
 
 export function cameraFor(world, player) {
@@ -689,6 +745,7 @@ export function drawMinimap(canvas, world, player, cam) {
   const dot = (x, y, col, r = 2) => { ctx.fillStyle = col; ctx.fillRect(x * k + k / 2 - r, y * k + k / 2 - r, r * 2, r * 2); };
   for (const ct of world.cities) dot(ct.x, ct.y, '#f3ecd8', 2.5);
   for (const d of world.dungeons || []) if (d.revealed) dot(d.x, d.y, '#ffb347', 2);
+  for (const m of world.motes || []) dot(m.x, m.y, '#dff4ff', 1);
   for (const l of world.links) if (!l.taken) dot(l.x, l.y, '#9fe7ff', 1.5);
   for (const e of world.enemies) if (e.bounty) dot(e.x, e.y, '#ffd54a', 2);
   for (const lm of world.landmarks || []) if (!lm.used) dot(lm.x, lm.y, '#ffe9a8', 1.5);
@@ -712,6 +769,7 @@ export function drawWorld(canvas, world, player, opts = {}) {
   const c = (x, y) => [(x - cam.x) * PX + PX / 2, (y - cam.y) * PX + PX / 2];
   if (opts.highlight) { f.strokeStyle = 'rgba(255,255,255,.5)'; f.lineWidth = 1; f.setLineDash([2, 2]); for (const [x, y] of opts.highlight) if (vis(x, y)) f.strokeRect((x - cam.x) * PX + 2.5, (y - cam.y) * PX + 2.5, PX - 5, PX - 5); f.setLineDash([]); }
   const objs = [];
+  for (const m of world.motes || []) if (vis(m.x, m.y)) { const [cx, cy] = c(m.x, m.y); objs.push({ y: cy - 2, draw: () => drawMote(f, cx, cy) }); }
   for (const l of world.links) if (vis(l.x, l.y)) { const [cx, cy] = c(l.x, l.y); objs.push({ y: cy, draw: () => drawCrystal(f, cx, cy, l.taken) }); }
   for (const d of world.dungeons || []) if (d.revealed && vis(d.x, d.y)) { const [cx, cy] = c(d.x, d.y); objs.push({ y: cy, draw: () => drawDungeon(f, cx, cy, d.cleared) }); }
   for (const lm of world.landmarks || []) if (vis(lm.x, lm.y)) { const [cx, cy] = c(lm.x, lm.y); objs.push({ y: cy - 1, draw: () => drawLandmark(f, cx, cy, lm) }); }

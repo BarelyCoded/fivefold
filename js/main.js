@@ -2,7 +2,7 @@
 import { parseList, importNames, defOf, forgetDefs, loadArtIndex, artFor, artCount, hasOwnArt, hasServer } from './collection.js';
 import { fetchCards, cacheSize, cached as cachedCard, allCached } from './scryfall.js';
 import { COLORS, COLOR_NAME, manaHtml, statusLabel } from './cards.js';
-import { generateWorld, drawWorld, drawMinimap, tileAt, inBounds, cityAt, linkAt, enemyAt, stepEnemies, BIOME, TILE, VIEW, placeDungeons, dungeonAt, placeLandmarks, landmarkAt, placeSpecials, specialAt } from './world.js';
+import { generateWorld, drawWorld, drawMinimap, tileAt, inBounds, cityAt, linkAt, enemyAt, stepEnemies, BIOME, TILE, VIEW, placeDungeons, dungeonAt, placeLandmarks, landmarkAt, placeSpecials, specialAt, placeMotes, moteAt, spawnMote } from './world.js';
 import { Duel } from './engine.js';
 import { mountDuel, cardHtml } from './duelview.js';
 import { aiHooks } from './ai.js';
@@ -158,6 +158,7 @@ async function newGame({ name, color, difficulty }) {
   placeDungeons(world, Math.random, S.dungeons.dungeons);
   placeLandmarks(world, Math.random);
   placeSpecials(world, Math.random);
+  placeMotes(world, Math.random);
   S.game = {
     name: name || 'Wanderer', color, difficulty, deck, world,
     player: { x: world.start.x, y: world.start.y, life: d.life, maxLife: d.life, gold: d.gold, food: 60, day: 1, steps: 0, amulets: newAmulets() },
@@ -184,8 +185,17 @@ function move(dx, dy) {
   if (g.player.steps % 5 === 0) { g.player.day++; if (g.player.day % 30 === 0) bossLink(); }
   const link = linkAt(g.world, nx, ny);
   if (link && !link.taken) { link.taken = true; g.player.maxLife += 2; g.player.life += 2; toast(`Mana link claimed. Maximum life is now ${g.player.maxLife}.`); }
-  stepEnemies(g.world, Math.random, g.player);
+  const mote = moteAt(g.world, nx, ny);
+  if (mote) {
+    g.world.motes = g.world.motes.filter(m => m !== mote);
+    if (Math.random() < 0.3) { giveAmulet(mote.color); toast(`A mana mote yields a ${COLOR_NAME[mote.color]} amulet.`); }
+    else { const gold = 8 + Math.floor(Math.random() * 14); g.player.gold += gold; toast(`A mana mote scatters into ${gold} gold.`); }
+    sfx('coin');
+  }
+  const caught = stepEnemies(g.world, Math.random, g.player);   // roaming foes give chase and may catch you
+  if (Math.random() < 0.1) spawnMote(g.world, Math.random, g.player);   // the world keeps seeding fresh motes
   save();
+  if (caught) { encounter(caught); return; }
   const city = cityAt(g.world, nx, ny);
   if (city) { go('city'); return; }
   const lm = landmarkAt(g.world, nx, ny);
@@ -868,6 +878,7 @@ function map() {
   }
   if (!g.world.landmarks) { placeLandmarks(g.world, Math.random); save(); }
   if (!g.world.specials) { placeSpecials(g.world, Math.random); save(); }
+  if (!g.world.motes) { placeMotes(g.world, Math.random); save(); }
   if (!g.player.amulets) { g.player.amulets = newAmulets(); g.quests ||= []; save(); }
   const hl = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dy]) => [g.player.x + dx, g.player.y + dy]).filter(([x, y]) => inBounds(g.world, x, y));
   const cam = drawWorld(canvas, g.world, g.player, { highlight: hl });
