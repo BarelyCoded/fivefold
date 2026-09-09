@@ -2,7 +2,7 @@
 import { parseList, importNames, defOf, forgetDefs, loadArtIndex, artFor, artCount, hasOwnArt, hasServer } from './collection.js';
 import { fetchCards, cacheSize, cached as cachedCard, allCached } from './scryfall.js';
 import { COLORS, COLOR_NAME, manaHtml, statusLabel } from './cards.js';
-import { generateWorld, drawWorld, drawMinimap, tileAt, inBounds, cityAt, linkAt, enemyAt, stepEnemies, BIOME, TILE, VIEW, placeDungeons, dungeonAt, placeLandmarks, landmarkAt, placeSpecials, specialAt, placeMotes, moteAt, spawnMote } from './world.js';
+import { generateWorld, drawWorld, drawMinimap, tileAt, inBounds, cityAt, linkAt, enemyAt, stepEnemies, BIOME, TILE, VIEW, placeDungeons, dungeonAt, placeLandmarks, landmarkAt, placeSpecials, specialAt, placeMotes, moteAt, spawnMote, castleAt, WARDEN_HOLD } from './world.js';
 import { Duel } from './engine.js';
 import { mountDuel, cardHtml } from './duelview.js';
 import { aiHooks } from './ai.js';
@@ -24,6 +24,7 @@ const DIFF = {
 };
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const rnd = a => a[Math.floor(Math.random() * a.length)];
+const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
 const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 // Riddles draw their question from every card the game has cached, not the small regional pool, so they range across the whole base.
 function riddleDefs() {
@@ -172,6 +173,7 @@ async function newGame({ name, color, difficulty }) {
     name: name || 'Wanderer', color, difficulty, deck, world,
     player: { x: world.start.x, y: world.start.y, life: d.life, maxLife: d.life, gold: d.gold, food: 60, day: 1, steps: 0, amulets: newAmulets() },
     boss: { links: 0 }, status: 'playing', wins: 0, losses: 0, cityStock: {}, quests: [], created: Date.now(),
+    usurper: rnd(COLORS),   // which Warden the Usurper hides behind, revealed only when that castle falls
   };
   save(); go('map');
 }
@@ -185,7 +187,8 @@ function move(dx, dy) {
   if (!inBounds(g.world, nx, ny)) return;
   const enemy = enemyAt(g.world, nx, ny);
   if (enemy) { encounter(enemy); return; }
-  if (g.world.castle.x === nx && g.world.castle.y === ny) { castlePrompt(); return; }
+  const cst = castleAt(g.world, nx, ny);
+  if (cst) { castlePrompt(cst); return; }
   const dg = dungeonAt(g.world, nx, ny);
   if (dg && dg.revealed) { g.player.x = nx; g.player.y = ny; save(); dungeonPrompt(dg); return; }
   g.player.x = nx; g.player.y = ny; g.player.steps++; sfx('step');
@@ -293,14 +296,40 @@ function encounter(enemy) {
   };
   render();
 }
-function castlePrompt() {
-  const boss = S.content.enemies.find(e => e.boss); const g = S.game;
+const WARDEN_NAME = { W: 'the Warden of Light', U: 'the Warden of Tides', B: 'the Warden of the Grave', R: 'the Warden of Cinders', G: 'the Warden of the Wilds' };
+// A Warden fights their guild's honed mono-colour deck at boss stature. One is the Usurper in disguise.
+function wardenOf(color) {
+  const base = S.content.enemies.find(e => e.color === color && e.tier === 2) || S.content.enemies.find(e => e.color === color);
+  const deck = { ...base.deck };
+  const bombs = { W: 'Serra Angel', U: 'Air Elemental', B: 'Sengir Vampire', R: 'Lightning Bolt', G: 'Craw Wurm' };
+  if (bombs[color]) deck[bombs[color]] = (deck[bombs[color]] || 0) + 2;
+  return { id: color + '-warden', name: WARDEN_NAME[color], color, tier: 4, life: 20, bribe: 0, gold: 80, boss: true, warden: color, taunt: base.taunt, deck };
+}
+function castlePrompt(castle) {
+  const g = S.game;
+  if (castle.fallen) { S.modal = { title: castle.name, body: `<p>The gates hang broken and cold. ${WARDEN_NAME[castle.color]} is dead; nothing stirs within.</p>`, buttons: [{ label: 'Leave', primary: true, action: () => { S.modal = null; render(); } }] }; render(); return; }
+  const w = wardenOf(castle.color);
+  const standing = (g.world.castles || []).filter(c => !c.fallen).length;
   S.modal = {
-    title: 'The Usurper’s castle',
-    body: `<p class="taunt">“${esc(boss.taunt)}”</p><p>A five-color deck and ${boss.life + g.boss.links * 5} life. Claim mana links first to raise your own. This is the end of the road.</p>`,
-    buttons: [{ label: 'Assault the castle', primary: true, action: () => { S.modal = null; startDuel(boss, null); } }, { label: 'Not yet', action: () => { S.modal = null; render(); } }],
+    title: castle.name,
+    body: `<p class="taunt">“${esc(w.taunt)}”</p><p>${cap(WARDEN_NAME[castle.color])} holds this ${COLOR_NAME[castle.color]} stronghold with ${w.life + g.boss.links * 5} life and a honed deck. One of the five Wardens is the Usurper wearing a stolen face — ${standing === 1 ? 'and this is the last one standing.' : 'is it this one?'} Storm the gate to find out.</p>`,
+    buttons: [{ label: 'Storm the castle', primary: true, action: () => { S.modal = null; startDuel(w, null); } }, { label: 'Not yet', action: () => { S.modal = null; render(); } }],
   };
   render();
+}
+// Old saves predate the five castles: place one Warden hold in each colour region.
+function migrateCastles(g) {
+  const w = g.world;
+  const occ = new Set([...w.cities.map(c => `${c.x},${c.y}`), ...w.links.map(l => `${l.x},${l.y}`), ...(w.dungeons || []).map(d => `${d.x},${d.y}`), ...(w.landmarks || []).map(l => `${l.x},${l.y}`), ...(w.specials || []).map(s => `${s.x},${s.y}`), ...w.enemies.map(e => `${e.x},${e.y}`)]);
+  const far = (x, y) => Math.abs(x - w.start.x) + Math.abs(y - w.start.y);
+  w.castles = [];
+  for (const cc of COLORS) {
+    let p = null;
+    for (let i = 0; i < 800 && !p; i++) { const x = Math.floor(Math.random() * w.w), y = Math.floor(Math.random() * w.h); if (occ.has(`${x},${y}`) || tileAt(w, x, y) !== cc || far(x, y) < 6 || w.cities.some(c => Math.abs(c.x - x) + Math.abs(c.y - y) < 3)) continue; p = { x, y }; }
+    for (let i = 0; i < 800 && !p; i++) { const x = Math.floor(Math.random() * w.w), y = Math.floor(Math.random() * w.h); if (occ.has(`${x},${y}`) || w.cities.some(c => Math.abs(c.x - x) + Math.abs(c.y - y) < 2)) continue; p = { x, y }; }
+    if (p) { w.castles.push({ x: p.x, y: p.y, color: cc, name: WARDEN_HOLD[cc] }); occ.add(`${p.x},${p.y}`); }
+  }
+  delete w.castle;
 }
 
 function startDuel(tpl, roamUid, opts = {}) {
@@ -471,7 +500,12 @@ function finishDuel(winner) {
     const dropChance = tpl.boss ? 1 : tpl.tier >= 2 ? 0.4 : 0.12;
     if (Math.random() < dropChance) { const col = tpl.boss ? rnd(COLORS) : tpl.color; giveAmulet(col); lines.push(`You pry a ${COLOR_NAME[col]} amulet from your fallen foe.`); }
     if (roamUid != null && g.quests?.length) { const q = g.quests.find(q => q.enemyUid === roamUid); if (q) { giveAmulet(q.color); g.quests = g.quests.filter(x => x !== q); lines.push(`Bounty claimed: ${q.city} rewards you a ${COLOR_NAME[q.color]} amulet.`); } }
-    if (tpl.boss) { g.status = 'won'; save(); go('end'); return; }
+    if (tpl.warden) {
+      const castle = (g.world.castles || []).find(c => c.color === tpl.warden); if (castle) castle.fallen = true;
+      if (tpl.warden === g.usurper) { lines.push('You tear the Warden’s mask away — and the Usurper’s own face stares back. The masquerade ends here.'); g.status = 'won'; save(); go('end'); return; }
+      lines.push(`${cap(WARDEN_NAME[tpl.warden])} falls — but the face beneath is a true Warden, not the impostor. The guild is broken; its sieges end. A ${COLOR_NAME[tpl.warden]} amulet is your spoil.`);
+      giveAmulet(tpl.warden);
+    } else if (tpl.boss) { g.status = 'won'; save(); go('end'); return; }
   } else {
     g.losses++;
     if (ante.mine) { addCards(S.collection, ante.mine, -1); addCards(g.deck, ante.mine, -1); lines.push(`You lose ${ante.mine} as ante.`); if (deckSize(g.deck) < 40) { fillBasics(g.deck); lines.push('A basic land fills the gap so your deck stays at 40 cards.'); } }
@@ -878,7 +912,7 @@ function map() {
   const panel = `<canvas id="minimap" class="minimap"></canvas>
       <h2>${esc(g.name)}</h2>
       <p>Standing in the <b>${BIOME[here].name}</b> (${COLOR_NAME[here]}). ${near.length ? `<br>${near.map(e => enemyById(e.template).name).join(', ')} nearby.` : ''}</p>
-      <p class="small">Move with WASD or the arrow keys, or click a neighbouring tile. Walking costs food. Blue crystals are mana links (+2 life). Landmarks marked ? ask a riddle about a card: answer right for a card of that region's color, wrong and you lose life, food or, rarely, a card. Pits with a torch are dungeons: revealed by clues from beaten foes, fought room by room with your life carried over. The dark fortress is the Usurper.</p>
+      <p class="small">Move with WASD or the arrow keys, or click a neighbouring tile. Walking costs food. Blue crystals are mana links (+2 life). Landmarks marked ? ask a riddle about a card: answer right for a card of that region's color, wrong and you lose life, food or, rarely, a card. Pits with a torch are dungeons: revealed by clues from beaten foes, fought room by room with your life carried over. Faint sparks are mana motes — walk over one for gold or an amulet. The five dark fortresses are the Warden guilds; storm them to find the one the Usurper wears.</p>
       ${(g.world.dungeons || []).some(d => d.revealed) ? `<p class="small">Known dungeons: ${g.world.dungeons.filter(d => d.revealed).map(d => `${dungeonTemplate(d.id).name}${d.cleared ? ' (cleared)' : ''}`).join(', ')}.</p>` : ''}
       <div class="btnrow"><button class="btn" id="b-rest" ${g.player.food < 3 || g.player.life >= g.player.maxLife ? 'disabled' : ''}>Rest (3 food, +5 life)</button><button class="btn ghost" data-go="title">Menu</button></div>
       ${totalAmulets() ? `<h3>World magic</h3><p class="small">Spend amulets to bend the world. ${g.player.cloak > 0 ? `<b>Cloaked: ${g.player.cloak} step${g.player.cloak > 1 ? 's' : ''} of shadow left.</b>` : 'Cast from anywhere on the map.'}</p>
@@ -894,6 +928,8 @@ function map() {
   if (!g.world.landmarks) { placeLandmarks(g.world, Math.random); save(); }
   if (!g.world.specials) { placeSpecials(g.world, Math.random); save(); }
   if (!g.world.motes) { placeMotes(g.world, Math.random); save(); }
+  if (!g.world.castles) { migrateCastles(g); save(); }
+  if (!g.usurper) { g.usurper = rnd(COLORS); save(); }
   if (!g.player.amulets) { g.player.amulets = newAmulets(); g.quests ||= []; save(); }
   const hl = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dy]) => [g.player.x + dx, g.player.y + dy]).filter(([x, y]) => inBounds(g.world, x, y));
   const cam = drawWorld(canvas, g.world, g.player, { highlight: hl });
@@ -1087,7 +1123,7 @@ document.addEventListener('keydown', ev => {
 
 // ---- boot -----------------------------------------------------------------------
 // Debug handle for the console and for automated tests: window.ff.S is the app state.
-window.ff = { S, defOf, save, render, startDuel, enemyById, startTutorialDuel, riddleDefs, makeRiddle, amuletShopPool, artifactShopPool, cityPool };
+window.ff = { S, defOf, save, render, startDuel, enemyById, startTutorialDuel, riddleDefs, makeRiddle, amuletShopPool, artifactShopPool, cityPool, wardenOf, finishDuel };
 initPreview();
 load();
 render();

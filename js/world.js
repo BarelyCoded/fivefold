@@ -19,6 +19,10 @@ export const PAL = {
 };
 export const BIOME = Object.fromEntries(COLORS.map(c => [c, { name: PAL[c].name, fill: PAL[c].ground[0], dark: PAL[c].ground[2] }]));
 export const CITY_NAME = { W: 'Alabaster', U: 'Tidewater', B: 'Mirehold', R: 'Cinderfall', G: 'Greenhollow' };
+export const WARDEN_HOLD = { W: 'the Radiant Bastion', U: 'the Sunken Spire', B: 'the Bonewrought Keep', R: 'the Emberhold', G: 'the Thornward' };
+const allCastles = world => world.castles || (world.castle ? [world.castle] : []);
+const castleKeys = world => allCastles(world).map(c => `${c.x},${c.y}`);
+export const castleAt = (world, x, y) => allCastles(world).find(c => c.x === x && c.y === y);
 
 // ---- generation ------------------------------------------------------------------
 function field(rng, w, h, passes = 2) {
@@ -57,9 +61,14 @@ export function generateWorld(rng, enemies, startColor) {
   const randomTile = (pred, tries = 400) => { for (let i = 0; i < tries; i++) { const x = Math.floor(rng() * W), y = Math.floor(rng() * H); if (occupied.has(`${x},${y}`)) continue; if (pred(x, y)) return { x, y }; } return null; };
   const links = [];
   for (const c of cities) { const t = randomTile((x, y) => at(x, y) === c.color && dist({ x, y }, c) >= 4 && dist({ x, y }, start) >= 3); if (t) { links.push({ ...t, color: c.color, taken: false }); occupied.add(`${t.x},${t.y}`); } }
-  let castle = null, far = -1;
-  for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) { if (occupied.has(`${x},${y}`)) continue; const d = dist({ x, y }, start); if (d > far) { far = d; castle = { x, y }; } }
-  occupied.add(`${castle.x},${castle.y}`);
+  // A guild castle in each colour's region — the Warden strongholds. One hides the Usurper.
+  const castles = [];
+  for (const cc of COLORS) {
+    let t = randomTile((x, y) => at(x, y) === cc && dist({ x, y }, start) >= 6 && !cities.some(ct => dist(ct, { x, y }) < 3), 700)
+         || randomTile((x, y) => at(x, y) === cc && !cities.some(ct => dist(ct, { x, y }) < 2), 700)
+         || randomTile((x, y) => !cities.some(ct => dist(ct, { x, y }) < 2), 700);
+    if (t) { castles.push({ x: t.x, y: t.y, color: cc, name: WARDEN_HOLD[cc] }); occupied.add(`${t.x},${t.y}`); }
+  }
   const roam = [];
   let uid = 1;
   const enemyCount = Math.round(W * H / 38);
@@ -70,7 +79,7 @@ export function generateWorld(rng, enemies, startColor) {
     const pool = enemies.filter(e => e.color === color && !e.boss); const tpl = pool.find(e => e.tier === tier) || pool[0]; if (!tpl) continue;
     roam.push({ uid: uid++, x: t.x, y: t.y, template: tpl.id, tier: tpl.tier, color }); occupied.add(`${t.x},${t.y}`);
   }
-  return { w: W, h: H, tiles, cities, links, castle, enemies: roam, start: { x: start.x, y: start.y }, seed: Math.floor(rng() * 1e9) };
+  return { w: W, h: H, tiles, cities, links, castles, enemies: roam, start: { x: start.x, y: start.y }, seed: Math.floor(rng() * 1e9) };
 }
 
 export const tileAt = (world, x, y) => world.tiles[y * world.w + x];
@@ -83,7 +92,7 @@ export const dungeonAt = (world, x, y) => (world.dungeons || []).find(d => d.x =
 // Place one hidden dungeon per template in matching terrain. Safe to call on old saves.
 export function placeDungeons(world, rng, templates) {
   if (world.dungeons) return world.dungeons;
-  const taken = new Set([...world.cities.map(c => `${c.x},${c.y}`), ...world.links.map(l => `${l.x},${l.y}`), `${world.castle.x},${world.castle.y}`, ...world.enemies.map(e => `${e.x},${e.y}`)]);
+  const taken = new Set([...world.cities.map(c => `${c.x},${c.y}`), ...world.links.map(l => `${l.x},${l.y}`), ...castleKeys(world), ...world.enemies.map(e => `${e.x},${e.y}`)]);
   const out = [];
   for (const t of templates) {
     let best = null;
@@ -107,7 +116,7 @@ const LANDMARK_KINDS = { G: ['well', 'standingStone', 'signpost', 'tower'], W: [
 export const landmarkAt = (world, x, y) => (world.landmarks || []).find(l => l.x === x && l.y === y);
 export function placeLandmarks(world, rng, count = Math.max(12, Math.round(world.w * world.h / 55))) {
   if (world.landmarks) return world.landmarks;
-  const taken = new Set([...world.cities.map(c => `${c.x},${c.y}`), ...world.links.map(l => `${l.x},${l.y}`), `${world.castle.x},${world.castle.y}`, ...world.enemies.map(e => `${e.x},${e.y}`), ...(world.dungeons || []).map(d => `${d.x},${d.y}`)]);
+  const taken = new Set([...world.cities.map(c => `${c.x},${c.y}`), ...world.links.map(l => `${l.x},${l.y}`), ...castleKeys(world), ...world.enemies.map(e => `${e.x},${e.y}`), ...(world.dungeons || []).map(d => `${d.x},${d.y}`)]);
   const out = [];
   const isCoast = (x, y) => [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => inBounds(world, x + dx, y + dy) && tileAt(world, x + dx, y + dy) !== 'U');
   for (let i = 0; i < 600 && out.length < count; i++) {
@@ -126,7 +135,7 @@ export function placeLandmarks(world, rng, count = Math.max(12, Math.round(world
 export const specialAt = (world, x, y) => (world.specials || []).find(l => l.x === x && l.y === y);
 export function placeSpecials(world, rng) {
   if (world.specials) return world.specials;
-  const taken = new Set([...world.cities.map(c => `${c.x},${c.y}`), ...world.links.map(l => `${l.x},${l.y}`), `${world.castle.x},${world.castle.y}`, ...world.enemies.map(e => `${e.x},${e.y}`), ...(world.dungeons || []).map(d => `${d.x},${d.y}`), ...(world.landmarks || []).map(l => `${l.x},${l.y}`)]);
+  const taken = new Set([...world.cities.map(c => `${c.x},${c.y}`), ...world.links.map(l => `${l.x},${l.y}`), ...castleKeys(world), ...world.enemies.map(e => `${e.x},${e.y}`), ...(world.dungeons || []).map(d => `${d.x},${d.y}`), ...(world.landmarks || []).map(l => `${l.x},${l.y}`)]);
   const out = [];
   const want = [{ kind: 'gemcutter' }, { kind: 'lostcity' }, { kind: 'diamondmine' }, { kind: 'diamondmine' }, { kind: 'diamondmine' }];
   for (const spec of want) {
@@ -165,7 +174,7 @@ const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 // A tile an enemy may not stand on (cities/links/landmarks are safe havens; you can't be caught there).
 function blockedForEnemy(world, x, y) {
   return !inBounds(world, x, y) || !!cityAt(world, x, y) || !!linkAt(world, x, y) || !!enemyAt(world, x, y)
-    || (world.castle.x === x && world.castle.y === y) || !!dungeonAt(world, x, y)
+    || !!castleAt(world, x, y) || !!dungeonAt(world, x, y)
     || !!landmarkAt(world, x, y) || !!specialAt(world, x, y);
 }
 // Roaming AI: enemies within sight give chase and step toward the player; otherwise they wander their
@@ -345,7 +354,7 @@ function paintTiles(world) {
   ctx.putImageData(image, 0, 0);
   paintRoads(ctx, world, seed);
   // scenery, back to front
-  const reserved = new Set([...world.cities.map(ct => `${ct.x},${ct.y}`), `${world.castle.x},${world.castle.y}`, ...world.links.map(l => `${l.x},${l.y}`), ...(world.dungeons || []).map(d => `${d.x},${d.y}`), ...(world.landmarks || []).map(l => `${l.x},${l.y}`)]);
+  const reserved = new Set([...world.cities.map(ct => `${ct.x},${ct.y}`), ...castleKeys(world), ...world.links.map(l => `${l.x},${l.y}`), ...(world.dungeons || []).map(d => `${d.x},${d.y}`), ...(world.landmarks || []).map(l => `${l.x},${l.y}`)]);
   const feats = [];
   const nearCity = (x, y) => world.cities.some(ct => Math.abs(ct.x - x) <= 3 && Math.abs(ct.y - y) <= 3 && (Math.abs(ct.x - x) + Math.abs(ct.y - y)) >= 2);
   for (let y = 0; y < world.h; y++) for (let x = 0; x < world.w; x++) {
@@ -509,7 +518,7 @@ function paintTerrain(world) {
   }
 
   // 4. tall features, back to front
-  const reserved = new Set([...world.cities.map(c => `${c.x},${c.y}`), `${world.castle.x},${world.castle.y}`, ...world.links.map(l => `${l.x},${l.y}`)]);
+  const reserved = new Set([...world.cities.map(c => `${c.x},${c.y}`), ...castleKeys(world), ...world.links.map(l => `${l.x},${l.y}`)]);
   const feats = [];
   for (let y = 0; y < world.h; y++) for (let x = 0; x < world.w; x++) {
     const b = at(x, y), X = x * PX, Y = y * PX;
@@ -654,11 +663,14 @@ function drawCity(ctx, cx, cy, color, name) {
   }
   labels.push({ x: cx, y: cy + 17, text: name });
 }
-function drawFortress(ctx, cx, cy) {
+const FORT_GLOW = { W: '220,210,150', U: '90,150,230', B: '150,90,180', R: '210,80,60', G: '90,170,80', M: '160,30,50' };
+function drawFortress(ctx, cx, cy, color = 'M', name = '', fallen = false) {
+  const rgb = FORT_GLOW[color] || FORT_GLOW.M;
+  ctx.save(); if (fallen) ctx.globalAlpha = 0.5;
   const glow = ctx.createRadialGradient(cx, cy, 3, cx, cy, 30);
-  glow.addColorStop(0, 'rgba(160,30,50,.45)'); glow.addColorStop(1, 'rgba(160,30,50,0)');
+  glow.addColorStop(0, `rgba(${rgb},${fallen ? 0.15 : 0.45})`); glow.addColorStop(1, `rgba(${rgb},0)`);
   ctx.fillStyle = glow; ctx.fillRect(cx - 30, cy - 30, 60, 60);
-  if (atlasReady()) { blitAt(ctx, SPRITES.city.fortress, cx, cy + PX / 2 + 2); const dr = MONSTERS.dragon.idle[0]; blitAt(ctx, dr, cx + 34, cy + PX / 2 + 6, Math.min(0.9, 50 / dr[3])); labels.push({ x: cx, y: cy + PX / 2 + 8, text: 'The Usurper' }); return; }
+  if (atlasReady()) { blitAt(ctx, SPRITES.city.fortress, cx, cy + PX / 2 + 2); if (name) labels.push({ x: cx, y: cy + PX / 2 + 8, text: fallen ? name + ' (fallen)' : name, color: fallen ? '#9a9a92' : '#f0e2c0' }); ctx.restore(); return; }
   shade(ctx, cx, cy + 10, 30);
   const s = '#26222c', sl = '#3d3846', sd = '#15121a';
   px(ctx, cx - 15, cy - 4, 30, 14, s); px(ctx, cx - 15, cy + 8, 30, 2, sd); px(ctx, cx - 15, cy - 4, 30, 1, sl);
@@ -669,6 +681,8 @@ function drawFortress(ctx, cx, cy) {
   px(ctx, cx - 1, cy - 20, 2, 3, '#ff8a3a'); px(ctx, cx - 11, cy - 10, 2, 3, '#ff8a3a'); px(ctx, cx + 10, cy - 10, 2, 3, '#ff8a3a');
   px(ctx, cx, cy - 36, 1, 8, sd); ctx.fillStyle = '#c8323a'; ctx.beginPath(); ctx.moveTo(cx + 1, cy - 36); ctx.lineTo(cx + 8, cy - 33); ctx.lineTo(cx + 1, cy - 30); ctx.closePath(); ctx.fill();
   px(ctx, cx - 2, cy + 4, 4, 6, sd);
+  if (name) labels.push({ x: cx, y: cy - 40, text: fallen ? name + ' (fallen)' : name, color: fallen ? '#9a9a92' : '#f0e2c0' });
+  ctx.restore();
 }
 function drawDungeon(ctx, cx, cy, cleared) {
   if (atlasReady()) { const k = 42 / SPRITES.pit[3]; if (cleared && SPRITES.pitCleared) { blitAt(ctx, SPRITES.pitCleared, cx, cy + PX / 2 + 2, k); return; } if (cleared) ctx.globalAlpha = 0.55; blitAt(ctx, SPRITES.pit, cx, cy + PX / 2 + 2, k); ctx.globalAlpha = 1; if (!cleared && SPRITES.pit[3] < 60) blitAt(ctx, SPRITES.torch, cx + 14, cy + 6, 0.6); return; }
@@ -750,7 +764,7 @@ export function drawMinimap(canvas, world, player, cam) {
   for (const e of world.enemies) if (e.bounty) dot(e.x, e.y, '#ffd54a', 2);
   for (const lm of world.landmarks || []) if (!lm.used) dot(lm.x, lm.y, '#ffe9a8', 1.5);
   for (const sp of world.specials || []) dot(sp.x, sp.y, { gemcutter: '#7fe0ff', lostcity: '#ffd76a', diamondmine: '#e6b3ff' }[sp.kind] || '#fff', 2);
-  dot(world.castle.x, world.castle.y, '#ff3b3b', 3);
+  for (const ca of allCastles(world)) dot(ca.x, ca.y, ca.fallen ? '#6a6a66' : '#ff3b3b', 2.5);
   dot(player.x, player.y, '#ffffff', 2.5);
   if (cam) { ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 1; ctx.strokeRect(cam.x * k + 0.5, cam.y * k + 0.5, VIEW.w * k - 1, VIEW.h * k - 1); }
 }
@@ -775,7 +789,7 @@ export function drawWorld(canvas, world, player, opts = {}) {
   for (const lm of world.landmarks || []) if (vis(lm.x, lm.y)) { const [cx, cy] = c(lm.x, lm.y); objs.push({ y: cy - 1, draw: () => drawLandmark(f, cx, cy, lm) }); }
   for (const sp of world.specials || []) if (vis(sp.x, sp.y)) { const [cx, cy] = c(sp.x, sp.y); objs.push({ y: cy - 1, draw: () => drawSpecial(f, cx, cy, sp) }); }
   for (const ct of world.cities) if (vis(ct.x, ct.y)) { const [cx, cy] = c(ct.x, ct.y); objs.push({ y: cy, draw: () => drawCity(f, cx, cy, ct.color, ct.name) }); }
-  if (vis(world.castle.x, world.castle.y)) { const [cx, cy] = c(world.castle.x, world.castle.y); objs.push({ y: cy, draw: () => drawFortress(f, cx, cy) }); }
+  for (const ca of allCastles(world)) if (vis(ca.x, ca.y)) { const [cx, cy] = c(ca.x, ca.y); objs.push({ y: cy, draw: () => drawFortress(f, cx, cy, ca.color, ca.name, ca.fallen) }); }
   const robes = { W: ['#d9d2b8', '#f0ead6'], U: ['#2f5f9c', '#5e8cc9'], B: ['#3a2d4a', '#5e4d75'], R: ['#a33a2a', '#d0604a'], G: ['#3f6f2f', '#6a9a4a'] };
   for (const e of world.enemies) if (vis(e.x, e.y)) { const [cx, cy] = c(e.x, e.y); const [r, rl] = robes[e.color] || robes.B; const sp = (SPRITES.mage[e.color] || SPRITES.mage.M)[e.tier >= 2 ? 1 : 0]; objs.push({ y: cy, draw: () => { drawFigure(f, cx, cy, r, rl, r, { tier: e.tier, sprite: sp }); if (e.bounty) labels.push({ x: cx, y: cy - PX / 2 - 10, text: '\u2605', size: 10, color: '#ffd54a', bg: 'rgba(60,40,10,.9)' }); } }); }
   { const [cx, cy] = c(player.x, player.y); objs.push({ y: cy + 0.1, draw: () => drawFigure(f, cx, cy, '#c8322a', '#e0604a', null, { legs: '#2f4f9c', staff: true, ring: true, sprite: SPRITES.hero }) }); }
