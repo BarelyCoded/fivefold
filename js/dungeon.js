@@ -77,42 +77,90 @@ const COLOR_WORDS = { W: 'White', U: 'Blue', B: 'Black', R: 'Red', G: 'Green' };
 // only: optional list of riddle kinds to allow ('cost', 'pt', 'power', 'toughness', 'color', 'cmc', 'keyword').
 export function makeRiddle(rng, defs, only = null) {
   const pool = defs.filter(d => d && d.kind !== 'unsupported');
-  if (!pool.length) return null;
-  const d = pool[Math.floor(rng() * pool.length)];
-  let kinds = [];
-  if (d.kind === 'creature') kinds.push('power', 'toughness', 'pt');
-  if (d.colors.length === 1) kinds.push('color');
-  if (d.cmc > 0) kinds.push('cmc', 'cost');
-  if (d.kwNames?.length) kinds.push('keyword');
-  if (only) kinds = kinds.filter(k => only.includes(k));
-  if (!kinds.length) return makeRiddle(rng, pool.filter(x => x !== d), only);
-  const kind = kinds[Math.floor(rng() * kinds.length)];
-  let q, answer, options;
-  const nums = n => [...new Set([n, n + 1, Math.max(0, n - 1), n + 2, n + 3, Math.max(0, n - 2)])].slice(0, 4);
-  switch (kind) {
-    case 'power': q = `What is the power of ${d.name}?`; answer = String(d.power); options = nums(d.power).map(String); break;
-    case 'toughness': q = `What is the toughness of ${d.name}?`; answer = String(d.toughness); options = nums(d.toughness).map(String); break;
-    case 'color': q = `What color is ${d.name}?`; answer = COLOR_WORDS[d.colors[0]]; options = Object.values(COLOR_WORDS); break;
-    case 'cmc': q = `What is the mana value of ${d.name}?`; answer = String(d.cmc); options = nums(d.cmc).map(String); break;
-    case 'cost': {
-      q = `What is the mana cost of ${d.name}?`; answer = costString(d.cost);
-      const c = d.cost; const pipColor = c.pips[0]?.[0] || 'W'; const other = ['W', 'U', 'B', 'R', 'G'].filter(x => x !== pipColor);
+  if (pool.length < 2) return null;
+  const shuf = arr => arr.map(v => [rng(), v]).sort((a, b) => a[0] - b[0]).map(x => x[1]);
+  const sample = (arr, n) => shuf(arr).slice(0, n);
+  const uniqBy = (arr, f) => { const seen = new Set(), out = []; for (const x of arr) { const k = f(x); if (!seen.has(k)) { seen.add(k); out.push(x); } } return out; };
+  const creatures = pool.filter(d => d.kind === 'creature');
+  const withKw = pool.filter(d => d.kwNames && d.kwNames.length);
+
+  // Each generator returns { q, answer, options, card } or null when it can't build a fair question.
+  // The multi-card ones are hard: they need the player to actually know several cards, not read one value.
+  const gens = {
+    mostPower: () => {
+      const c = uniqBy(creatures, d => d.power); if (c.length < 4) return null;
+      const four = sample(c, 4); const ans = four.reduce((a, b) => (b.power > a.power ? b : a));
+      return { q: 'Which of these creatures has the greatest power?', answer: ans.name, options: four.map(d => d.name), card: ans.name };
+    },
+    leastToughness: () => {
+      const c = uniqBy(creatures, d => d.toughness); if (c.length < 4) return null;
+      const four = sample(c, 4); const ans = four.reduce((a, b) => (b.toughness < a.toughness ? b : a));
+      return { q: 'Which of these creatures has the least toughness?', answer: ans.name, options: four.map(d => d.name), card: ans.name };
+    },
+    mostCmc: () => {
+      const c = uniqBy(pool, d => d.cmc); if (c.length < 4) return null;
+      const four = sample(c, 4); const ans = four.reduce((a, b) => (b.cmc > a.cmc ? b : a));
+      return { q: 'Which of these cards has the highest mana value?', answer: ans.name, options: four.map(d => d.name), card: ans.name };
+    },
+    leastCmc: () => {
+      const c = uniqBy(pool, d => d.cmc); if (c.length < 4) return null;
+      const four = sample(c, 4); const ans = four.reduce((a, b) => (b.cmc < a.cmc ? b : a));
+      return { q: 'Which of these cards is the cheapest to cast?', answer: ans.name, options: four.map(d => d.name), card: ans.name };
+    },
+    whichKeyword: () => {
+      if (!withKw.length) return null;
+      const target = withKw[Math.floor(rng() * withKw.length)]; const kw = target.kwNames[Math.floor(rng() * target.kwNames.length)];
+      const others = sample(pool.filter(d => d !== target && !(d.kwNames || []).includes(kw)), 3); if (others.length < 3) return null;
+      return { q: `Which of these cards has ${kw.toLowerCase()}?`, answer: target.name, options: shuf([target.name, ...others.map(d => d.name)]), card: target.name };
+    },
+    whichType: () => {
+      const kinds = ['instant', 'sorcery', 'enchantment', 'artifact', 'creature'];
+      const kind = kinds[Math.floor(rng() * kinds.length)];
+      const target = sample(pool.filter(d => d.kind === kind), 1)[0]; if (!target) return null;
+      const others = sample(pool.filter(d => d.kind !== kind), 3); if (others.length < 3) return null;
+      const word = { instant: 'an instant', sorcery: 'a sorcery', enchantment: 'an enchantment', artifact: 'an artifact', creature: 'a creature' }[kind];
+      return { q: `Which of these cards is ${word}?`, answer: target.name, options: shuf([target.name, ...others.map(d => d.name)]), card: target.name };
+    },
+    typeLine: () => {
+      const d = pool[Math.floor(rng() * pool.length)]; if (!d.typeLine) return null;
+      const others = uniqBy(sample(pool.filter(x => x.typeLine && x.typeLine !== d.typeLine), 6), x => x.typeLine).slice(0, 3);
+      if (others.length < 3) return null;
+      return { q: `What is the full type line of ${d.name}?`, answer: d.typeLine, options: shuf([d.typeLine, ...others.map(x => x.typeLine)]), card: d.name };
+    },
+    cost: () => {
+      const d = pool.filter(x => x.cmc > 0)[Math.floor(rng() * pool.filter(x => x.cmc > 0).length)]; if (!d) return null;
+      const answer = costString(d.cost); const c = d.cost; const pipColor = c.pips[0] && c.pips[0][0] || 'W';
+      const other = ['W', 'U', 'B', 'R', 'G'].filter(x => x !== pipColor);
       const vars = [
         { pips: c.pips, generic: c.generic + 1 }, { pips: c.pips, generic: Math.max(0, c.generic - 1) },
-        { pips: [...c.pips, [pipColor]], generic: Math.max(0, c.generic - 1) }, { pips: c.pips.map(() => [other[Math.floor(rng() * other.length)]]), generic: c.generic },
-        { pips: c.pips.slice(1), generic: c.generic + 1 },
+        { pips: [...c.pips, [pipColor]], generic: Math.max(0, c.generic - 1) },
+        { pips: c.pips.map(() => [other[Math.floor(rng() * other.length)]]), generic: c.generic },
       ].map(v => costString({ ...v, x: c.x })).filter(v => v && v !== answer);
-      options = [answer, ...[...new Set(vars)].sort(() => rng() - 0.5).slice(0, 3)]; break;
-    }
-    case 'pt': {
-      q = `What are the power and toughness of ${d.name}?`; answer = `${d.power}/${d.toughness}`;
-      const vars = [[1, 0], [0, 1], [-1, 0], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]].map(([dp, dt]) => `${Math.max(0, d.power + dp)}/${Math.max(1, d.toughness + dt)}`).filter(v => v !== answer);
-      options = [answer, ...[...new Set(vars)].sort(() => rng() - 0.5).slice(0, 3)]; break;
-    }
-    case 'keyword': { const all = ['Flying', 'First strike', 'Trample', 'Banding', 'Regeneration', 'Swampwalk', 'Islandwalk', 'Forestwalk', 'Mountainwalk', 'Plainswalk', 'Protection from red', 'Vigilance', 'Haste']; answer = d.kwNames[0]; options = [answer, ...all.filter(k => !d.kwNames.includes(k)).sort(() => rng() - 0.5).slice(0, 5)]; q = `What special ability does ${d.name} have?`; break; }
-  }
-  options = [...new Set(options)].sort(() => rng() - 0.5);
-  return { q, answer, options, card: d.name };
+      const distinct = [...new Set(vars)].slice(0, 3); if (distinct.length < 3) return null;
+      return { q: `What is the exact mana cost of ${d.name}?`, answer, options: shuf([answer, ...distinct]), card: d.name };
+    },
+    pt: () => {
+      const d = creatures[Math.floor(rng() * creatures.length)]; if (!d) return null;
+      const answer = `${d.power}/${d.toughness}`;
+      const vars = [[1, 0], [0, 1], [-1, 0], [0, -1], [1, 1], [-1, -1], [2, 0], [0, 2]].map(([dp, dt]) => `${Math.max(0, d.power + dp)}/${Math.max(1, d.toughness + dt)}`).filter(v => v !== answer);
+      return { q: `What are the power and toughness of ${d.name}?`, answer, options: shuf([answer, ...[...new Set(vars)].slice(0, 3)]), card: d.name };
+    },
+    cmc: () => {
+      const d = pool.filter(x => x.cmc > 0)[Math.floor(rng() * pool.filter(x => x.cmc > 0).length)]; if (!d) return null;
+      const nums = [...new Set([d.cmc, d.cmc + 1, Math.max(0, d.cmc - 1), d.cmc + 2, Math.max(0, d.cmc - 2)])].slice(0, 4);
+      return { q: `What is the mana value of ${d.name}?`, answer: String(d.cmc), options: shuf(nums.map(String)), card: d.name };
+    },
+  };
+  // Map the old 'only' filter (cost/color/pt) onto the new kinds, but lean on the harder ones.
+  const HARD = ['mostPower', 'leastToughness', 'mostCmc', 'leastCmc', 'whichKeyword', 'whichType', 'typeLine'];
+  const EASY = ['cost', 'pt', 'cmc'];
+  let order = only
+    ? [...HARD, ...EASY.filter(k => only.includes(k) || (only.includes('color') && false))]
+    : [...HARD, ...EASY];
+  // Try hard questions first (shuffled), then fall back to exact-recall, then anything.
+  order = [...shuf(HARD.filter(k => order.includes(k))), ...shuf(EASY.filter(k => order.includes(k)))];
+  for (const k of order) { const r = gens[k] && gens[k](); if (r && r.options.length >= 3) { r.options = [...new Set(r.options)]; return r; } }
+  return null;
 }
 
 // ---- rendering ---------------------------------------------------------------------

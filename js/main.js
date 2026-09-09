@@ -175,7 +175,7 @@ function landmarkRiddle(lm) {
   const g = S.game;
   const color = lm.color || tileAt(g.world, lm.x, lm.y);
   const pool = [...new Set([...cityPool(color), ...S.dungeons.dungeons.filter(d => d.color === color).flatMap(d => d.treasure)])].filter(n => { const d = defOf(n); return d && d.kind !== 'unsupported' && d.kind !== 'land'; });
-  const r = makeRiddle(Math.random, pool.map(defOf), ['cost', 'color', 'pt']);
+  const r = makeRiddle(Math.random, pool.map(defOf));
   if (!r) { lm.used = true; save(); render(); return; }
   S.modal = {
     title: LANDMARK_TEXT[lm.kind] || 'A landmark',
