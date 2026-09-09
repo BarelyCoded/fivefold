@@ -997,6 +997,34 @@ function collection() {
   </section>`;
 }
 
+// Simple, Shandalar-flavoured deck advice shown under the stats. Targets a 40-card base at
+// ~40% lands / ~40% creatures / 20-25% interaction, shifted by the archetype the mana curve implies.
+// The old mulligan rule (redraw only on 0 or 7 lands) makes a stable mana base matter most, so the
+// land note is the loudest. Shows the few biggest deviations, or an all-clear when the ratios are good.
+function deckAdvice({ size, lands, spells, creatures, others, curve, avg }) {
+  if (!spells && !lands) return '';
+  const base = Math.max(40, size);
+  const pct = n => Math.round(n / base * 100);
+  const heavy = curve[5] + curve[6] + curve[7];   // spells costing 5+
+  const arch = (spells >= 6 && avg <= 2.4 && heavy <= 2) ? 'aggro'
+    : (avg >= 3.3 || heavy >= 5) ? 'control' : 'midrange';
+  const aArch = `${arch === 'aggro' ? 'an' : 'a'} ${arch}`;
+  const band = { aggro: [0.30, 0.35, 0.37], midrange: [0.38, 0.40, 0.42], control: [0.40, 0.42, 0.44] }[arch];
+  const [lo, mid, hi] = band.map(f => Math.round(base * f));
+  const tips = [];
+  if (size < 40) tips.push(['warn', `Only ${size} cards — build up to at least 40. The targets below assume a 40-card deck.`]);
+  if (lands < lo) tips.push(['warn', `Add about ${mid - lands} land${mid - lands === 1 ? '' : 's'}: ${lands} (${pct(lands)}%) is thin for ${aArch} deck — aim for ${mid} (~${Math.round(mid / base * 100)}%). Under the old mulligan rule (redraw only on 0 or 7 lands) a shaky mana base loses games on the shuffle.`]);
+  else if (lands > hi) tips.push(['tip', `Trim about ${lands - mid} land${lands - mid === 1 ? '' : 's'}: ${lands} (${pct(lands)}%) is more than ${aArch} deck needs — swap the spares for spells.`]);
+  const cMid = Math.round(base * 0.40);
+  if (creatures < Math.round(base * 0.30)) tips.push(['tip', `Add creatures: ${creatures} (${pct(creatures)}%) is light. They are your win condition and your blockers against the AI — aim for about ${cMid} (40%).`]);
+  if (arch !== 'aggro' && others < Math.round(base * 0.10)) tips.push(['tip', `Work in some interaction: only ${others} noncreature spell${others === 1 ? '' : 's'}. A few removal, burn or counters (aim 20–25%, about ${Math.round(base * 0.22)}) answer the AI's threats.`]);
+  if (avg >= 3.6) tips.push(['tip', `Heavy curve (avg ${avg.toFixed(1)}): add a land or a couple of 1–2 drops so you can cast on time.`]);
+  const shown = tips.slice(0, 4);
+  const body = shown.length
+    ? shown.map(([cls, t]) => `<li class="adv-${cls}">${esc(t)}</li>`).join('')
+    : `<li class="adv-ok">Ratios look solid for ${aArch} deck — ${lands} lands (${pct(lands)}%), ${creatures} creatures (${pct(creatures)}%), ${others} other spell${others === 1 ? '' : 's'} (${pct(others)}%).</li>`;
+  return `<div class="deckadvice"><div class="curve-head"><span>Recommendations</span><span class="small">reads as ${arch}</span></div><ul>${body}</ul></div>`;
+}
 function deck() {
   const g = S.game; if (!g) return title();
   const q = S.deckFilter.toLowerCase();
@@ -1008,9 +1036,11 @@ function deck() {
   const curve = new Array(8).fill(0); let spells = 0, cmcSum = 0;
   // Colour pie: coloured mana symbols demanded across nonland spells (hybrids split evenly).
   const pip = { W: 0, U: 0, B: 0, R: 0, G: 0 };
+  let creatures = 0;
   for (const r of inDeck) {
     if (!r.d || r.d.kind === 'land') continue;
     const cv = Math.min(7, r.d.cmc || 0); curve[cv] += r.c; spells += r.c; cmcSum += (r.d.cmc || 0) * r.c;
+    if (r.d.power != null) creatures += r.c;
     for (const grp of (r.d.cost?.pips || [])) { const cols = grp.filter(c => pip[c] !== undefined); for (const c of cols) pip[c] += r.c / cols.length; }
   }
   const maxC = Math.max(1, ...curve), avg = spells ? (cmcSum / spells) : 0, BH = 64;
@@ -1032,6 +1062,7 @@ function deck() {
     </div>` : '<p class="small statmsg">Colored spells show your color split here.</p>'}
   </div>`;
   const statsHtml = `<div class="deckstats">${curveHtml}${pieHtml}</div>`;
+  const adviceHtml = deckAdvice({ size, lands, spells, creatures, others: spells - creatures, curve, avg });
   app.innerHTML = `<section class="screen deckb">
     <div class="cols wide">
       <div class="box">
@@ -1042,6 +1073,7 @@ function deck() {
       <div class="box">
         <div class="rowhead"><h2>Deck · ${size} cards, ${lands} lands</h2><span class="rowtools"><button class="btn" id="b-fill">Fill basics to 40</button><button class="btn" id="b-clear-deck"${size ? '' : ' disabled'}>Remove all</button></span></div>
         ${statsHtml}
+        ${adviceHtml}
         <div class="basics">${COLORS.map(c => `<span class="basic"><i class="dot c-${c}"></i>${BASICS[c]} <b>${g.deck[BASICS[c]] || 0}</b> <button class="btn tiny" data-rem="${BASICS[c]}">−</button><button class="btn tiny" data-add="${BASICS[c]}">+</button></span>`).join('')}</div>
         ${probs.length ? `<div class="msg">${probs.map(esc).join('<br>')}</div>` : '<div class="ok">Deck is ready.</div>'}
         <table class="coll"><tr><th>Card</th><th>Cost</th><th>Qty</th><th></th></tr>
