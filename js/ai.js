@@ -323,6 +323,32 @@ function subsets(arr, maxSize) {
   return res;
 }
 
+// Rough mana available to p right now: everything in the pool plus each untapped mana source.
+const manaTotal = m => (m ? (m.generic || 0) + (m.pips?.length || 0) : 0);
+function availMana(p) {
+  let n = 0;
+  if (p.pool) for (const k in p.pool) n += p.pool[k];
+  for (const c of p.battlefield) if (!c.tapped && c.def.manaAbilities && c.def.manaAbilities.length) n++;
+  return n;
+}
+// Upper bound on the extra power p could pump onto `a` this turn (self-pump abilities like Vampire
+// Bats' {B}:+1/+0, and pump spells in hand), limited by `mana`. Used to judge whether swinging a
+// 0-power creature could actually reach lethal.
+function pumpReach(duel, p, a, mana) {
+  let extra = 0, budget = mana;
+  for (const ab of abilitiesOf(a)) {
+    if (ab.type !== 'activated') continue;
+    const e = ab.effects[0]; if (!e || e.type !== 'pump' || (e.p | 0) <= 0 || e.sel !== 'self') continue;
+    const lim = ab.limit || (ab.once ? 1 : 0) || 99;
+    const cost = manaTotal(ab.cost.mana);
+    if (cost <= 0) { extra += (e.p | 0) * Math.min(lim, 5); continue; }
+    const uses = Math.min(lim, Math.floor(budget / cost));
+    extra += (e.p | 0) * uses; budget -= uses * cost;
+  }
+  for (const c of p.hand) { const e = c.def.spell?.effects?.[0]; if (e && e.type === 'pump' && (e.p | 0) > 0 && duel.canCast(p, c)) { const cost = manaTotal(c.def.cost); if (budget >= cost) { extra += (e.p | 0); budget -= cost; } } }
+  return extra;
+}
+
 function chooseAttackers(duel, p) {
   const opp = duel.opponentOf(p);
   const mine = p.battlefield.filter(c => duel.canAttack(c));
@@ -341,6 +367,14 @@ function chooseAttackers(duel, p) {
     if (a.cur.flags.has('mustAttack')) { out.push(a.id); continue; }
     // Keep a tap-to-pump helper (e.g. Angelic Page) back and untapped so it can boost our fights.
     if (mine.length > 1 && isCombatUtility(a)) continue;
+    // A 0-power creature does nothing by attacking (it deals no damage and just taps itself out of
+    // blocking). Only swing it when we can pump it to a lethal, unblocked hit (e.g. Vampire Bats).
+    if (power(a) === 0) {
+      const reach = pumpReach(duel, p, a, availMana(p));
+      const blockable = avail.some(b => duel.canBlock(b, a));
+      if (reach >= opp.life && !blockable) { out.push(a.id); }
+      continue;
+    }
     const legal = avail.filter(b => duel.canBlock(b, a));
     // Find the defender's BEST block (the one that minimizes our net gain), gang blocks included.
     let worst = Infinity, worstBlock = [];
