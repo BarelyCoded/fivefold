@@ -1,7 +1,7 @@
 // Fivefold app controller: screens, world loop, persistence.
 import { parseList, importNames, defOf, forgetDefs, loadArtIndex, artFor, artCount, hasOwnArt, hasServer } from './collection.js';
 import { fetchCards, cacheSize, cached as cachedCard, allCached } from './scryfall.js';
-import { COLORS, COLOR_NAME, costString, statusLabel } from './cards.js';
+import { COLORS, COLOR_NAME, manaHtml, statusLabel } from './cards.js';
 import { generateWorld, drawWorld, drawMinimap, tileAt, inBounds, cityAt, linkAt, enemyAt, stepEnemies, BIOME, TILE, VIEW, placeDungeons, dungeonAt, placeLandmarks, landmarkAt, placeSpecials, specialAt } from './world.js';
 import { Duel } from './engine.js';
 import { mountDuel, cardHtml } from './duelview.js';
@@ -711,7 +711,7 @@ function collection() {
       <div class="rowhead"><h2>Collection · ${names.length} distinct, ${Object.values(S.collection).reduce((a, b) => a + b, 0)} total</h2>
         <div class="seg">${['all', 'playable', 'unsupported'].map(f => `<button class="seg-b${S.filter === f ? ' on' : ''}" data-filter="${f}">${f}</button>`).join('')}</div></div>
       ${rows.length ? `<table class="coll"><tr><th></th><th>Card</th><th>Qty</th><th>Type</th><th>Cost</th><th>Art</th><th>Status</th><th>Notes</th><th></th></tr>
-      ${rows.map(r => { const raw = r.d ? cachedCard(r.n) : null; const art = r.d && hasOwnArt(r.d) ? 'yours' : raw?.art_set ? `${raw.art_set.toUpperCase()} ${raw.art_year || ''}` : ''; return `<tr class="st-${r.d ? r.d.status : 'missing'}"><td class="thumb">${r.d ? `<div class="mini${hasOwnArt(r.d) ? ' own' : ''}" data-preview="${esc(r.n)}" style="${artFor(r.d) ? `background-image:url('${artFor(r.d)}')` : ''}"></div>` : ''}</td><td data-preview="${esc(r.n)}">${esc(r.n)}</td><td>${r.q}</td><td>${esc(r.d?.typeLine || '')}</td><td>${r.d && r.d.kind !== 'land' ? esc(costString(r.d.cost)) : ''}</td><td class="small">${esc(art)}</td><td>${statusLabel(r.d)}</td><td class="notes">${esc((r.d?.notes || []).join('; '))}</td><td><button class="btn tiny" data-dec="${esc(r.n)}">−1</button></td></tr>`; }).join('')}</table>` : '<p class="small">Nothing here yet. Import a list above, or start a new journey to receive a starter deck.</p>'}
+      ${rows.map(r => { const raw = r.d ? cachedCard(r.n) : null; const art = r.d && hasOwnArt(r.d) ? 'yours' : raw?.art_set ? `${raw.art_set.toUpperCase()} ${raw.art_year || ''}` : ''; return `<tr class="st-${r.d ? r.d.status : 'missing'}"><td class="thumb">${r.d ? `<div class="mini${hasOwnArt(r.d) ? ' own' : ''}" data-preview="${esc(r.n)}" style="${artFor(r.d) ? `background-image:url('${artFor(r.d)}')` : ''}"></div>` : ''}</td><td data-preview="${esc(r.n)}">${esc(r.n)}</td><td>${r.q}</td><td>${esc(r.d?.typeLine || '')}</td><td>${r.d && r.d.kind !== 'land' ? manaHtml(r.d.cost) : ''}</td><td class="small">${esc(art)}</td><td>${statusLabel(r.d)}</td><td class="notes">${esc((r.d?.notes || []).join('; '))}</td><td><button class="btn tiny" data-dec="${esc(r.n)}">−1</button></td></tr>`; }).join('')}</table>` : '<p class="small">Nothing here yet. Import a list above, or start a new journey to receive a starter deck.</p>'}
     </div>
   </section>`;
 }
@@ -726,16 +726,16 @@ function deck() {
   app.innerHTML = `<section class="screen deckb">
     <div class="cols wide">
       <div class="box">
-        <div class="rowhead"><h2>Your cards</h2><input id="dfilter" placeholder="Filter…" value="${esc(S.deckFilter)}"></div>
+        <div class="rowhead"><h2>Your cards</h2><span class="rowtools"><button class="btn tiny" id="b-addall">Add all</button><input id="dfilter" placeholder="Filter…" value="${esc(S.deckFilter)}"></span></div>
         <table class="coll"><tr><th>Card</th><th>Cost</th><th>Own</th><th>In deck</th><th></th></tr>
-        ${owned.map(r => { const used = g.deck[r.n] || 0; return `<tr><td data-preview="${esc(r.n)}">${esc(r.n)}<span class="small"> ${esc(r.d.typeLine)}</span></td><td>${r.d.kind === 'land' ? '' : esc(costString(r.d.cost))}</td><td>${r.q}</td><td>${used}</td><td><button class="btn tiny" data-add="${esc(r.n)}" ${used >= r.q ? 'disabled' : ''}>+</button></td></tr>`; }).join('')}</table>
+        ${owned.map(r => { const used = g.deck[r.n] || 0; return `<tr><td data-preview="${esc(r.n)}">${esc(r.n)}<span class="small"> ${esc(r.d.typeLine)}</span></td><td>${r.d.kind === 'land' ? '' : manaHtml(r.d.cost)}</td><td>${r.q}</td><td>${used}</td><td><button class="btn tiny" data-add="${esc(r.n)}" ${used >= r.q ? 'disabled' : ''}>+</button></td></tr>`; }).join('')}</table>
       </div>
       <div class="box">
-        <div class="rowhead"><h2>Deck · ${size} cards, ${lands} lands</h2><button class="btn" id="b-fill">Fill basics to 40</button></div>
+        <div class="rowhead"><h2>Deck · ${size} cards, ${lands} lands</h2><span class="rowtools"><button class="btn" id="b-fill">Fill basics to 40</button><button class="btn" id="b-clear-deck"${size ? '' : ' disabled'}>Remove all</button></span></div>
         <div class="basics">${COLORS.map(c => `<span class="basic"><i class="dot c-${c}"></i>${BASICS[c]} <b>${g.deck[BASICS[c]] || 0}</b> <button class="btn tiny" data-rem="${BASICS[c]}">−</button><button class="btn tiny" data-add="${BASICS[c]}">+</button></span>`).join('')}</div>
         ${probs.length ? `<div class="msg">${probs.map(esc).join('<br>')}</div>` : '<div class="ok">Deck is ready.</div>'}
         <table class="coll"><tr><th>Card</th><th>Cost</th><th>Qty</th><th></th></tr>
-        ${inDeck.map(r => `<tr class="st-${r.d?.status || 'missing'}"><td data-preview="${esc(r.n)}">${esc(r.n)}</td><td>${r.d && r.d.kind !== 'land' ? esc(costString(r.d.cost)) : ''}</td><td>${r.c}</td><td><button class="btn tiny" data-rem="${esc(r.n)}">−</button></td></tr>`).join('')}</table>
+        ${inDeck.map(r => `<tr class="st-${r.d?.status || 'missing'}"><td data-preview="${esc(r.n)}">${esc(r.n)}</td><td>${r.d && r.d.kind !== 'land' ? manaHtml(r.d.cost) : ''}</td><td>${r.c}</td><td><button class="btn tiny" data-rem="${esc(r.n)}">−</button></td></tr>`).join('')}</table>
       </div>
     </div>
   </section>`;
@@ -872,7 +872,7 @@ app.addEventListener('submit', ev => {
 });
 document.addEventListener('click', ev => {
   if (ev.target.closest('.btn, .tab, .linkbtn')) sfx('click');
-  const t = ev.target.closest('[data-go],[data-modal],[data-filter],[data-add],[data-rem],[data-dec],[data-buy],[data-amshop],[data-audio],[data-lesson],#b-import,#b-csv,#b-rescan,#b-clear-coll,#b-fill,#b-rest,#b-inn,#b-food,#b-leave,#b-newgame,#b-dleave,#b-practice,#b-bounty,#b-worldmagic,#b-reset-all');
+  const t = ev.target.closest('[data-go],[data-modal],[data-filter],[data-add],[data-rem],[data-dec],[data-buy],[data-amshop],[data-audio],[data-lesson],#b-import,#b-csv,#b-rescan,#b-clear-coll,#b-fill,#b-addall,#b-clear-deck,#b-rest,#b-inn,#b-food,#b-leave,#b-newgame,#b-dleave,#b-practice,#b-bounty,#b-worldmagic,#b-reset-all');
   if (!t) return;
   const g = S.game;
   if ('audio' in t.dataset) { toggleAudio(); renderTop(); return; }
@@ -891,6 +891,8 @@ document.addEventListener('click', ev => {
     case 'b-rescan': loadArtIndex().then(render); break;
     case 'b-clear-coll': if (confirm('Remove every card from your collection? Your deck will need rebuilding.')) { S.collection = {}; if (g) g.deck = {}; save(); render(); } break;
     case 'b-fill': fillBasics(g.deck); save(); render(); break;
+    case 'b-addall': { const q = S.deckFilter.toLowerCase(); for (const n of Object.keys(S.collection)) { const d = defOf(n); if (!d || d.kind === 'unsupported') continue; if (q && !n.toLowerCase().includes(q)) continue; const want = S.collection[n] - (g.deck[n] || 0); if (want > 0) addCards(g.deck, n, want); } save(); render(); break; }
+    case 'b-clear-deck': if (deckSize(g.deck) && confirm('Remove every card from your deck?')) { g.deck = {}; save(); render(); } break;
     case 'b-rest': if (g.player.food >= 3) { g.player.food -= 3; g.player.life = Math.min(g.player.maxLife, g.player.life + 5); g.player.day++; if (g.player.day % 30 === 0) bossLink(); stepEnemies(g.world, Math.random, g.player); save(); render(); } break;
     case 'b-inn': g.player.life = g.player.maxLife; save(); render(); break;
     case 'b-food': if (g.player.gold >= 2) { g.player.gold -= 2; g.player.food += 20; save(); render(); } break;

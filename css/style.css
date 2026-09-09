@@ -56,6 +56,7 @@ legend { color: var(--ink2); font-size: 13px; padding: 0 4px; }
 .title .lede { max-width: 70ch; color: var(--ink2); font-size: 17px; margin-bottom: 20px; }
 .legal { font-size: 12px; color: var(--ink3); max-width: 80ch; margin-top: 24px; border-top: 1px solid var(--line); padding-top: 10px; }
 .rowhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.rowtools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
 .seg-b { background: transparent; border: 0; color: var(--ink2); padding: 4px 10px; cursor: pointer; font-size: 13px; }
 .seg-b.on { background: var(--line); color: var(--ink); }
@@ -166,9 +167,9 @@ tr.st-unsupported td:nth-child(7), tr.st-unsupported td:nth-child(3), tr.st-miss
 /* duel */
 /* The duel sizes itself from the viewport: cards shrink on short screens, the table uses the full width. */
 .duelscreen { --ch: clamp(96px, calc((100vh - 470px) / 3), 176px); --cw: calc(var(--ch) * 0.712); }
-.duel { display: grid; grid-template-columns: 92px minmax(0, 1fr) 300px; gap: 12px; align-items: start; }
-@media (max-width: 1000px) { .duel { grid-template-columns: 1fr; } .rail { display: none; } }
-.rail { position: sticky; top: 12px; }
+.duel { display: grid; grid-template-columns: 210px minmax(0, 1fr) 260px; gap: 12px; align-items: start; }
+@media (max-width: 1000px) { .duel { grid-template-columns: 1fr; } .rail { position: static; } .rail .phases { display: none; } }
+.rail { position: sticky; top: 12px; display: flex; flex-direction: column; gap: 10px; }
 .phases { background: linear-gradient(180deg, #3a2f26, #221b16); border: 2px solid #6e5637; border-radius: 8px; padding: 8px 6px; display: flex; flex-direction: column; gap: 3px; box-shadow: inset 0 0 12px rgba(0,0,0,.6); }
 .phases-who { font-family: Garamond, Georgia, serif; font-size: 13px; color: var(--gold); text-align: center; margin-bottom: 4px; border-bottom: 1px solid #6e5637; padding-bottom: 4px; }
 .phase { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 4px; color: #8d8073; font-size: 11px; }
@@ -222,6 +223,8 @@ tr.st-unsupported td:nth-child(7), tr.st-unsupported td:nth-child(3), tr.st-miss
 .hand { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 10px 8px; background: linear-gradient(180deg, #1a1714, #221d18); border-top: 2px solid #6e5637; min-height: calc(var(--ch) + 24px); }
 .panel { display: flex; flex-direction: column; gap: 10px; }
 .controls { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.autopass { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #b8a888; cursor: pointer; margin-top: 2px; }
+.autopass input { margin: 0; }
 .hint { font-size: 13px; color: var(--ink2); }
 .log { background: var(--bg2); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font-size: 12.5px; color: var(--ink2); max-height: max(140px, calc(100vh - 400px)); overflow: auto; }
 .log div:last-child { color: var(--ink); }
@@ -322,3 +325,13 @@ svg.arrows { position: absolute; left: 0; top: 0; pointer-events: none; z-index:
 .amushop-row .nm { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .amushop-row .nm i { color: var(--ink2); font-size: 11px; margin-left: 6px; font-style: normal; }
 .amushop-row .cost { display: inline-flex; align-items: center; gap: 3px; font-variant-numeric: tabular-nums; color: var(--gold); font-weight: 600; }
+
+/* ---- mana symbol pips ------------------------------------------------------------- */
+.pip { display: inline-flex; align-items: center; justify-content: center; min-width: 15px; height: 15px; padding: 0 1px; border-radius: 50%; font-size: 10px; font-weight: 700; line-height: 1; margin-left: 1px; box-shadow: inset 0 -1px 1px rgba(0,0,0,.35), 0 0 0 1px rgba(0,0,0,.25); vertical-align: middle; font-family: system-ui, sans-serif; }
+.pip-w { background: #f7f1de; color: #3a3320; }
+.pip-u { background: #3d72a8; color: #eaf2fb; }
+.pip-b { background: #3a3038; color: #e8dfe8; }
+.pip-r { background: #c34231; color: #fbeae7; }
+.pip-g { background: #3f8047; color: #eafbe9; }
+.pip-c, .pip-x { background: #cabfa6; color: #3a3320; }
+.pip-h { background: linear-gradient(135deg, #f7f1de 48%, #3d72a8 52%); color: #241d10; border-radius: 8px; padding: 0 4px; }

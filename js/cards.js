@@ -49,6 +49,20 @@ export function costString(cost) {
   for (const p of cost.pips || []) parts.push(p.join('/'));
   return parts.join('') || (cost.pips ? '0' : '');
 }
+// Cost as colored mana-symbol pips (HTML). Pass a cost object; returns inner HTML for a <span>.
+export function manaHtml(cost) {
+  if (!cost) return '';
+  const pips = [];
+  if (cost.x) pips.push(['X']);
+  if (cost.generic) pips.push([String(cost.generic)]);
+  for (const p of cost.pips || []) pips.push(p);
+  if (!pips.length) return cost.pips ? '<i class="pip pip-c">0</i>' : '';
+  return pips.map(p => {
+    const first = String(p[0]);
+    const key = p.length > 1 ? 'h' : /^[WUBRGC]$/.test(first) ? first.toLowerCase() : first === 'X' ? 'x' : 'c';
+    return `<i class="pip pip-${key}">${p.length > 1 ? p.join('') : first}</i>`;
+  }).join('');
+}
 export const cmcOf = cost => (cost.generic || 0) + (cost.pips || []).length;
 
 // ---- helpers --------------------------------------------------------------------

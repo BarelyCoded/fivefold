@@ -2,13 +2,16 @@
 // and plays the engine's visual-effect events (attacks, blocks, strikes, damage).
 import { has, power, toughness, isCreature, isLand, isType, STEP_NAME, costText, abilitiesOf } from './engine.js';
 import { artFor, hasOwnArt } from './collection.js';
-import { costString, COLORS } from './cards.js';
+import { costString, manaHtml, COLORS } from './cards.js';
 import { spriteStyle, atlasReady } from './atlas.js';
 import { onTokenArt } from './scryfall.js';
 import { sfx } from './audio.js';
 import { hintFor } from './tutorial.js';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+const AUTOPASS_KEY = 'ff.autopass';
+const getAutoPass = () => { try { return localStorage.getItem(AUTOPASS_KEY) === '1'; } catch { return false; } };
+const setAutoPass = v => { try { localStorage.setItem(AUTOPASS_KEY, v ? '1' : '0'); } catch {} };
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const KW_ABBR = k => (typeof k === 'string' ? k : k.k === 'Protection' ? 'Pro ' + k.from : k.k === 'Landwalk' ? k.land + 'walk' : k.k).split(' ').map(w => w[0]).join('');
 const PHASES = [['untap', 'Untap', '↻'], ['upkeep', 'Upkeep', '☼'], ['draw', 'Draw', '▤'], ['main1', 'Main', '✦'], ['combat', 'Combat', '⚔'], ['main2', 'Main 2', '✦'], ['end', 'End', '◗']];
@@ -23,7 +26,7 @@ export function cardHtml(def, opts = {}) {
   const style = art ? ` style="background-image:url('${art}')"` : '';
   const pt = opts.pt ?? (def.kind === 'creature' ? `${def.power}/${def.toughness}` : '');
   return `<div class="${cls.join(' ')}"${style} data-id="${opts.id ?? ''}" data-zone="${opts.zone ?? ''}" data-name="${esc(def.name)}" title="${esc(def.name)}">
-    <div class="card-top"><span class="card-name">${esc(def.name)}</span>${def.kind !== 'land' ? `<span class="card-cost">${esc(costString(def.cost))}</span>` : ''}</div>
+    <div class="card-top"><span class="card-name">${esc(def.name)}</span>${def.kind !== 'land' ? `<span class="card-cost">${manaHtml(def.cost)}</span>` : ''}</div>
     ${!art ? `<div class="card-body"><span class="card-type">${esc(def.typeLine)}</span></div>` : ''}
     ${hasOwnArt(def) ? '<span class="card-own" title="Your art">★</span>' : ''}
     ${pt ? `<div class="card-pt${opts.ptClass ? ' ' + opts.ptClass : ''}">${pt}</div>` : ''}
@@ -37,6 +40,15 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
   const ui = { wizard: null, attackers: new Set(), blocks: {}, blocker: null, message: '', menu: null, viewer: null, choice: null, order: null };
   let finished = false, running = false;
 
+  // Auto-pass: when the human holds priority but has no land to play, no spell to cast, and no
+  // (non-mana) activated ability available, there is nothing to decide — skip the step for them.
+  // Mana abilities alone don't count: adding mana with nothing to spend it on isn't a real play.
+  function hasAnyPlay() {
+    for (const c of me.hand) if (duel.canCast(me, c)) return true;
+    for (const c of me.battlefield) { const abs = abilitiesOf(c); for (let i = 0; i < abs.length; i++) if (abs[i].type === 'activated' && duel.canActivate(me, c, i)) return true; }
+    return false;
+  }
+
   // ---- engine driver ----------------------------------------------------------------
   async function run() {
     if (running) return; running = true;
@@ -46,7 +58,10 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
         render();
         const fxWait = playFx();
         if (r === 'over') { if (!finished) { finished = true; await sleep(Math.max(900, fxWait)); onEnd(duel.winner); } return; }
-        if (r === 'wait') return;
+        if (r === 'wait') {
+          if (getAutoPass() && duel.pending?.type === 'priority' && !ui.wizard && !ui.menu && !hasAnyPlay() && duel.humanPass()) continue;
+          return;
+        }
         if (document.hidden) continue; // background tabs throttle timers; keep the engine moving
         if (r === 'ai') await sleep(Math.max(speed, fxWait));
         else if (fxWait) await sleep(fxWait);
@@ -270,7 +285,8 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
       const canAtk = mine && duel.step === 'main1' && me.battlefield.some(c => duel.canAttack(c));
       const passLabel = stackTop ? 'Pass (let it resolve)' : mine && duel.step === 'main1' ? (canAtk ? 'Go to combat' : 'Next phase') : mine && duel.step === 'main2' ? 'End turn' : 'Pass';
       return `<div class="hint">You have priority${stackTop ? ' — respond or pass' : ''}. Click a card in hand to cast it, or a permanent to use its abilities. Space passes.</div>
-        <button id="b-pass" class="btn primary">${passLabel}</button><button id="b-endturn" class="btn" title="Pass priority automatically until the next turn begins">${mine ? 'Skip to end of turn' : 'Stop asking this turn'}</button>`;
+        <button id="b-pass" class="btn primary">${passLabel}</button><button id="b-endturn" class="btn" title="Pass priority automatically until the next turn begins">${mine ? 'Skip to end of turn' : 'Stop asking this turn'}</button>
+        <label class="autopass" title="When you have no land, spell, or ability you could use, pass for you automatically"><input type="checkbox" id="cb-autopass" ${getAutoPass() ? 'checked' : ''}> Auto-pass empty steps</label>`;
     }
     const req = pend.req;
     switch (req.kind) {
@@ -296,7 +312,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
   function template() {
     return `
     <div class="duel">
-      <aside class="rail">${phaseStrip()}</aside>
+      <aside class="rail">${phaseStrip()}<div class="controls">${tutor()}${controls()}${ui.message ? `<div class="msg">${esc(ui.message)}</div>` : ''}</div></aside>
       <div class="table">
         <section class="zone opp">
           ${playerBox(ai)}
@@ -312,7 +328,6 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
         <section class="hand">${me.hand.map(handCard).join('')}</section>
       </div>
       <aside class="panel">
-        <div class="controls">${tutor()}${controls()}${ui.message ? `<div class="msg">${esc(ui.message)}</div>` : ''}</div>
         <div class="log">${duel.log.slice(-18).map(l => `<div>${esc(l)}</div>`).join('')}</div>
         <button id="b-concede" class="btn small ghost">Concede</button>
       </aside>
@@ -456,6 +471,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     if (z === 'bf' && card.controller === 0) { permMenu(card); return; }
   });
   root.addEventListener('change', ev => {
+    if (ev.target.id === 'cb-autopass') { setAutoPass(ev.target.checked); if (ev.target.checked) run(); return; }
     const cb = ev.target.closest('input[data-choice]'); if (!cb) return;
     ui.choice ||= new Set(); const id = Number(cb.dataset.choice);
     if (cb.checked) ui.choice.add(id); else ui.choice.delete(id);
