@@ -2,7 +2,7 @@
 import { parseList, importNames, defOf, forgetDefs, loadArtIndex, artFor, artCount, hasOwnArt, hasServer } from './collection.js';
 import { fetchCards, cacheSize, cached as cachedCard, allCached } from './scryfall.js';
 import { COLORS, COLOR_NAME, manaHtml, statusLabel } from './cards.js';
-import { generateWorld, drawWorld, drawMinimap, tileAt, inBounds, cityAt, linkAt, enemyAt, stepEnemies, BIOME, TILE, VIEW, placeDungeons, dungeonAt, placeLandmarks, landmarkAt, placeSpecials, specialAt, placeMotes, moteAt, spawnMote, castleAt, WARDEN_HOLD } from './world.js';
+import { generateWorld, drawWorld, drawMinimap, tileAt, inBounds, cityAt, linkAt, enemyAt, stepEnemies, BIOME, TILE, VIEW, placeDungeons, dungeonAt, placeLandmarks, landmarkAt, placeSpecials, specialAt, placeMotes, moteAt, spawnMote, castleAt, WARDEN_HOLD, roadAt, ensureRoads } from './world.js';
 import { Duel } from './engine.js';
 import { mountDuel, cardHtml } from './duelview.js';
 import { aiHooks } from './ai.js';
@@ -205,7 +205,8 @@ function move(dx, dy) {
     else { const gold = 8 + Math.floor(Math.random() * 14); g.player.gold += gold; toast(`A mana mote scatters into ${gold} gold.`); }
     sfx('coin');
   }
-  const caught = stepEnemies(g.world, Math.random, g.player);   // roaming foes give chase and may catch you
+  const onRoad = roadAt(g.world, nx, ny);                       // roads let you outpace pursuit, as in the old overland
+  const caught = stepEnemies(g.world, Math.random, g.player, onRoad);   // roaming foes give chase and may catch you
   if (Math.random() < 0.1) spawnMote(g.world, Math.random, g.player);   // the world keeps seeding fresh motes
   save();
   if (caught) { encounter(caught); return; }
@@ -923,11 +924,12 @@ function tierRow(n, c) {
 function map() {
   const g = S.game; if (!g) return title();
   const here = tileAt(g.world, g.player.x, g.player.y);
+  const onRoad = roadAt(g.world, g.player.x, g.player.y);
   const near = g.world.enemies.filter(e => Math.abs(e.x - g.player.x) <= 1 && Math.abs(e.y - g.player.y) <= 1);
   const panel = `<canvas id="minimap" class="minimap"></canvas>
       <h2>${esc(g.name)}</h2>
-      <p>Standing in the <b>${BIOME[here].name}</b> (${COLOR_NAME[here]}). ${near.length ? `<br>${near.map(e => enemyById(e.template).name).join(', ')} nearby.` : ''}</p>
-      <p class="small">Move with WASD or the arrow keys, or click a neighbouring tile. Walking costs food. Blue crystals are mana links (+2 life). Landmarks marked ? ask a riddle about a card: answer right for a card of that region's color, wrong and you lose life, food or, rarely, a card. Pits with a torch are dungeons: revealed by clues from beaten foes, fought room by room with your life carried over. Faint sparks are mana motes — walk over one for gold or an amulet. The five dark fortresses are the Warden guilds; storm them to find the one the Usurper wears.</p>
+      <p>Standing in the <b>${BIOME[here].name}</b> (${COLOR_NAME[here]}).${onRoad ? ' <b class="onroad">On a road — you travel it swiftly and pursuers lose your trail.</b>' : ''} ${near.length ? `<br>${near.map(e => enemyById(e.template).name).join(', ')} nearby.` : ''}</p>
+      <p class="small">Move with WASD or the arrow keys, or click a neighbouring tile. Walking costs food. Blue crystals are mana links (+2 life). Landmarks marked ? ask a riddle about a card: answer right for a card of that region's color, wrong and you lose life, food or, rarely, a card. Pits with a torch are dungeons: revealed by clues from beaten foes, fought room by room with your life carried over. Faint sparks are mana motes — walk over one for gold or an amulet. Dirt roads link the cities: stay on one and you move too fast for pursuing mages to close in. The five dark fortresses are the Warden guilds; storm them to find the one the Usurper wears.</p>
       ${(g.world.dungeons || []).some(d => d.revealed) ? `<p class="small">Known dungeons: ${g.world.dungeons.filter(d => d.revealed).map(d => `${dungeonTemplate(d.id).name}${d.cleared ? ' (cleared)' : ''}`).join(', ')}.</p>` : ''}
       <div class="btnrow"><button class="btn" id="b-rest" ${g.player.food < 3 || g.player.life >= g.player.maxLife ? 'disabled' : ''}>Rest (3 food, +5 life)</button><button class="btn ghost" data-go="title">Menu</button></div>
       ${totalAmulets() ? `<h3>World magic</h3><p class="small">Spend amulets to bend the world. ${g.player.cloak > 0 ? `<b>Cloaked: ${g.player.cloak} step${g.player.cloak > 1 ? 's' : ''} of shadow left.</b>` : 'Cast from anywhere on the map.'}</p>
@@ -944,6 +946,7 @@ function map() {
   if (!g.world.specials) { placeSpecials(g.world, Math.random); save(); }
   if (!g.world.motes) { placeMotes(g.world, Math.random); save(); }
   if (!g.world.castles) { migrateCastles(g); save(); }
+  if (!g.world.roads) { ensureRoads(g.world); save(); }
   if (!g.usurper) { g.usurper = rnd(COLORS); save(); }
   if (!g.player.amulets) { g.player.amulets = newAmulets(); g.quests ||= []; save(); }
   const hl = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dy]) => [g.player.x + dx, g.player.y + dy]).filter(([x, y]) => inBounds(g.world, x, y));

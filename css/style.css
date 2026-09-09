@@ -127,6 +127,7 @@ tr.st-unsupported td:nth-child(7), tr.st-unsupported td:nth-child(3), tr.st-miss
 .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; }
 .sw { display: inline-block; width: 12px; height: 12px; margin-right: 5px; vertical-align: -1px; border: 1px solid rgba(0,0,0,.4); }
 .taunt { font-style: italic; color: var(--ink2); }
+.onroad { color: #c9a367; }
 
 /* modal / toast */
 .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: grid; place-items: center; z-index: 20; }

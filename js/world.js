@@ -79,7 +79,9 @@ export function generateWorld(rng, enemies, startColor) {
     const pool = enemies.filter(e => e.color === color && !e.boss); const tpl = pool.find(e => e.tier === tier) || pool[0]; if (!tpl) continue;
     roam.push({ uid: uid++, x: t.x, y: t.y, template: tpl.id, tier: tpl.tier, color }); occupied.add(`${t.x},${t.y}`);
   }
-  return { w: W, h: H, tiles, cities, links, castles, enemies: roam, start: { x: start.x, y: start.y }, seed: Math.floor(rng() * 1e9) };
+  const world = { w: W, h: H, tiles, cities, links, castles, enemies: roam, start: { x: start.x, y: start.y }, seed: Math.floor(rng() * 1e9) };
+  world.roads = computeRoadTiles(world);
+  return world;
 }
 
 export const tileAt = (world, x, y) => world.tiles[y * world.w + x];
@@ -88,6 +90,50 @@ export const cityAt = (world, x, y) => world.cities.find(c => c.x === x && c.y =
 export const linkAt = (world, x, y) => world.links.find(l => l.x === x && l.y === y);
 export const enemyAt = (world, x, y) => world.enemies.find(e => e.x === x && e.y === y);
 export const dungeonAt = (world, x, y) => (world.dungeons || []).find(d => d.x === x && d.y === y);
+
+// ---- roads ---------------------------------------------------------------------------
+// Roads join each city to its two nearest neighbours. The same links drive the map paint,
+// the minimap, and movement — a tile the road runs through is "on a road", and walking one
+// lets you outpace pursuers (stepEnemies eases chasers off while you're on the road).
+function roadLinks(cities) {
+  const links = [];
+  for (const a of cities) {
+    const near = cities.filter(b => b !== a).sort((p1, p2) => dist(a, p1) - dist(a, p2)).slice(0, 2);
+    for (const b of near) if (!links.some(r => r[0] === b && r[1] === a)) links.push([a, b]);
+  }
+  return links;
+}
+function roadPolyline(a, b, ri, seed) {
+  const pts = []; const n = Math.ceil(dist(a, b) * 3);
+  for (let i = 0; i <= n; i++) {
+    const t = i / n; const bx = a.x + (b.x - a.x) * t, by = a.y + (b.y - a.y) * t;
+    const perp = Math.atan2(b.y - a.y, b.x - a.x) + Math.PI / 2;
+    const wob = (vnoise(t * 6, ri + 1, seed + 500 + a.x) - 0.5) * 1.6 * Math.sin(t * Math.PI);
+    pts.push([bx * PX + PX / 2 + Math.cos(perp) * wob * PX, by * PX + PX / 2 + Math.sin(perp) * wob * PX]);
+  }
+  return pts;
+}
+function computeRoadTiles(world) {
+  const seed = world.seed || 0; const set = new Set();
+  roadLinks(world.cities).forEach(([a, b], ri) => {
+    const n = Math.ceil(dist(a, b) * 3) * 4;   // oversample so no tile the road crosses is skipped
+    for (let i = 0; i <= n; i++) {
+      const t = i / n; const bx = a.x + (b.x - a.x) * t, by = a.y + (b.y - a.y) * t;
+      const perp = Math.atan2(b.y - a.y, b.x - a.x) + Math.PI / 2;
+      const wob = (vnoise(t * 6, ri + 1, seed + 500 + a.x) - 0.5) * 1.6 * Math.sin(t * Math.PI);
+      const pxx = bx * PX + PX / 2 + Math.cos(perp) * wob * PX, pyy = by * PX + PX / 2 + Math.sin(perp) * wob * PX;
+      const tx = Math.floor(pxx / PX), ty = Math.floor(pyy / PX);
+      if (inBounds(world, tx, ty)) set.add(`${tx},${ty}`);
+    }
+  });
+  return [...set];
+}
+// Backfill roads on saves made before roads were tracked. Safe to call every load.
+export function ensureRoads(world) {
+  if (!world.roads) world.roads = computeRoadTiles(world);
+  return world.roads;
+}
+export const roadAt = (world, x, y) => !!(world.roads && world.roads.includes(`${x},${y}`));
 
 // Place one hidden dungeon per template in matching terrain. Safe to call on old saves.
 export function placeDungeons(world, rng, templates) {
@@ -180,12 +226,12 @@ function blockedForEnemy(world, x, y) {
 // Roaming AI: enemies within sight give chase and step toward the player; otherwise they wander their
 // own terrain. An enemy that steps onto the player's tile catches them — returned so the caller can
 // start the duel. Cities, mana links and landmarks are safe: enemies never step onto them.
-export function stepEnemies(world, rng, player) {
+export function stepEnemies(world, rng, player, haste) {
   let caught = null;
   for (const e of world.enemies) {
     const pd = Math.abs(e.x - player.x) + Math.abs(e.y - player.y);
     const sight = e.tier >= 2 ? 6 : 4;                 // tougher foes notice you from farther off
-    const chase = pd <= sight && !player.cloak;        // a Shadow Cloak hides you from pursuit
+    const chase = pd <= sight && !player.cloak && !haste;  // a Shadow Cloak, or a road underfoot, breaks pursuit
     if (!chase && rng() > 0.45) continue;              // idle enemies only amble
     let opts;
     if (chase) {
@@ -404,20 +450,9 @@ function paintTiles(world) {
 // Scale so a sprite is `frac` of a tile tall and never wider than a tile.
 function tileFit(rect, frac) { return Math.min(PX * frac / rect[3], PX * 0.98 / rect[2]); }
 function paintRoads(ctx, world, seed) {
-  const roads = [];
-  for (const a of world.cities) {
-    const near = world.cities.filter(b => b !== a).sort((p1, p2) => dist(a, p1) - dist(a, p2)).slice(0, 2);
-    for (const b of near) if (!roads.some(r => (r[0] === b && r[1] === a))) roads.push([a, b]);
-  }
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-  roads.forEach(([a, b], ri) => {
-    const pts = []; const n = Math.ceil(dist(a, b) * 3);
-    for (let i = 0; i <= n; i++) {
-      const t = i / n; const bx = a.x + (b.x - a.x) * t, by = a.y + (b.y - a.y) * t;
-      const perp = Math.atan2(b.y - a.y, b.x - a.x) + Math.PI / 2;
-      const wob = (vnoise(t * 6, ri + 1, seed + 500 + a.x) - 0.5) * 1.6 * Math.sin(t * Math.PI);
-      pts.push([bx * PX + PX / 2 + Math.cos(perp) * wob * PX, by * PX + PX / 2 + Math.sin(perp) * wob * PX]);
-    }
+  roadLinks(world.cities).forEach(([a, b], ri) => {
+    const pts = roadPolyline(a, b, ri, seed);
     const stroke = (col, w, dash) => { ctx.strokeStyle = col; ctx.lineWidth = w; ctx.setLineDash(dash || []); ctx.beginPath(); pts.forEach((pt, i) => (i ? ctx.lineTo(pt[0], pt[1]) : ctx.moveTo(pt[0], pt[1]))); ctx.stroke(); ctx.setLineDash([]); };
     stroke('rgba(70,48,28,.75)', 7); stroke('#a5804e', 4); stroke('#c9a367', 1.5, [3, 4]);
   });
@@ -498,24 +533,13 @@ function paintTerrain(world) {
   }
 
   // 3. roads: each city to its nearest two cities
-  const roads = [];
-  for (const a of world.cities) {
-    const near = world.cities.filter(b => b !== a).sort((p1, p2) => dist(a, p1) - dist(a, p2)).slice(0, 2);
-    for (const b of near) if (!roads.some(r => (r[0] === b && r[1] === a))) roads.push([a, b]);
-  }
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-  for (const [a, b] of roads) {
-    const pts = []; const n = Math.ceil(dist(a, b) * 3);
-    for (let i = 0; i <= n; i++) {
-      const t = i / n; const bx = a.x + (b.x - a.x) * t, by = a.y + (b.y - a.y) * t;
-      const perp = Math.atan2(b.y - a.y, b.x - a.x) + Math.PI / 2;
-      const wob = (vnoise(t * 6, roads.indexOf([a, b]) + 1, seed + 500 + a.x) - 0.5) * 1.6 * Math.sin(t * Math.PI);
-      pts.push([bx * PX + PX / 2 + Math.cos(perp) * wob * PX, by * PX + PX / 2 + Math.sin(perp) * wob * PX]);
-    }
+  roadLinks(world.cities).forEach(([a, b], ri) => {
+    const pts = roadPolyline(a, b, ri, seed);
     ctx.strokeStyle = '#6f4f2c'; ctx.lineWidth = 6; ctx.beginPath(); pts.forEach((pt, i) => (i ? ctx.lineTo(pt[0], pt[1]) : ctx.moveTo(pt[0], pt[1]))); ctx.stroke();
     ctx.strokeStyle = '#a07c48'; ctx.lineWidth = 3; ctx.beginPath(); pts.forEach((pt, i) => (i ? ctx.lineTo(pt[0], pt[1]) : ctx.moveTo(pt[0], pt[1]))); ctx.stroke();
     ctx.strokeStyle = '#c29a5c'; ctx.lineWidth = 1; ctx.setLineDash([2, 3]); ctx.beginPath(); pts.forEach((pt, i) => (i ? ctx.lineTo(pt[0], pt[1]) : ctx.moveTo(pt[0], pt[1]))); ctx.stroke(); ctx.setLineDash([]);
-  }
+  });
 
   // 4. tall features, back to front
   const reserved = new Set([...world.cities.map(c => `${c.x},${c.y}`), ...castleKeys(world), ...world.links.map(l => `${l.x},${l.y}`)]);
