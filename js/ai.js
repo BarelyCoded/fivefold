@@ -386,6 +386,10 @@ function chooseAttackers(duel, p) {
       if (!S.length) gain += faceValue(power(a));             // got through: count the face damage
       if (gain < worst) { worst = gain; worstBlock = S; }
     }
+    // Hold a defensive creature (low power, high toughness) back to block, instead of swinging it for
+    // a chip: attacking a 1/4 into the opponent's bigger creature just taps it out of blocking.
+    if (power(a) <= 2 && toughness(a) >= power(a) + 2 && !has(a, 'Vigilance') && worst <= faceValue(power(a))
+        && opp.battlefield.some(b => isCreature(b) && !b.tapped && power(b) > power(a) && power(b) >= 2 && duel.canBlock(a, b))) continue;
     const tol = value(a) <= 4.5 ? -1.6 : -0.25;               // small creatures accept near-even trades
     if (worst >= tol) { out.push(a.id); for (const b of worstBlock) { const i = avail.indexOf(b); if (i >= 0) avail.splice(i, 1); } }
   }
