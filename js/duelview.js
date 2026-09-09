@@ -48,6 +48,28 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     for (const c of me.battlefield) { const abs = abilitiesOf(c); for (let i = 0; i < abs.length; i++) if (abs[i].type === 'activated' && duel.canActivate(me, c, i)) return true; }
     return false;
   }
+  // Your creatures in combat that are about to take lethal damage and still have a usable ability to save
+  // themselves (regenerate, a self-pump). Drives the "you can respond" nudge before combat damage lands.
+  const firstStrikeC = c => has(c, 'First strike') || has(c, 'Double strike');
+  function combatSavers() {
+    if (!['attackers', 'blockers', 'firstStrike', 'damage'].includes(duel.step)) return [];
+    if (duel.pending?.type !== 'priority' || duel.priority !== 0) return [];
+    const out = [];
+    for (const c of me.battlefield) {
+      if (!isCreature(c)) continue;
+      const isAtk = duel.attackers.includes(c.id);
+      const isBlk = !isAtk && Object.values(duel.blocks).flat().includes(c.id);
+      if (!isAtk && !isBlk) continue;
+      let incoming = 0, foesFS = false;
+      if (isAtk) { for (const id of (duel.blocks[c.id] || [])) { const b = cardOf(id); if (b) { incoming += power(b); foesFS = foesFS || firstStrikeC(b); } } }
+      else { for (const [aid, bids] of Object.entries(duel.blocks)) if (bids.includes(c.id)) { const a = cardOf(aid); if (a) { incoming = Math.max(incoming, power(a)); foesFS = foesFS || firstStrikeC(a); } } }
+      const left = toughness(c) - c.damage;
+      if (left <= 0 || incoming < left) continue;                 // not lethal
+      if (firstStrikeC(c) && !foesFS) continue;                   // it strikes first and likely wins — don't cry wolf
+      if (abilitiesOf(c).some((ab, i) => ab.type === 'activated' && duel.canActivate(me, c, i))) out.push(c);
+    }
+    return out;
+  }
 
   // ---- engine driver ----------------------------------------------------------------
   async function run() {
@@ -322,7 +344,9 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
       const mine = duel.active === 0;
       const canAtk = mine && duel.step === 'main1' && me.battlefield.some(c => duel.canAttack(c));
       const passLabel = stackTop ? 'Pass (let it resolve)' : mine && duel.step === 'main1' ? (canAtk ? 'Go to combat' : 'Next phase') : mine && duel.step === 'main2' ? 'End turn' : 'Pass';
-      return `<div class="hint">You have priority${stackTop ? ' — respond or pass' : ''}. Click a card in hand to cast it, or a permanent to use its abilities. Space passes.</div>
+      const savers = combatSavers();
+      const nudge = savers.length ? `<div class="msg combat-nudge">⚠ ${esc(savers.map(c => c.def.name).join(', '))} ${savers.length > 1 ? 'are' : 'is'} about to die in combat — click ${savers.length > 1 ? 'one' : 'it'} to use its ability before damage.</div>` : '';
+      return `${nudge}<div class="hint">You have priority${stackTop ? ' — respond or pass' : ''}. Click a card in hand to cast it, or a permanent to use its abilities. Space passes.</div>
         <button id="b-pass" class="btn primary">${passLabel}</button><button id="b-endturn" class="btn" title="Pass priority automatically until the next turn begins">${mine ? 'Skip to end of turn' : 'Stop asking this turn'}</button>
         <label class="autopass" title="When you have no land, spell, or ability you could use, pass for you automatically"><input type="checkbox" id="cb-autopass" ${getAutoPass() ? 'checked' : ''}> Auto-pass empty steps</label>`;
     }
