@@ -348,6 +348,21 @@ function pumpReach(duel, p, a, mana) {
   for (const c of p.hand) { const e = c.def.spell?.effects?.[0]; if (e && e.type === 'pump' && (e.p | 0) > 0 && duel.canCast(p, c)) { const cost = manaTotal(c.def.cost); if (budget >= cost) { extra += (e.p | 0); budget -= cost; } } }
   return extra;
 }
+// A defender's visible combat trick: the total +P/+T it could tap onto a single blocker right now via
+// untapped abilities that pump another creature (e.g. Angelic Page's {T}: target creature +1/+1). Used
+// so the AI doesn't walk an attacker into a blocker that can be boosted to kill it.
+function trickPump(duel, defender) {
+  let p = 0, t = 0;
+  for (const c of defender.battlefield) {
+    if (c.tapped || (isCreature(c) && c.sick && !has(c, 'Haste'))) continue;
+    for (const ab of abilitiesOf(c)) {
+      if (ab.type !== 'activated' || !ab.cost.tap) continue;
+      const e = ab.effects[0];
+      if (e && e.type === 'pump' && e.sel !== 'self') { p += Math.max(0, e.p | 0); t += Math.max(0, e.t | 0); }
+    }
+  }
+  return { p, t };
+}
 
 function chooseAttackers(duel, p) {
   const opp = duel.opponentOf(p);
@@ -360,6 +375,19 @@ function chooseAttackers(duel, p) {
   // Worth of pushing `d` unblocked damage through — huge when it's lethal, a little extra near-lethal.
   const faceValue = d => d <= 0 ? 0 : d >= opp.life ? 40 : d + (opp.life - d <= 3 ? 3 : 0);
   const out = [];
+  const trick = trickPump(duel, opp);                        // a boost the defender could tap onto a blocker
+  // The gain (to us) of the defender committing blocker-set S to attacker a, with an optional pump on one
+  // blocker to model a combat trick. Negative means we come out behind.
+  const blockGain = (a, S, boost) => {
+    let restore = null;
+    if (boost && S.length) { restore = S[0]; restore.cur.p += boost.p; restore.cur.t += boost.t; }
+    const oc = combatOutcome(duel, a, S);
+    if (restore) { restore.cur.p -= boost.p; restore.cur.t -= boost.t; }
+    let gain = oc.blockersKilled.reduce((s, b) => s + value(b), 0);
+    if (oc.attackerDies) gain -= value(a);
+    if (!S.length) gain += faceValue(power(a));
+    return gain;
+  };
   // The defender commits blockers to our scariest creatures first; approximate by consuming them so
   // the same blocker isn't assumed to guard two of our attackers at once.
   let avail = allBlockers.slice();
@@ -376,20 +404,29 @@ function chooseAttackers(duel, p) {
       continue;
     }
     const legal = avail.filter(b => duel.canBlock(b, a));
-    // Find the defender's BEST block (the one that minimizes our net gain), gang blocks included.
+    // Find the defender's BEST block (the one that minimizes our net gain), gang blocks included, and —
+    // when the defender holds a pump — assume it lands on whichever blocker hurts us most.
     let worst = Infinity, worstBlock = [];
     for (const S of subsets(legal, Math.min(3, legal.length))) {
       if (has(a, 'Menace') && S.length === 1) continue;       // one blocker can't legally stop menace
-      const oc = combatOutcome(duel, a, S);
-      let gain = oc.blockersKilled.reduce((s, b) => s + value(b), 0);
-      if (oc.attackerDies) gain -= value(a);
-      if (!S.length) gain += faceValue(power(a));             // got through: count the face damage
+      let gain = blockGain(a, S, null);
+      if ((trick.p || trick.t) && S.length) for (const b of S) gain = Math.min(gain, blockGain(a, [b, ...S.filter(x => x !== b)], trick));
       if (gain < worst) { worst = gain; worstBlock = S; }
     }
     // Hold a defensive creature (low power, high toughness) back to block, instead of swinging it for
     // a chip: attacking a 1/4 into the opponent's bigger creature just taps it out of blocking.
     if (power(a) <= 2 && toughness(a) >= power(a) + 2 && !has(a, 'Vigilance') && worst <= faceValue(power(a))
         && opp.battlefield.some(b => isCreature(b) && !b.tapped && power(b) > power(a) && power(b) >= 2 && duel.canBlock(a, b))) continue;
+    // Hold back a premium blocker (e.g. a first striker) when a small swing gains far less than the
+    // creature would by staying home to kill an attacker: don't trade a 1/1 first-striker's guard for 1.
+    if (power(a) <= 2 && worst <= 2 && !has(a, 'Vigilance')) {
+      const profitBlock = opp.battlefield.reduce((best, b) => {
+        if (!isCreature(b) || !duel.canBlock(a, b)) return best;
+        const oc = combatOutcome(duel, b, [a]);              // a stays back and blocks b next turn
+        return (oc.attackerDies && !oc.blockersKilled.includes(a)) ? Math.max(best, value(b)) : best;
+      }, 0);
+      if (profitBlock - worst >= 2) continue;
+    }
     const tol = value(a) <= 4.5 ? -1.6 : -0.25;               // small creatures accept near-even trades
     if (worst >= tol) { out.push(a.id); for (const b of worstBlock) { const i = avail.indexOf(b); if (i >= 0) avail.splice(i, 1); } }
   }
