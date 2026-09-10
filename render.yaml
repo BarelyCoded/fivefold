@@ -1,0 +1,14 @@
+# Render blueprint: deploy the Fivefold multiplayer relay as a single always-on web service.
+# It serves the game AND the 1v1 lobby on one HTTPS URL, so players just open the link and play —
+# no relay address to type, no tunnel. See MULTIPLAYER.md for the click-through steps.
+#
+# One-click: push this repo to GitHub, then in Render choose "New +" -> "Blueprint" and pick the repo.
+services:
+  - type: web
+    name: fivefold-relay
+    runtime: node
+    plan: free            # free spins down when idle (first visitor waits ~30-60s); use "starter" to stay always-on
+    buildCommand: npm install   # no dependencies, so this is effectively a no-op
+    startCommand: node relay.js  # Render injects PORT, which relay.js already honors
+    healthCheckPath: /
+    autoDeploy: true

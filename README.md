@@ -18,6 +18,10 @@ Then open http://localhost:8642. The first launch fetches rules text for the bui
 
 The game is static files, so the repository publishes itself to GitHub Pages: every push to `main` runs `.github/workflows/pages.yml` and the site appears at `https://<owner>.github.io/fivefold/`. One-time setup in the repository settings: Pages, then set the source to "GitHub Actions". On the web version, saves live in each player's browser, card images come from Scryfall, and the local-only features (the `art/` folder and `collection.csv`) are hidden. Importing a pasted list still works.
 
+### Multiplayer (1v1)
+
+There's an optional 1v1 duel mode with a small lobby. It needs a tiny relay process (the static Pages site can't host it), which also serves the game — `node relay.js` runs both on http://localhost:8642. For same-network or hosted play (a one-click Render deploy gives you a single always-on link), see **[MULTIPLAYER.md](./MULTIPLAYER.md)**.
+
 ## Import your cards
 
 1. Copy `collection.example.csv` to `collection.csv` and list your cards, one per line: `4 Lightning Bolt`. Set codes in parentheses are ignored. Basic lands never need listing.
