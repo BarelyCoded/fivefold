@@ -1,30 +1,31 @@
-// Sound, synthesised with Web Audio: no audio files. Short effects for cards, combat and the map,
-// and a quiet generative score that changes with the screen. Everything routes through one master
-// gain so the toggle in the top bar silences it all. The context unlocks on the first click or key.
+// Sound. Short effects (cards, combat, the map) are synthesised with Web Audio; the music is a set of
+// mp3 tracks played in a shuffled, continuous playlist for ambiance. Everything obeys one mute toggle in
+// the top bar, remembered across sessions. Both the effect context and the music start on the first
+// click or key (browsers block audio until a gesture).
 const KEY = 'ff.audio.v1';
-let ctx = null, master = null, musicBus = null;
+let ctx = null, master = null;
 let muted = (() => { try { return localStorage.getItem(KEY) === 'off'; } catch { return false; } })();
-let mode = null, nextBar = 0, barTimer = null, barIndex = 0;
+let mode = null;
 
 export const audioMuted = () => muted;
 export function toggleAudio() {
   muted = !muted;
   try { localStorage.setItem(KEY, muted ? 'off' : 'on'); } catch { /* ignore */ }
   if (!muted) unlock();
-  if (master) master.gain.setTargetAtTime(muted ? 0 : 0.5, ctx.currentTime, 0.05);
+  if (master && ctx) master.gain.setTargetAtTime(muted ? 0 : 0.5, ctx.currentTime, 0.05);
+  applyMusicMute();
   return muted;
 }
 function ensure() {
   if (!ctx) {
     const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return false;
     ctx = new AC(); master = ctx.createGain(); master.gain.value = muted ? 0 : 0.5; master.connect(ctx.destination);
-    musicBus = ctx.createGain(); musicBus.gain.value = 0.35; musicBus.connect(master);
   }
   if (ctx.state === 'suspended') ctx.resume();
   return true;
 }
-// Call from a user gesture. Starts the score if one was requested before the gesture.
-export function unlock() { if (!ensure()) return; if (mode && !barTimer) startScore(); }
+// Call from a user gesture. Unlocks the effect context and (re)starts the music playlist if it's wanted.
+export function unlock() { ensure(); if (wantMusic || mode) startMusic(); }
 
 // ---- effects ----------------------------------------------------------------------
 function tone(freq, { type = 'sine', t = 0, dur = 0.15, gain = 0.25, slide = 0, attack = 0.005 } = {}) {
@@ -61,49 +62,55 @@ const SFX = {
 };
 export function sfx(name) { if (muted || !ctx) return; const f = SFX[name]; if (f) { try { f(); } catch { /* ignore */ } } }
 
-// ---- score ------------------------------------------------------------------------
-// Each screen has a mode: a scale, a tempo and a mood. One bar is scheduled at a time, just ahead of
-// the clock, from a pad chord, a soft bass and a sparse pentatonic melody; nothing repeats exactly.
-const MODES = {
-  title: { root: 220, scale: [0, 2, 4, 7, 9], bar: 3.2, pad: 0.05, bass: 0.05, melody: 0.045, density: 0.5, wave: 'triangle' },
-  map: { root: 261.6, scale: [0, 2, 4, 7, 9], bar: 2.6, pad: 0.045, bass: 0.06, melody: 0.05, density: 0.65, wave: 'triangle' },
-  city: { root: 293.7, scale: [0, 2, 4, 5, 7, 9], bar: 2.2, pad: 0.04, bass: 0.05, melody: 0.06, density: 0.75, wave: 'triangle' },
-  duel: { root: 196, scale: [0, 2, 3, 5, 7, 8, 10], bar: 2.0, pad: 0.05, bass: 0.08, melody: 0.04, density: 0.7, wave: 'sawtooth', pulse: true },
-  dungeon: { root: 146.8, scale: [0, 1, 3, 5, 7, 8], bar: 3.4, pad: 0.06, bass: 0.07, melody: 0.03, density: 0.35, wave: 'sine', drone: true },
-};
-const chords = [[0, 2, 4], [3, 5, 0], [4, 6, 1], [1, 3, 5]];
-function freqOf(m, degree, octave = 0) { const n = m.scale.length; const d = ((degree % n) + n) % n; const oct = Math.floor(degree / n) + octave; return m.root * Math.pow(2, (m.scale[d] + 12 * oct) / 12); }
-function voice(freq, at, dur, gain, type, bus = musicBus) {
-  const o = ctx.createOscillator(), g = ctx.createGain(); o.type = type; o.frequency.value = freq;
-  g.gain.setValueAtTime(0, at); g.gain.linearRampToValueAtTime(gain, at + Math.min(0.4, dur * 0.3)); g.gain.setValueAtTime(gain, at + dur * 0.7); g.gain.linearRampToValueAtTime(0, at + dur);
-  o.connect(g); g.connect(bus); o.start(at); o.stop(at + dur + 0.02);
+// ---- music: a shuffled mp3 playlist --------------------------------------------------
+// A handful of tracks play back to back in random order for ambiance, the same across every screen.
+// The files sit at the site root; resolve them against the page base so it also works under a GitHub
+// Pages sub-path. Streamed through a plain <audio> element (independent of the effects context).
+const TRACKS = [
+  '1classicSkaraBrae.mp3', '1classicStones.mp3', '1classicTavern01.mp3',
+  '1classicThejourney.mp3', '1classicVesper.mp3', '1classicWind.mp3',
+];
+const MUSIC_VOL = 0.5;
+let audioEl = null, queue = [], lastTrack = null, wantMusic = false;
+const musicPath = f => { try { return new URL(f, document.baseURI).href; } catch { return f; } };
+function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+function nextTrack() {
+  if (!queue.length) { queue = shuffle(TRACKS.slice()); if (queue.length > 1 && queue[0] === lastTrack) queue.push(queue.shift()); }
+  return (lastTrack = queue.shift());
 }
-function scheduleBar(m, at) {
-  const ch = chords[barIndex % chords.length];
-  for (const d of ch) { voice(freqOf(m, d, 0), at, m.bar, m.pad, 'sine'); voice(freqOf(m, d, 0) * 1.003, at, m.bar, m.pad * 0.6, 'triangle'); }
-  voice(freqOf(m, ch[0], -1), at, m.pulse ? m.bar * 0.45 : m.bar * 0.9, m.bass, 'triangle');
-  if (m.pulse) voice(freqOf(m, ch[0], -1), at + m.bar / 2, m.bar * 0.4, m.bass * 0.8, 'triangle');
-  if (m.drone) voice(freqOf(m, ch[0], -2), at, m.bar, m.bass * 0.7, 'sine');
-  const steps = 8; let last = 2 + Math.floor(Math.random() * 3);
-  for (let i = 0; i < steps; i++) {
-    if (Math.random() > m.density) continue;
-    last += [-2, -1, -1, 0, 1, 1, 2][Math.floor(Math.random() * 7)]; last = Math.max(0, Math.min(m.scale.length * 2 - 1, last));
-    const t = at + i * (m.bar / steps); const dur = m.bar / steps * (1 + Math.floor(Math.random() * 2));
-    voice(freqOf(m, last, 1), t, dur, m.melody * (0.6 + Math.random() * 0.5), m.wave === 'sawtooth' ? 'triangle' : m.wave);
-  }
-  barIndex++;
+function applyMusicMute() {
+  if (!audioEl) return;
+  if (muted) audioEl.pause();
+  else { audioEl.volume = MUSIC_VOL; if (wantMusic) { const p = audioEl.play(); if (p && p.catch) p.catch(() => {}); } }
 }
-function startScore() {
-  if (barTimer) clearInterval(barTimer);
-  nextBar = ctx.currentTime + 0.1;
-  const tick = () => { const m = MODES[mode]; if (!m) return; while (nextBar < ctx.currentTime + 1.2) { scheduleBar(m, nextBar); nextBar += m.bar; } };
-  tick(); barTimer = setInterval(tick, 400);
+function ensureMusicEl() {
+  if (audioEl) return audioEl;
+  audioEl = new Audio();
+  audioEl.preload = 'auto';
+  audioEl.volume = muted ? 0 : MUSIC_VOL;
+  audioEl.addEventListener('ended', playNext);
+  audioEl.addEventListener('error', () => { if (wantMusic && !muted) setTimeout(playNext, 600); });   // skip a bad/interrupted file
+  return audioEl;
 }
-// Choose the score for a screen; null stops it.
+function playNext() {
+  if (!wantMusic || muted) return;
+  const el = ensureMusicEl();
+  el.src = musicPath(nextTrack());
+  el.volume = MUSIC_VOL;
+  const p = el.play(); if (p && p.catch) p.catch(() => {});   // autoplay may be blocked until a gesture; unlock() retries
+}
+function startMusic() {
+  wantMusic = true;
+  if (muted) return;
+  const el = ensureMusicEl();
+  if (!el.src) playNext();
+  else { const p = el.play(); if (p && p.catch) p.catch(() => {}); }
+}
+// Kept for the render loop's per-screen calls: the playlist is continuous, so this just marks that music
+// is wanted and (re)starts it once audio is permitted. A null mode is ignored — ambiance never stops.
 export function music(newMode) {
-  if (newMode === mode) return;
   mode = newMode;
-  if (!ctx) return;                    // starts at unlock()
-  if (!mode) { if (barTimer) clearInterval(barTimer); barTimer = null; return; }
-  startScore();
+  if (!newMode) return;
+  wantMusic = true;
+  startMusic();
 }
