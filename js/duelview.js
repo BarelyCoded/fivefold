@@ -35,8 +35,16 @@ export function cardHtml(def, opts = {}) {
   </div>`;
 }
 
-export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = null, tutorial = false }) {
-  const me = duel.players[0], ai = duel.players[1];
+export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = null, tutorial = false, localIdx = 0, input = null, allowMulligan = true, autoStart = true }) {
+  // localIdx is which seat this client renders from (0 single-player/host, 1 guest). `input`, when given
+  // (the guest), routes every action over the network instead of mutating the local mirror duel.
+  const me = duel.players[localIdx], ai = duel.players[1 - localIdx];
+  const act = input || {
+    pass: () => duel.passFor(localIdx), endTurn: () => duel.endTurnFor(localIdx),
+    cast: (c, o) => duel.castFor(localIdx, c, o), activate: (c, i, o) => duel.activateFor(localIdx, c, i, o),
+    mana: (c, i, col) => duel.manaFor(localIdx, c, i, col), answer: v => duel.answerFor(localIdx, v),
+    mulligan: () => duel.mulligan(localIdx), concede: () => duel.end(1 - localIdx, `${me.name} concedes.`),
+  };
   const ui = { wizard: null, attackers: new Set(), blocks: {}, blocker: null, message: '', menu: null, viewer: null, choice: null, order: null };
   let finished = false, running = false;
 
@@ -53,7 +61,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
   const firstStrikeC = c => has(c, 'First strike') || has(c, 'Double strike');
   function combatSavers() {
     if (!['attackers', 'blockers', 'firstStrike', 'damage'].includes(duel.step)) return [];
-    if (duel.pending?.type !== 'priority' || duel.priority !== 0) return [];
+    if (duel.pending?.type !== 'priority' || duel.priority !== localIdx) return [];
     const out = [];
     for (const c of me.battlefield) {
       if (!isCreature(c)) continue;
@@ -75,13 +83,18 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
   async function run() {
     if (running) return; running = true;
     try {
+      if (input) {   // guest: never ticks. The host drives the authoritative game and streams snapshots;
+        render(); const fxWait = playFx();   // we just render the mirror and surface the end of the game.
+        if (duel.winner !== null && !finished) { finished = true; await sleep(Math.max(900, fxWait)); onEnd(duel.winner); }
+        return;
+      }
       for (let guard = 0; guard < 5000; guard++) {
         const r = duel.tick();
         render();
         const fxWait = playFx();
         if (r === 'over') { if (!finished) { finished = true; await sleep(Math.max(900, fxWait)); onEnd(duel.winner); } return; }
         if (r === 'wait') {
-          if (getAutoPass() && duel.pending?.type === 'priority' && !ui.wizard && !ui.menu && !ui.paying && !hasAnyPlay() && duel.humanPass()) continue;
+          if (getAutoPass() && duel.pending?.type === 'priority' && !ui.wizard && !ui.menu && !ui.paying && !hasAnyPlay() && act.pass()) continue;
           return;
         }
         if (document.hidden) continue; // background tabs throttle timers; keep the engine moving
@@ -224,7 +237,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     </div>`;
   }
   function portraitHtml(p) {
-    const pr = portraits && (p.idx === 0 ? portraits.me : portraits.foe);
+    const pr = portraits && (p.idx === localIdx ? portraits.me : portraits.foe);
     if (!pr || !atlasReady()) return '';
     // Static portrait: always the first frame. The idle frame-swap animation is disabled because
     // frames of different sizes resized the portrait box and shifted the duel layout.
@@ -498,7 +511,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
   function finishCast(w) {
     const { card, opts } = w;
     if (w.auto) {
-      if (!duel.humanCast(card, opts)) { ui.message = 'That could not be cast.'; render(); return; }
+      if (!act.cast(card, opts)) { ui.message = 'That could not be cast.'; render(); return; }
       run(); return;
     }
     if (duel.canCast(me, card, { ...opts, poolOnly: true })) { castPoolOnly(card, opts); return; }
@@ -506,7 +519,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
   }
   function castPoolOnly(card, opts) {
     ui.paying = null;
-    if (!duel.humanCast(card, { ...opts, poolOnly: true })) { ui.message = 'That could not be cast.'; render(); return; }
+    if (!act.cast(card, { ...opts, poolOnly: true })) { ui.message = 'That could not be cast.'; render(); return; }
     run();
   }
   // Which colours / how much generic the current pool still can't cover (for glow + smart land tapping).
@@ -526,7 +539,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     let choice = null;
     card.def.manaAbilities.forEach((ma, i) => { if (choice || (ma.cost.tap && card.tapped)) return; const col = ma.produces.find(c => need.colors.has(c)) || ma.produces[0]; choice = { i, col }; });
     if (!choice) return;
-    duel.humanMana(card, choice.i, choice.col);
+    act.mana(card, choice.i, choice.col);
     if (duel.canCast(me, ui.paying.card, { ...ui.paying.opts, poolOnly: true })) castPoolOnly(ui.paying.card, ui.paying.opts);
     else render();
   }
@@ -538,11 +551,11 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     if (canCast && canCycle) {
       ui.menu = { title: card.def.name, items: [
         { label: card.def.kind === 'land' ? 'Play' : (auto ? 'Cast (auto-pay)' : 'Cast (tap your own mana)'), primary: true, action: () => { ui.menu = null; startCast(card, {}, auto); } },
-        { label: 'Cycle', action: () => { ui.menu = null; duel.humanCast(card, { cycling: true }); run(); } },
+        { label: 'Cycle', action: () => { ui.menu = null; act.cast(card, { cycling: true }); run(); } },
       ] }; render(); return;
     }
     if (canCast) { startCast(card, {}, auto); return; }
-    duel.humanCast(card, { cycling: true }); run();
+    act.cast(card, { cycling: true }); run();
   }
   // Double-click a permanent with exactly one unambiguous ability -> use it straight away (Vampire Bats,
   // Llanowar Elves). Anything more (a choice of colours or several abilities) still opens the menu.
@@ -551,7 +564,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     const manas = []; card.def.manaAbilities.forEach((ma, i) => { if (!card.tapped || !ma.cost.tap) manas.push({ i, ma }); });
     const acts = []; abilitiesOf(card).forEach((ab, i) => { if (ab.type === 'activated' && duel.canActivate(me, card, i)) acts.push({ i, ab }); });
     if (acts.length === 1 && manas.length === 0) { startActivate(card, acts[0].i); return; }
-    if (manas.length === 1 && acts.length === 0 && manas[0].ma.produces.length === 1) { duel.humanMana(card, manas[0].i, manas[0].ma.produces[0]); render(); return; }
+    if (manas.length === 1 && acts.length === 0 && manas[0].ma.produces.length === 1) { act.mana(card, manas[0].i, manas[0].ma.produces[0]); render(); return; }
     permMenu(card);
   }
   // Distinguish a single click (menu / manual cast) from a double click (auto / one-shot ability).
@@ -573,7 +586,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
       if (info.discard && !('discard' in w.opts)) { ui.menu = { title: 'Discard a card', items: info.discard.map(id => ({ label: duel.card(id).def.name, action: () => { w.opts.discard = [id]; ui.menu = null; step(); } })) }; render(); return; }
       if (w.targets.length < w.specs.length) { w.stage = 'targets'; render(); return; }
       w.opts.targets = w.targets; ui.wizard = null;
-      if (!duel.humanActivate(card, i, w.opts)) { ui.message = 'That ability could not be activated.'; render(); return; }
+      if (!act.activate(card, i, w.opts)) { ui.message = 'That ability could not be activated.'; render(); return; }
       run();
     };
     w.step = step; step();
@@ -585,7 +598,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
       if (w.ability !== undefined) w.step(); else next(w);
       return;
     }
-    if (duel.pending?.req?.kind === 'target') { if (!isLegal(ref)) return; duel.humanAnswer(ref); run(); }
+    if (duel.pending?.req?.kind === 'target') { if (!isLegal(ref)) return; act.answer(ref); run(); }
   }
   // Menu label for an activated ability: cost, then the effect with ~ resolved to the card's own name
   // and a capital first letter — so "{b}: regenerate ~." reads as "Regenerate Drudge Skeletons ({B})".
@@ -596,7 +609,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
   }
   function permMenu(card) {
     const items = [];
-    card.def.manaAbilities.forEach((ma, i) => { const ok = !card.tapped || !ma.cost.tap; for (const col of (ma.produces.length > 1 ? ma.produces : [ma.produces[0]])) items.push({ label: `Add ${ma.amount || 1} ${col} mana (${costText(ma.cost)})`, disabled: !ok, mana: true, action: () => { ui.menu = null; duel.humanMana(card, i, col); render(); } }); });
+    card.def.manaAbilities.forEach((ma, i) => { const ok = !card.tapped || !ma.cost.tap; for (const col of (ma.produces.length > 1 ? ma.produces : [ma.produces[0]])) items.push({ label: `Add ${ma.amount || 1} ${col} mana (${costText(ma.cost)})`, disabled: !ok, mana: true, action: () => { ui.menu = null; act.mana(card, i, col); render(); } }); });
     abilitiesOf(card).forEach((ab, i) => { if (ab.type !== 'activated') return; items.push({ label: abilityLabel(card, ab), disabled: !duel.canActivate(me, card, i), action: () => { ui.menu = null; startActivate(card, i); } }); });
     if (!items.length) return;
     // A land / mana rock with a single unambiguous mana ability: tap it straight for mana, no menu.
@@ -607,7 +620,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
   function handMenu(card) {
     const items = [];
     if (duel.canCast(me, card)) items.push({ label: card.def.kind === 'land' ? 'Play' : 'Cast', primary: true, action: () => { ui.menu = null; startCast(card); } });
-    if (duel.canCast(me, card, { cycling: true })) items.push({ label: 'Cycle', action: () => { ui.menu = null; duel.humanCast(card, { cycling: true }); run(); } });
+    if (duel.canCast(me, card, { cycling: true })) items.push({ label: 'Cycle', action: () => { ui.menu = null; act.cast(card, { cycling: true }); run(); } });
     if (!items.length) { ui.message = card.def.kind === 'unsupported' ? 'This card is not supported by the engine yet.' : 'Cannot play that now.'; render(); return; }
     if (items.length === 1) { items[0].action(); return; }
     ui.menu = { title: card.def.name, items }; render();
@@ -619,7 +632,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     if (!btn) return;
     if (ui.mulligan) {   // the opening-hand overlay swallows all other clicks
       if (btn.id === 'b-mull-keep') { ui.mulligan = false; render(); run(); }
-      else if (btn.id === 'b-mull-again') { duel.mulligan(0); ui.mulligan = me.hand.filter(isLand).length <= 1; render(); if (!ui.mulligan) run(); }
+      else if (btn.id === 'b-mull-again') { act.mulligan(); ui.mulligan = me.hand.filter(isLand).length <= 1; render(); if (!ui.mulligan) run(); }
       return;
     }
     if (ui.paying) {   // manual-mana mode: tap your own lands to pay for the pending spell
@@ -630,7 +643,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     }
     if (cardChoiceActive()) {   // card-picker overlay: click cards to select, then Confirm
       const req = duel.pending.req;
-      if (btn.id === 'b-choose') { const sel = ui.choice || new Set(); if (sel.size >= req.min && sel.size <= req.max) { ui.choice = null; duel.humanAnswer([...sel]); run(); } return; }
+      if (btn.id === 'b-choose') { const sel = ui.choice || new Set(); if (sel.size >= req.min && sel.size <= req.max) { ui.choice = null; act.answer([...sel]); run(); } return; }
       if (btn.classList.contains('card') && btn.dataset.zone === 'pick') { const c = cardOf(btn.dataset.id); if (c) { ui.choice ||= new Set(); if (ui.choice.has(c.id)) ui.choice.delete(c.id); else if (req.max === 1) ui.choice = new Set([c.id]); else if (ui.choice.size < req.max) ui.choice.add(c.id); render(); } return; }
       return;
     }
@@ -639,7 +652,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     if (btn.dataset.wiz === 'x') { const v = Math.max(0, Math.min(ui.wizard.maxX, Number(root.querySelector('#xval').value) || 0)); if (ui.wizard.ability !== undefined) ui.wizard.onX(v); else { ui.wizard.opts.x = v; next(ui.wizard); } return; }
     if (btn.dataset.wizref) { const [type, id] = btn.dataset.wizref.split(':'); pickRef({ type, id: Number(id) }); return; }
     if (btn.dataset.reqref) { const [type, id] = btn.dataset.reqref.split(':'); pickRef({ type, id: Number(id) }); return; }
-    if (btn.dataset.answer) { duel.humanAnswer(btn.dataset.answer === 'yes'); run(); return; }
+    if (btn.dataset.answer) { act.answer(btn.dataset.answer === 'yes'); run(); return; }
     if (btn.dataset.order && ui.order) { const i = Number(btn.dataset.idx), j = btn.dataset.order === 'up' ? i - 1 : i + 1; if (j >= 0 && j < ui.order.length) { [ui.order[i], ui.order[j]] = [ui.order[j], ui.order[i]]; render(); } return; }
     if (btn.dataset.div && ui.divide) {
       const req = duel.pending?.req; if (!req || req.kind !== 'divide') return;
@@ -651,20 +664,20 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
       else { const id = Number(key); d.map[id] = Math.max(0, (d.map[id] || 0) + dir); if (dir < 0 && req.trample && !req.targets.every(t => (d.map[t.id] || 0) >= t.lethal)) d.player = 0; }
       render(); return;
     }
-    if (btn.dataset.color) { duel.humanAnswer(btn.dataset.color); run(); return; }
+    if (btn.dataset.color) { act.answer(btn.dataset.color); run(); return; }
     if (btn.hasAttribute('data-close-viewer') && (btn === ev.target || btn.tagName === 'BUTTON')) { ui.viewer = null; render(); return; }
     if (btn.dataset.grave !== undefined) { ui.viewer = Number(btn.dataset.grave); render(); return; }
     switch (btn.id) {
-      case 'b-pass': duel.humanPass(); run(); return;
-      case 'b-endturn': duel.humanEndTurn(); run(); return;
-      case 'b-attack': { const ids = [...ui.attackers]; ui.attackers = new Set(); duel.humanAnswer(ids); run(); return; }
-      case 'b-attack-all': { const req = duel.pending?.req; if (req?.kind !== 'attackers') return; ui.attackers = new Set(); duel.humanAnswer(req.options.slice()); run(); return; }
-      case 'b-block': { if (!duel.validBlocks(ui.blocks)) { ui.message = 'Those blocks are not legal.'; render(); return; } const b = ui.blocks; ui.blocks = {}; ui.blocker = null; ui.message = ''; duel.humanAnswer(b); run(); return; }
-      case 'b-choose': { const ids = [...(ui.choice || [])]; ui.choice = null; duel.humanAnswer(ids); run(); return; }
-      case 'b-order': { const ids = (ui.order || []).slice(); ui.order = null; duel.humanAnswer(ids); run(); return; }
-      case 'b-divide': { const d = ui.divide; if (!d) return; const plan = { ...d.map }; if (d.player) plan.player = d.player; ui.divide = null; duel.humanAnswer(plan); run(); return; }
-      case 'b-look': { duel.humanAnswer(null); run(); return; }
-      case 'b-concede': if (confirm('Concede this duel? You will lose your ante card.')) { duel.end(1, `${me.name} concedes.`); run(); } return;
+      case 'b-pass': act.pass(); run(); return;
+      case 'b-endturn': act.endTurn(); run(); return;
+      case 'b-attack': { const ids = [...ui.attackers]; ui.attackers = new Set(); act.answer(ids); run(); return; }
+      case 'b-attack-all': { const req = duel.pending?.req; if (req?.kind !== 'attackers') return; ui.attackers = new Set(); act.answer(req.options.slice()); run(); return; }
+      case 'b-block': { if (!duel.validBlocks(ui.blocks)) { ui.message = 'Those blocks are not legal.'; render(); return; } const b = ui.blocks; ui.blocks = {}; ui.blocker = null; ui.message = ''; act.answer(b); run(); return; }
+      case 'b-choose': { const ids = [...(ui.choice || [])]; ui.choice = null; act.answer(ids); run(); return; }
+      case 'b-order': { const ids = (ui.order || []).slice(); ui.order = null; act.answer(ids); run(); return; }
+      case 'b-divide': { const d = ui.divide; if (!d) return; const plan = { ...d.map }; if (d.player) plan.player = d.player; ui.divide = null; act.answer(plan); run(); return; }
+      case 'b-look': { act.answer(null); run(); return; }
+      case 'b-concede': if (confirm(input ? 'Concede this duel?' : 'Concede this duel? You will lose your ante card.')) { act.concede(); run(); } return;
     }
     if (btn.classList.contains('stack-item')) { if (targeting()) pickRef({ type: 'spell', id: Number(btn.dataset.stack) }); return; }
     if (btn.classList.contains('pbox')) { pickRef({ type: 'player', idx: Number(btn.dataset.player) }); return; }
@@ -704,13 +717,17 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
   document.addEventListener('keydown', function onKey(ev) {
     if (!root.isConnected) { document.removeEventListener('keydown', onKey); return; }
     if (ev.key === 'Escape') { ui.wizard = null; ui.menu = null; ui.viewer = null; ui.paying = null; render(); }
-    if (ev.key === ' ' && duel.pending?.type === 'priority' && !ui.wizard && !ui.menu && !ui.paying) { ev.preventDefault(); duel.humanPass(); run(); }
+    if (ev.key === ' ' && duel.pending?.type === 'priority' && !ui.wizard && !ui.menu && !ui.paying) { ev.preventDefault(); act.pass(); run(); }
   });
 
   duel.onChange(() => { ui.message = ''; render(); if (duel.winner !== null) run(); });
-  duel.start();
-  // Offer a free mulligan on a land-starved opening hand (one land or none).
-  const openingLands = () => me.hand.filter(isLand).length;
-  if (!tutorial && me.hand.length && openingLands() <= 1) { ui.mulligan = true; render(); }
-  else run();
+  if (autoStart) {
+    duel.start();
+    // Offer a free mulligan on a land-starved opening hand (one land or none); otherwise start ticking.
+    const openingLands = () => me.hand.filter(isLand).length;
+    if (!tutorial && allowMulligan && me.hand.length && openingLands() <= 1) { ui.mulligan = true; render(); }
+    else run();
+  } else render();   // guest: nothing to deal — the first snapshot will hydrate and render the board
+  // The host resumes ticking here after applying a remote input; the guest re-renders on each snapshot.
+  return { run, rerender: render, duel };
 }
