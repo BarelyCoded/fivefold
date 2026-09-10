@@ -87,9 +87,9 @@ function addCards(coll, name, n = 1) { coll[name] = (coll[name] || 0) + n; if (c
 const MAX_COPIES = 4;
 const copyCap = name => BASIC_NAMES.has(name) ? Infinity : MAX_COPIES;
 // How many more of `name` the deck may hold: limited by copies owned and the 4-of rule.
-function deckRoom(name) {
-  const g = S.game; const owned = BASIC_NAMES.has(name) ? Infinity : (S.collection[name] || 0);
-  return Math.max(0, Math.min(owned, copyCap(name)) - (g.deck[name] || 0));
+function deckRoom(name, deck = S.game?.deck || {}, collection = S.collection) {
+  const owned = BASIC_NAMES.has(name) ? Infinity : (collection[name] || 0);
+  return Math.max(0, Math.min(owned, copyCap(name)) - (deck[name] || 0));
 }
 // ---- town treasuries: each city keeps a fluctuating gold reserve. Buying refills it, selling drains it.
 const TOWN_GOLD_CAP = 300, TOWN_GOLD_START = 150;
@@ -135,7 +135,7 @@ function expandDeck(deckObj) {
   return out;
 }
 function deckSize(deckObj) { return Object.values(deckObj).reduce((a, b) => a + b, 0); }
-function deckProblems(deckObj) {
+function deckProblems(deckObj, collection = S.collection) {
   const p = [];
   const size = deckSize(deckObj);
   if (size < 40) p.push(`Deck has ${size} cards; it needs at least 40.`);
@@ -143,7 +143,7 @@ function deckProblems(deckObj) {
     const d = defOf(name);
     if (!d) { p.push(`${name}: card data not loaded.`); continue; }
     if (d.kind === 'unsupported') p.push(`${name}: not supported by the demo engine.`);
-    if (!BASIC_NAMES.has(name) && (S.collection[name] || 0) < n) p.push(`${name}: you own ${S.collection[name] || 0}, deck uses ${n}.`);
+    if (!BASIC_NAMES.has(name) && (collection[name] || 0) < n) p.push(`${name}: you own ${collection[name] || 0}, deck uses ${n}.`);
     if (!BASIC_NAMES.has(name) && n > MAX_COPIES) p.push(`${name}: ${n} copies; at most ${MAX_COPIES} of a card are allowed.`);
   }
   return p;
@@ -1074,16 +1074,13 @@ function deckAdvice({ size, lands, spells, creatures, others, curve, avg }) {
     : `<li class="adv-ok">Ratios look solid for ${aArch} deck — ${lands} lands (${pct(lands)}%), ${creatures} creatures (${pct(creatures)}%), ${others} other spell${others === 1 ? '' : 's'} (${pct(others)}%).</li>`;
   return `<div class="deckadvice"><div class="curve-head"><span>Recommendations</span><span class="small">reads as ${arch}</span></div><ul>${body}</ul></div>`;
 }
-function deck() {
-  const g = S.game; if (!g) return title();
-  const q = S.deckFilter.toLowerCase();
-  const owned = Object.keys(S.collection).map(n => ({ n, q: S.collection[n], d: defOf(n) })).filter(r => r.d && r.d.kind !== 'unsupported' && (!q || r.n.toLowerCase().includes(q))).sort((a, b) => a.d.cmc - b.d.cmc || a.n.localeCompare(b.n));
-  const inDeck = Object.entries(g.deck).map(([n, c]) => ({ n, c, d: defOf(n) })).sort((a, b) => (a.d?.kind === 'land') - (b.d?.kind === 'land') || (a.d?.cmc || 0) - (b.d?.cmc || 0) || a.n.localeCompare(b.n));
-  const probs = deckProblems(g.deck);
-  const size = deckSize(g.deck), lands = inDeck.filter(r => r.d?.kind === 'land').reduce((a, r) => a + r.c, 0);
-  // Mana curve: nonland spells bucketed by mana value (0..6, 7+).
+// The curve + colour pie + recommendations for any deck object — shared by the journey deck builder and
+// the multiplayer deck builder.
+function deckStatsHtml(deckObj) {
+  const inDeck = Object.entries(deckObj).map(([n, c]) => ({ n, c, d: defOf(n) }));
+  const size = deckSize(deckObj);
+  const lands = inDeck.filter(r => r.d?.kind === 'land').reduce((a, r) => a + r.c, 0);
   const curve = new Array(8).fill(0); let spells = 0, cmcSum = 0;
-  // Colour pie: coloured mana symbols demanded across nonland spells (hybrids split evenly).
   const pip = { W: 0, U: 0, B: 0, R: 0, G: 0 };
   let creatures = 0;
   for (const r of inDeck) {
@@ -1093,7 +1090,7 @@ function deck() {
     for (const grp of (r.d.cost?.pips || [])) { const cols = grp.filter(c => pip[c] !== undefined); for (const c of cols) pip[c] += r.c / cols.length; }
   }
   const maxC = Math.max(1, ...curve), avg = spells ? (cmcSum / spells) : 0, BH = 64;
-  const avgLeft = spells ? (Math.min(7, avg) / 7 * 100) : 0;   // avg marker position across the 0..7 axis
+  const avgLeft = spells ? (Math.min(7, avg) / 7 * 100) : 0;
   const curveHtml = `<div class="curve">
     <div class="curve-head"><span>Mana curve</span><span class="small">${spells} spell${spells === 1 ? '' : 's'}${spells ? ` · avg ${avg.toFixed(1)}` : ''}</span></div>
     ${spells ? `<div class="curve-plot">${spells ? `<span class="curve-avg" style="left:${avgLeft}%" title="Average mana value ${avg.toFixed(2)}"></span>` : ''}${curve.map((n, i) => `<div class="curve-col"><span class="curve-n">${n || ''}</span><div class="curve-bar${n ? '' : ' empty'}" style="height:${n ? Math.max(4, Math.round(n / maxC * BH)) : 0}px" title="${n} spell${n === 1 ? '' : 's'} at ${i === 7 ? '7+' : i} mana"></div></div>`).join('')}</div>
@@ -1110,8 +1107,16 @@ function deck() {
       <ul class="pie-legend">${COLORS.filter(c => pip[c] > 0).sort((a, b) => pip[b] - pip[a]).map(c => `<li><i class="dot c-${c}"></i>${COLOR_NAME[c]}<span class="pie-pct">${Math.round(pip[c])} · ${Math.round(pip[c] / pipTotal * 100)}%</span></li>`).join('')}</ul>
     </div>` : '<p class="small statmsg">Colored spells show your color split here.</p>'}
   </div>`;
-  const statsHtml = `<div class="deckstats">${curveHtml}${pieHtml}</div>`;
-  const adviceHtml = deckAdvice({ size, lands, spells, creatures, others: spells - creatures, curve, avg });
+  return `<div class="deckstats">${curveHtml}${pieHtml}</div>${deckAdvice({ size, lands, spells, creatures, others: spells - creatures, curve, avg })}`;
+}
+function deck() {
+  const g = S.game; if (!g) return title();
+  const q = S.deckFilter.toLowerCase();
+  const owned = Object.keys(S.collection).map(n => ({ n, q: S.collection[n], d: defOf(n) })).filter(r => r.d && r.d.kind !== 'unsupported' && (!q || r.n.toLowerCase().includes(q))).sort((a, b) => a.d.cmc - b.d.cmc || a.n.localeCompare(b.n));
+  const inDeck = Object.entries(g.deck).map(([n, c]) => ({ n, c, d: defOf(n) })).sort((a, b) => (a.d?.kind === 'land') - (b.d?.kind === 'land') || (a.d?.cmc || 0) - (b.d?.cmc || 0) || a.n.localeCompare(b.n));
+  const probs = deckProblems(g.deck);
+  const size = deckSize(g.deck), lands = inDeck.filter(r => r.d?.kind === 'land').reduce((a, r) => a + r.c, 0);
+  const statsHtml = deckStatsHtml(g.deck);
   app.innerHTML = `<section class="screen deckb">
     <div class="cols wide">
       <div class="box">
@@ -1122,7 +1127,6 @@ function deck() {
       <div class="box">
         <div class="rowhead"><h2>Deck · ${size} cards, ${lands} lands</h2><span class="rowtools"><button class="btn" id="b-fill">Fill basics to 40</button><button class="btn" id="b-clear-deck"${size ? '' : ' disabled'}>Remove all</button></span></div>
         ${statsHtml}
-        ${adviceHtml}
         <div class="basics">${COLORS.map(c => `<span class="basic"><i class="dot c-${c}"></i>${BASICS[c]} <b>${g.deck[BASICS[c]] || 0}</b> <button class="btn tiny" data-rem="${BASICS[c]}">−</button><button class="btn tiny" data-add="${BASICS[c]}">+</button></span>`).join('')}</div>
         ${probs.length ? `<div class="msg">${probs.map(esc).join('<br>')}</div>` : '<div class="ok">Deck is ready.</div>'}
         <table class="coll"><tr><th>Card</th><th>Cost</th><th>Qty</th><th></th></tr>
@@ -1615,31 +1619,46 @@ function mplobby() {
   }
   app.innerHTML = `<section class="screen mplobby"><div class="box">${body}</div></section>`;
 }
-function mpDeckSummary(deck) {
-  const rows = Object.entries(deck).map(([n, c]) => ({ n, c, d: defOf(n) })).filter(r => r.d).sort((a, b) => (a.d.kind === 'land') - (b.d.kind === 'land') || (a.d.cmc || 0) - (b.d.cmc || 0) || a.n.localeCompare(b.n));
-  const lands = rows.filter(r => r.d.kind === 'land').reduce((a, r) => a + r.c, 0);
-  const size = rows.reduce((a, r) => a + r.c, 0);
-  return { rows, lands, size };
+// Multiplayer is a sandbox: every card is available in plenty, so the copy oracle reports a full stock
+// for any name (the 4-of rule still governs). The display pool is the client's cached, supported cards.
+const MP_STOCK = new Proxy({}, { get: () => 99, has: () => true });
+function mpSandbox() { return MP_STOCK; }
+function mpPool() {
+  const seen = new Set(); const out = [];
+  for (const c of allCached()) { if (seen.has(c.name) || BASIC_NAMES.has(c.name) || c.name.startsWith('A-')) continue; const d = defOf(c.name); if (d && d.kind !== 'unsupported') { seen.add(c.name); out.push({ n: c.name, d }); } }
+  return out;
 }
+// Editing the deck un-readies you and tells your opponent so a match can't start on a stale deck.
+function mpEdit(fn) { const mp = S.mp; fn(mp.deck); if (mp.ready) { mp.ready = false; mp.net.relay({ k: 'ready', ready: false }); } render(); }
 function mpdeck() {
   const mp = S.mp; if (!mp) return title();
-  const { rows, lands, size } = mpDeckSummary(mp.deck);
-  const oppState = mp.oppReady ? `<b class="mp-ok">${esc(mp.oppName || 'Opponent')} is ready.</b>` : `Waiting for ${esc(mp.oppName || 'your opponent')} to pick a deck…`;
-  app.innerHTML = `<section class="screen mpdeck"><div class="cols wide">
+  const sandbox = mpSandbox();
+  const q = (S.mpFilter || '').toLowerCase();
+  const owned = mpPool().filter(r => !q || r.n.toLowerCase().includes(q)).sort((a, b) => (a.d.cmc || 0) - (b.d.cmc || 0) || a.n.localeCompare(b.n)).slice(0, 400);
+  const inDeck = Object.entries(mp.deck).map(([n, c]) => ({ n, c, d: defOf(n) })).sort((a, b) => (a.d?.kind === 'land') - (b.d?.kind === 'land') || (a.d?.cmc || 0) - (b.d?.cmc || 0) || a.n.localeCompare(b.n));
+  const probs = deckProblems(mp.deck, sandbox);
+  const size = deckSize(mp.deck), lands = inDeck.filter(r => r.d?.kind === 'land').reduce((a, r) => a + r.c, 0);
+  const oppState = mp.oppReady ? `<b class="mp-ok">${esc(mp.oppName || 'Opponent')} is ready.</b>` : `Waiting for ${esc(mp.oppName || 'your opponent')}…`;
+  app.innerHTML = `<section class="screen deckb mpdeck"><div class="cols wide">
     <div class="box">
-      <h2>Build your duel deck</h2>
-      <p class="small">Pick a colour and how many colours (Apprentice 1 · Magician 2 · Sorcerer 3). Reroll for a fresh 40-card list — full card-by-card editing is coming next.</p>
-      <fieldset><legend>Main colour</legend>${COLORS.map(c => `<label class="radio"><input type="radio" name="mpcolor" value="${c}" ${c === mp.deckColor ? 'checked' : ''}> <i class="dot c-${c}"></i>${COLOR_NAME[c]}</label>`).join('')}</fieldset>
-      <label>Colours <select id="mp-diff">${Object.entries(DIFF).map(([k, d]) => `<option value="${k}" ${k === mp.deckDiff ? 'selected' : ''}>${['', 'One colour', 'Two colours', 'Three colours'][d.colors]}</option>`).join('')}</select></label>
-      <div class="btnrow"><button class="btn" id="mp-reroll">Reroll deck</button>
-        <button class="btn primary" id="mp-ready" ${mp.ready ? 'disabled' : ''}>${mp.ready ? 'Ready ✓' : "I'm ready"}</button></div>
-      <p class="small">${mp.ready ? 'Waiting for your opponent…' : ''} ${oppState}</p>
-      <div class="btnrow"><button class="btn ghost" id="mp-quit">Leave</button></div>
+      <div class="rowhead"><h2>Card pool</h2><span class="rowtools"><input id="mp-filter" placeholder="Filter…" value="${esc(S.mpFilter || '')}"></span></div>
+      <table class="coll"><tr><th>Card</th><th>Cost</th><th>In deck</th><th></th></tr>
+      ${owned.map(r => { const used = mp.deck[r.n] || 0; const room = deckRoom(r.n, mp.deck, sandbox); const atCap = used >= copyCap(r.n); return `<tr><td data-preview="${esc(r.n)}">${esc(r.n)}<span class="small"> ${esc(r.d.typeLine)}</span></td><td>${r.d.kind === 'land' ? '' : manaHtml(r.d.cost)}</td><td>${used}${atCap ? ' <span class="small">(max)</span>' : ''}</td><td class="nowrap"><button class="btn tiny" data-mpadd="${esc(r.n)}" ${room <= 0 ? 'disabled' : ''}>+</button><button class="btn tiny" data-mpaddmax="${esc(r.n)}" ${room <= 0 ? 'disabled' : ''} title="Add up to ${copyCap(r.n)}">+all</button></td></tr>`; }).join('')}</table>
     </div>
     <div class="box">
-      <h3>Deck · ${size} cards, ${lands} lands</h3>
-      <table class="coll"><tr><th>Card</th><th>Cost</th><th>Qty</th></tr>
-      ${rows.map(r => `<tr><td data-preview="${esc(r.n)}">${esc(r.n)}</td><td>${r.d.kind !== 'land' ? manaHtml(r.d.cost) : ''}</td><td>${r.c}</td></tr>`).join('')}</table>
+      <div class="rowhead"><h2>Your deck · ${size} cards, ${lands} lands</h2><span class="rowtools"><button class="btn" id="mp-clear"${size ? '' : ' disabled'}>Clear</button></span></div>
+      <details class="mp-quick"><summary>Quick deck</summary>
+        <fieldset><legend>Main colour</legend>${COLORS.map(c => `<label class="radio"><input type="radio" name="mpcolor" value="${c}" ${c === mp.deckColor ? 'checked' : ''}> <i class="dot c-${c}"></i>${COLOR_NAME[c]}</label>`).join('')}</fieldset>
+        <label>Colours <select id="mp-diff">${Object.entries(DIFF).map(([k, d]) => `<option value="${k}" ${k === mp.deckDiff ? 'selected' : ''}>${['', 'One colour', 'Two colours', 'Three colours'][d.colors]}</option>`).join('')}</select></label>
+        <button class="btn" id="mp-reroll">Generate this deck</button>
+      </details>
+      ${deckStatsHtml(mp.deck)}
+      <div class="basics">${COLORS.map(c => `<span class="basic"><i class="dot c-${c}"></i>${BASICS[c]} <b>${mp.deck[BASICS[c]] || 0}</b> <button class="btn tiny" data-mprem="${BASICS[c]}">−</button><button class="btn tiny" data-mpadd="${BASICS[c]}">+</button></span>`).join('')}</div>
+      ${probs.length ? `<div class="msg">${probs.slice(0, 6).map(esc).join('<br>')}</div>` : '<div class="ok">Deck is ready.</div>'}
+      <div class="btnrow"><button class="btn primary" id="mp-ready" ${probs.length || mp.ready ? 'disabled' : ''}>${mp.ready ? 'Ready ✓' : "I'm ready"}</button><button class="btn ghost" id="mp-quit">Leave</button></div>
+      <p class="small">${mp.ready ? 'Waiting for your opponent…' : ''} ${oppState}</p>
+      <table class="coll"><tr><th>Card</th><th>Cost</th><th>Qty</th><th></th></tr>
+      ${inDeck.map(r => `<tr><td data-preview="${esc(r.n)}">${esc(r.n)}</td><td>${r.d && r.d.kind !== 'land' ? manaHtml(r.d.cost) : ''}</td><td>${r.c}</td><td class="nowrap"><button class="btn tiny" data-mprem="${esc(r.n)}">−</button><button class="btn tiny" data-mpremmax="${esc(r.n)}" title="Remove all">−all</button></td></tr>`).join('')}</table>
     </div>
   </div></section>`;
 }
@@ -1666,6 +1685,17 @@ function mpduel() {
 document.addEventListener('click', ev => {
   const mp = S.mp;
   const jb = ev.target.closest('[data-mpjoin]'); if (jb && mp?.net) { mp.msg = ''; mp.net.join(jb.dataset.mpjoin); return; }
+  if (mp && S.screen === 'mpdeck') {
+    const sandbox = mpSandbox();
+    const el = ev.target.closest('[data-mpadd],[data-mpaddmax],[data-mprem],[data-mpremmax]');
+    if (el) {
+      if (el.dataset.mpadd != null) { const n = el.dataset.mpadd; if (deckRoom(n, mp.deck, sandbox) > 0) mpEdit(d => addCards(d, n, 1)); }
+      else if (el.dataset.mpaddmax != null) { const n = el.dataset.mpaddmax, room = deckRoom(n, mp.deck, sandbox); if (room > 0) mpEdit(d => addCards(d, n, room)); }
+      else if (el.dataset.mprem != null) mpEdit(d => addCards(d, el.dataset.mprem, -1));
+      else if (el.dataset.mpremmax != null) mpEdit(d => addCards(d, el.dataset.mpremmax, -(d[el.dataset.mpremmax] || 0)));
+      return;
+    }
+  }
   const t = ev.target.closest('button'); if (!t || !t.id) return;
   switch (t.id) {
     case 'b-multiplayer': mpEnter(); break;
@@ -1677,6 +1707,7 @@ document.addEventListener('click', ev => {
     case 'mp-join': if (mp?.net) { const code = (document.getElementById('mp-code')?.value || '').trim(); if (code) { mp.msg = ''; mp.net.join(code); } } break;
     case 'mp-cancel': if (mp) { mp.net.leave(); mp.role = null; mp.room = null; mp.view = 'menu'; mp.msg = ''; render(); } break;
     case 'mp-reroll': mpReroll(); break;
+    case 'mp-clear': mpEdit(d => { for (const k of Object.keys(d)) delete d[k]; }); break;
     case 'mp-ready': mpReady(); break;
     case 'mp-quit': mpLeave(); break;
   }
@@ -1685,6 +1716,9 @@ document.addEventListener('change', ev => {
   const mp = S.mp; if (!mp) return;
   if (ev.target.name === 'mpcolor') mpSetDeck(ev.target.value, mp.deckDiff);
   else if (ev.target.id === 'mp-diff') mpSetDeck(mp.deckColor, ev.target.value);
+});
+document.addEventListener('input', ev => {
+  if (ev.target.id === 'mp-filter') { S.mpFilter = ev.target.value; const box = ev.target.closest('.box'); const tbl = box?.querySelector('table'); if (tbl) mpdeck(); const f = document.getElementById('mp-filter'); if (f) { f.focus(); f.setSelectionRange(f.value.length, f.value.length); } }
 });
 
 // Web Audio starts only after a gesture; the first click or key unlocks it and starts the score for the current screen.
