@@ -18,9 +18,9 @@ loadAtlas();
 const BASICS = { W: 'Plains', U: 'Island', B: 'Swamp', R: 'Mountain', G: 'Forest' };
 const BASIC_NAMES = new Set(Object.values(BASICS));
 const DIFF = {
-  apprentice: { label: 'Apprentice', life: 20, enemyBonus: 0, gold: 30 },
-  magician: { label: 'Magician', life: 15, enemyBonus: 0, gold: 20 },
-  sorcerer: { label: 'Sorcerer', life: 12, enemyBonus: 4, gold: 12 },
+  apprentice: { label: 'Apprentice', life: 20, enemyBonus: 0, gold: 30, colors: 1 },
+  magician: { label: 'Magician', life: 15, enemyBonus: 0, gold: 20, colors: 2 },
+  sorcerer: { label: 'Sorcerer', life: 12, enemyBonus: 4, gold: 12, colors: 3 },
 };
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const rnd = a => a[Math.floor(Math.random() * a.length)];
@@ -171,12 +171,49 @@ function fillBasics(deckObj) {
 }
 
 // ---- game --------------------------------------------------------------------------
+// Starting-deck card pools, one per colour, in the spirit of MicroProse Shandalar's starters: cheap
+// creatures many, a couple of fatties, a little removal. Every card here is drawn from the roaming
+// mages' own decks, so it is always supported and pre-cached. Weights are copies in a 28-card bag; a
+// mono starter draws 23 of them, so each new game's list is slightly different — as Shandalar's were.
+const START_POOLS = {
+  W: [['Savannah Lions', 4], ['Tundra Wolves', 3], ['White Knight', 3], ['Pearled Unicorn', 3], ['Mesa Pegasus', 3], ['Wild Griffin', 3], ['Angelic Page', 3], ['Longbow Archer', 2], ['Swords to Plowshares', 3], ['Serra Angel', 1]],
+  U: [['Merfolk of the Pearl Trident', 4], ['Coral Merfolk', 3], ['Sage Owl', 3], ['Wind Drake', 3], ['Horned Turtle', 3], ['Giant Octopus', 2], ['Phantom Monster', 2], ['Air Elemental', 1], ['Unsummon', 4], ['Divination', 3]],
+  B: [['Scathe Zombies', 4], ['Bog Imp', 3], ['Drudge Skeletons', 3], ['Vampire Bats', 3], ['Black Knight', 3], ['Bog Wraith', 2], ['Gravedigger', 2], ['Hypnotic Specter', 1], ['Sengir Vampire', 1], ['Terror', 3], ['Raise Dead', 3]],
+  R: [["Mons's Goblin Raiders", 4], ['Raging Goblin', 3], ['Gray Ogre', 3], ['Hurloon Minotaur', 3], ['Hill Giant', 3], ['Balduvian Barbarians', 2], ['Earth Elemental', 1], ['Shock', 3], ['Lightning Bolt', 2], ['Volcanic Hammer', 2], ['Incinerate', 2]],
+  G: [['Llanowar Elves', 4], ['Grizzly Bears', 4], ['Scryb Sprites', 3], ['Elvish Archers', 3], ['Giant Spider', 3], ['Trained Armodon', 3], ['War Mammoth', 2], ['Ironroot Treefolk', 2], ['Craw Wurm', 1], ['Giant Growth', 3]],
+};
+// How the 23 nonland spells and 17 lands split across the deck's colours (primary always dominant),
+// keyed by number of colours: 1 (Apprentice), 2 (Magician), 3 (Sorcerer).
+const SPELL_SPLIT = { 1: [23], 2: [15, 8], 3: [13, 6, 4] };
+const LAND_SPLIT = { 1: [17], 2: [11, 6], 3: [9, 5, 3] };
+function shuffleInPlace(a, rng) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+// Draw n nonland cards from a colour's pool, weighted by the bag and randomised each time.
+function pickColorCards(color, n, rng) {
+  const bag = [];
+  for (const [name, w] of START_POOLS[color]) for (let i = 0; i < w; i++) bag.push(name);
+  shuffleInPlace(bag, rng);
+  const out = {};
+  for (let i = 0; i < n && i < bag.length; i++) out[bag[i]] = (out[bag[i]] || 0) + 1;
+  return out;
+}
+// Build a fresh 40-card starting deck for a colour and difficulty (1/2/3 colours). The chosen colour
+// leads; any extra colours are picked at random, so decks vary from game to game like Shandalar's.
+function buildStartDeck(primary, colorCount, rng = Math.random) {
+  const secondaries = shuffleInPlace(COLORS.filter(c => c !== primary), rng).slice(0, colorCount - 1);
+  const colors = [primary, ...secondaries];
+  const spells = SPELL_SPLIT[colorCount], lands = LAND_SPLIT[colorCount];
+  const deck = {};
+  colors.forEach((col, i) => {
+    for (const [name, c] of Object.entries(pickColorCards(col, spells[i], rng))) deck[name] = (deck[name] || 0) + c;
+    deck[BASICS[col]] = (deck[BASICS[col]] || 0) + lands[i];
+  });
+  return deck;
+}
 async function newGame({ name, color, difficulty }) {
   await ensureContent();
   const d = DIFF[difficulty];
-  const starter = S.content.enemies.find(e => e.color === color && e.tier === 1);
-  const deck = {};
-  for (const [n, c] of Object.entries(starter.deck)) { deck[n] = c; if (!BASIC_NAMES.has(n)) addCards(S.collection, n, c); }
+  const deck = buildStartDeck(color, d.colors, Math.random);
+  for (const [n, c] of Object.entries(deck)) if (!BASIC_NAMES.has(n)) addCards(S.collection, n, c);
   const world = generateWorld(Math.random, S.content.enemies, color);
   placeDungeons(world, Math.random, S.dungeons.dungeons);
   placeLandmarks(world, Math.random);
@@ -923,7 +960,7 @@ function title() {
         <h2>New journey</h2>
         <label>Your name <input name="name" value="${esc(g?.name || '')}" placeholder="Wanderer"></label>
         <fieldset><legend>Starting color</legend>${COLORS.map(c => `<label class="radio"><input type="radio" name="color" value="${c}" ${c === 'G' ? 'checked' : ''}> <i class="dot c-${c}"></i>${COLOR_NAME[c]}</label>`).join('')}</fieldset>
-        <label>Difficulty <select name="difficulty">${Object.entries(DIFF).map(([k, d]) => `<option value="${k}">${d.label} — ${d.life} life, ${d.gold} gold</option>`).join('')}</select></label>
+        <label>Difficulty <select name="difficulty">${Object.entries(DIFF).map(([k, d]) => `<option value="${k}">${d.label} — ${['', 'one colour', 'two colours', 'three colours'][d.colors]}, ${d.life} life</option>`).join('')}</select></label>
         <button class="btn primary" type="submit">Begin</button>
         <p class="small">You start with a ready-made 40-card deck of your color. Import your own cards from the Collection tab at any time.</p>
       </form>
@@ -1458,7 +1495,7 @@ document.addEventListener('keydown', ev => {
 
 // ---- boot -----------------------------------------------------------------------
 // Debug handle for the console and for automated tests: window.ff.S is the app state.
-window.ff = { S, defOf, save, render, startDuel, enemyById, startTutorialDuel, riddleDefs, makeRiddle, amuletShopPool, artifactShopPool, cityPool, wardenOf, finishDuel, advanceSieges, maxSieges, collectMote, ambushFromMote, amuletPrice, tierOf, leveledEnemy, colorBombs, roamTemplate, deckRoom, copyCap, sellPrice, sellableCopies, townGold, addTownGold, sellCard, MAX_COPIES, deckProblems, addClue, clueTarget, dungeonArchetype, knownPrizes, dungeonTemplate, FIND_CLUES, relocateDungeon, enterCity, roamResult };
+window.ff = { S, defOf, save, render, startDuel, enemyById, startTutorialDuel, riddleDefs, makeRiddle, amuletShopPool, artifactShopPool, cityPool, wardenOf, finishDuel, advanceSieges, maxSieges, collectMote, ambushFromMote, amuletPrice, tierOf, leveledEnemy, colorBombs, roamTemplate, deckRoom, copyCap, sellPrice, sellableCopies, townGold, addTownGold, sellCard, MAX_COPIES, deckProblems, addClue, clueTarget, dungeonArchetype, knownPrizes, dungeonTemplate, FIND_CLUES, relocateDungeon, enterCity, roamResult, buildStartDeck, START_POOLS };
 initPreview();
 load();
 render();
