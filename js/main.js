@@ -2,7 +2,7 @@
 import { parseList, importNames, defOf, forgetDefs, loadArtIndex, artFor, artCount, hasOwnArt, hasServer } from './collection.js';
 import { fetchCards, cacheSize, cached as cachedCard, allCached } from './scryfall.js';
 import { COLORS, COLOR_NAME, manaHtml, statusLabel } from './cards.js';
-import { generateWorld, drawWorld, drawMinimap, tileAt, inBounds, cityAt, linkAt, enemyAt, stepEnemies, BIOME, TILE, VIEW, placeDungeons, dungeonAt, relocateDungeon, placeLandmarks, landmarkAt, placeSpecials, specialAt, placeMotes, moteAt, spawnMote, castleAt, WARDEN_HOLD, roadAt, ensureRoads } from './world.js';
+import { generateWorld, drawWorld, drawMinimap, tileAt, inBounds, cityAt, linkAt, enemyAt, stepEnemies, BIOME, TILE, VIEW, placeDungeons, dungeonAt, relocateDungeon, placeLandmarks, landmarkAt, placeSpecials, specialAt, placeMotes, moteAt, spawnMote, castleAt, WARDEN_HOLD, roadAt, ensureRoads, bazaarAt, spawnBazaar } from './world.js';
 import { Duel } from './engine.js';
 import { mountDuel, cardHtml } from './duelview.js';
 import { Net } from './net.js';
@@ -273,6 +273,7 @@ function move(dx, dy) {
   const eprev = g.world.enemies.map(e => ({ e, x: e.x, y: e.y }));      // snapshot so movers can slide, not teleport
   const caught = stepEnemies(g.world, Math.random, g.player, onRoad);   // roaming foes give chase and may catch you
   if (Math.random() < 0.1) spawnMote(g.world, Math.random, g.player);   // the world keeps seeding fresh motes
+  tickBazaar(g);                                                        // a rare travelling market appears and moves on
   save();
   if (caught) { encounter(caught); return; }
   const city = cityAt(g.world, nx, ny);
@@ -281,6 +282,7 @@ function move(dx, dy) {
   if (lm && !lm.used) { landmarkRiddle(lm); return; }
   const sp = specialAt(g.world, nx, ny);
   if (sp) { specialPrompt(sp); return; }
+  if (bazaarAt(g.world, nx, ny)) { save(); openBazaar(); return; }   // a travelling market you can reach
   // A plain step onto open ground: slide there instead of snapping, and let any roaming mage that moved
   // slide with us. Event tiles (foes, cities, dungeons, landmarks) returned above and just cut to the event.
   const enemyFrom = new Map();
@@ -355,6 +357,66 @@ function advanceSieges(g) {
   if (w.cities.filter(c => c.captured).length >= 4) { g.status = 'lost'; g.lostBy = 'siege'; save(); go('end'); }
 }
 function toast(msg) { S.toast = msg; render(); setTimeout(() => { if (S.toast === msg) { S.toast = null; render(); } }, 3500); }
+
+// ---- The Nomad's Bazaar: a rare travelling market -----------------------------------
+// It appears on open ground near you now and then, lingers a while, then packs up. Unlike a town it sells
+// the whole non-restricted catalogue for gold, any color — the place to buy the exact pieces of a deck.
+const BAZAAR_CHANCE = 0.0022;   // per step, when none is out and the cooldown has passed
+const BAZAAR_COOLDOWN = 140;    // steps after one leaves before another may appear
+const BAZAAR_LIFE = 170;        // steps a bazaar lingers before the nomads move on
+function tickBazaar(g) {
+  const w = g.world;
+  if (w.bazaar) {
+    const onIt = g.player.x === w.bazaar.x && g.player.y === w.bazaar.y;
+    if (!onIt && g.player.steps - w.bazaar.born > BAZAAR_LIFE) { w.bazaar = null; w.bazaarGone = g.player.steps; }
+    return;
+  }
+  if (g.player.steps - (w.bazaarGone || -9999) < BAZAAR_COOLDOWN) return;
+  if (Math.random() < BAZAAR_CHANCE) {
+    const b = spawnBazaar(w, g.player, Math.random);
+    if (b) toast('A caravan of bright tents has appeared nearby — a Nomad’s Bazaar. Reach it to trade.');
+  }
+}
+function openBazaar() { S.bazaarFilter = ''; stockBazaar(); save(); go('bazaar'); }
+// The buyable pool: the whole catalogue by color plus artifacts, minus the restricted cards — the Power
+// Nine (already dropped by shopOk) and the unique dungeon-vault artifacts, which only dungeons yield.
+function bazaarExcluded() { return new Set([...(S.dungeons?.artifacts || [])]); }
+function bazaarRawNames() {
+  const names = new Set();
+  for (const col of COLORS) for (const n of shopNames(col)) names.add(n);
+  for (const n of artifactNames()) names.add(n);
+  return [...names];
+}
+function bazaarPool() {
+  const ex = bazaarExcluded(); const seen = new Set(); const out = [];
+  for (const n of bazaarRawNames()) {
+    if (seen.has(n) || ex.has(n)) continue;
+    const d = defOf(n);
+    if (!d || d.kind === 'unsupported' || d.kind === 'land' || !shopOk(n)) continue;
+    seen.add(n); out.push(n);
+  }
+  return out;
+}
+// Gold buy prices, by power tier, so a bomb costs real money and commons are cheap enough to buy in bulk.
+const BUY_TIER_GOLD = { S: 320, A: 160, B: 78, C: 40, D: 18, E: 8 };
+function goldPrice(name) {
+  const d = defOf(name); if (!d) return 40;
+  const t = tierOf(name);
+  const base = (t && BUY_TIER_GOLD[t] != null) ? BUY_TIER_GOLD[t] : Math.max(12, 16 + (d.cmc || 0) * 8);
+  return Math.max(4, Math.round(base + (d.cmc || 0) * 2));
+}
+// On opening, pull card data (not the slow art) for the catalogue so the shelves fill in, then re-render.
+function stockBazaar() {
+  const uncached = bazaarRawNames().filter(n => !cachedCard(n));
+  if (!uncached.length || S.bazaarFetching) return;
+  S.bazaarFetching = true;
+  fetchCards(uncached, null, { skipArt: true }).then(() => { S.bazaarFetching = null; forgetDefs(); if (S.screen === 'bazaar') render(); }).catch(() => { S.bazaarFetching = null; });
+}
+function buyFromBazaar(name) {
+  const g = S.game; const price = goldPrice(name);
+  if (g.player.gold < price) { toast('Not enough gold for that.'); return; }
+  g.player.gold -= price; addCards(S.collection, name, 1); sfx('coin'); save(); render();
+}
 
 function specialPrompt(sp) {
   const g = S.game;
@@ -958,8 +1020,8 @@ function renderTop() {
 function render() {
   app.classList.toggle('full', S.screen === 'duel' || S.screen === 'mpduel');
   renderTop();
-  const views = { title, collection, deck, map, city, duel, result, end, dungeon, tutorial, tiers, mplobby, mpdeck, mpduel };
-  music({ title: 'title', tutorial: 'title', collection: 'map', deck: 'map', map: 'map', result: 'map', end: 'title', city: 'city', duel: 'duel', dungeon: 'dungeon' }[S.screen] || 'title');
+  const views = { title, collection, deck, map, city, bazaar, duel, result, end, dungeon, tutorial, tiers, mplobby, mpdeck, mpduel };
+  music({ title: 'title', tutorial: 'title', collection: 'map', deck: 'map', map: 'map', result: 'map', end: 'title', city: 'city', bazaar: 'city', duel: 'duel', dungeon: 'dungeon' }[S.screen] || 'title');
   // The map keeps its canvas between steps (re-creating a full-size canvas every keypress is what made walking feel slow).
   const keepMap = S.screen === 'map' && !!app.querySelector('.mapscreen #map');
   if (keepMap) { for (const el of app.querySelectorAll('.overlay, .toast')) el.remove(); } else app.innerHTML = '';
@@ -1438,6 +1500,28 @@ function city() {
   </section>`;
 }
 
+function bazaarRow(name) {
+  const d = defOf(name); const cost = goldPrice(name); const g = S.game; const owned = S.collection[name] || 0;
+  return `<div class="amushop-row"><span class="mini" data-preview="${esc(name)}" style="${artFor(d) ? `background-image:url('${artFor(d)}')` : ''}"></span><span class="nm" data-preview="${esc(name)}">${esc(name)} ${tierChip(name)}<i>${esc(d.typeLine)}${owned ? ` · own ${owned}` : ''}</i></span><span class="cost">${cost}<span class="baz-g">g</span></span><button class="btn small" data-bazbuy="${esc(name)}" ${g.player.gold >= cost ? '' : 'disabled'}>Buy</button></div>`;
+}
+function bazaar() {
+  const g = S.game; if (!g.world.bazaar) return map();
+  const q = (S.bazaarFilter || '').toLowerCase();
+  const pool = bazaarPool().filter(n => !q || n.toLowerCase().includes(q)).sort((a, b) => (goldPrice(a) - goldPrice(b)) || a.localeCompare(b));
+  const shown = pool.slice(0, 160);
+  app.innerHTML = `<section class="screen cityscreen bazaar">
+    <div class="box">
+      <h2>The Nomad’s Bazaar <span class="small">· a travelling market of every stripe</span></h2>
+      <p class="innmsg">Silk tents and a hundred tongues, with a table for almost every card in the world — for the right weight of gold, any colour. The nomads keep no Power Nine, nor the relics of the deep dungeons.</p>
+      <div class="btnrow"><span class="baz-gold">◎ ${g.player.gold} gold</span><button class="btn primary" data-go="map">Leave</button></div>
+      <div class="rowhead"><h3>Wares</h3><span class="rowtools"><input id="bazaar-filter" placeholder="Search cards…" value="${esc(S.bazaarFilter || '')}"></span></div>
+      ${S.bazaarFetching && !shown.length ? '<p class="small">The traders are unrolling their wares…</p>' : ''}
+      <div class="amushop"><div class="amushop-list">${shown.map(n => bazaarRow(n)).join('') || '<p class="small">No wares match that search.</p>'}</div></div>
+      ${pool.length > shown.length ? `<p class="small">${pool.length - shown.length} more — narrow your search to see them.</p>` : ''}
+    </div>
+  </section>`;
+}
+
 function duel() {
   const d = S.duel;
   // Mount once per duel; a re-render (toast, stats) must not restart the game.
@@ -1505,7 +1589,7 @@ app.addEventListener('submit', ev => {
 });
 document.addEventListener('click', ev => {
   if (ev.target.closest('.btn, .tab, .linkbtn')) sfx('click');
-  const t = ev.target.closest('[data-go],[data-modal],[data-filter],[data-add],[data-addmax],[data-rem],[data-remmax],[data-dec],[data-buy],[data-sell],[data-amshop],[data-audio],[data-lesson],#b-import,#b-csv,#b-rescan,#b-clear-coll,#b-fill,#b-addall,#b-clear-deck,#b-rest,#b-food,#b-leave,#b-newgame,#b-dleave,#b-practice,#b-bounty,#wm-heal,#wm-blink,#wm-cloak,#wm-thunder,#wm-sight,#b-reset-all');
+  const t = ev.target.closest('[data-go],[data-modal],[data-filter],[data-add],[data-addmax],[data-rem],[data-remmax],[data-dec],[data-buy],[data-sell],[data-amshop],[data-bazbuy],[data-audio],[data-lesson],#b-import,#b-csv,#b-rescan,#b-clear-coll,#b-fill,#b-addall,#b-clear-deck,#b-rest,#b-food,#b-leave,#b-newgame,#b-dleave,#b-practice,#b-bounty,#wm-heal,#wm-blink,#wm-cloak,#wm-thunder,#wm-sight,#b-reset-all');
   if (!t) return;
   const g = S.game;
   if ('audio' in t.dataset) { toggleAudio(); renderTop(); return; }
@@ -1521,6 +1605,7 @@ document.addEventListener('click', ev => {
   if (t.dataset.dec) { addCards(S.collection, t.dataset.dec, -1); if (g && g.deck[t.dataset.dec] > (S.collection[t.dataset.dec] || 0)) addCards(g.deck, t.dataset.dec, -1); save(); render(); return; }
   if (t.dataset.buy != null) { const c = cityAt(g.world, g.player.x, g.player.y); const it = cityStock(c)[Number(t.dataset.buy)]; if (it && !it.sold && g.player.gold >= it.price) { g.player.gold -= it.price; addTownGold(c.color, it.price); it.sold = true; addCards(S.collection, it.name, 1); sfx('coin'); save(); render(); } return; }
   if (t.dataset.amshop != null) { const name = t.dataset.amshop; const color = t.dataset.amcolor || null; const cost = amuletPrice(name); if (spendAmulets(cost, color)) { addCards(S.collection, name, 1); sfx('coin'); save(); render(); toast(`${name} bought for ${cost} amulet${cost > 1 ? 's' : ''}.`); } return; }
+  if (t.dataset.bazbuy != null) { buyFromBazaar(t.dataset.bazbuy); return; }
   switch (t.id) {
     case 'b-import': S.importText = document.getElementById('imp').value; doImport(S.importText); break;
     case 'b-csv': fetch('api/collection').then(r => r.ok ? r.text() : Promise.reject(new Error('collection.csv not found next to server.js'))).then(txt => { S.importText = txt; doImport(txt); }).catch(e => { S.report = { error: e.message }; render(); }); break;
@@ -1931,6 +2016,7 @@ document.addEventListener('change', ev => {
 });
 document.addEventListener('input', ev => {
   if (ev.target.id === 'mp-filter') { S.mpFilter = ev.target.value; const box = ev.target.closest('.box'); const tbl = box?.querySelector('table'); if (tbl) mpdeck(); const f = document.getElementById('mp-filter'); if (f) { f.focus(); f.setSelectionRange(f.value.length, f.value.length); } }
+  else if (ev.target.id === 'bazaar-filter') { S.bazaarFilter = ev.target.value; bazaar(); const f = document.getElementById('bazaar-filter'); if (f) { f.focus(); f.setSelectionRange(f.value.length, f.value.length); } }
 });
 
 // Web Audio starts only after a gesture; the first click or key unlocks it and starts the score for the current screen.
@@ -1953,7 +2039,7 @@ window.addEventListener('blur', () => { heldDirs.length = 0; });   // don't let 
 
 // ---- boot -----------------------------------------------------------------------
 // Debug handle for the console and for automated tests: window.ff.S is the app state.
-window.ff = { S, defOf, save, render, startDuel, enemyById, startTutorialDuel, riddleDefs, makeRiddle, amuletShopPool, artifactShopPool, cityPool, wardenOf, finishDuel, advanceSieges, maxSieges, collectMote, ambushFromMote, amuletPrice, tierOf, leveledEnemy, colorBombs, roamTemplate, deckRoom, copyCap, sellPrice, sellableCopies, townGold, addTownGold, sellCard, MAX_COPIES, deckProblems, addClue, clueTarget, dungeonArchetype, knownPrizes, dungeonTemplate, FIND_CLUES, relocateDungeon, enterCity, roamResult, buildStartDeck, START_POOLS };
+window.ff = { S, defOf, save, render, startDuel, enemyById, startTutorialDuel, riddleDefs, makeRiddle, amuletShopPool, artifactShopPool, cityPool, wardenOf, finishDuel, advanceSieges, maxSieges, collectMote, ambushFromMote, amuletPrice, tierOf, leveledEnemy, colorBombs, roamTemplate, deckRoom, copyCap, sellPrice, sellableCopies, townGold, addTownGold, sellCard, MAX_COPIES, deckProblems, addClue, clueTarget, dungeonArchetype, knownPrizes, dungeonTemplate, FIND_CLUES, relocateDungeon, enterCity, roamResult, buildStartDeck, START_POOLS, spawnBazaar, bazaarPool, goldPrice, openBazaar, tickBazaar };
 initPreview();
 load();
 render();

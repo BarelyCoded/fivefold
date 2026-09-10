@@ -226,6 +226,24 @@ function drawSpecial(ctx, cx, cy, sp) {
   const tag = { gemcutter: 'Gem', lostcity: 'El\u2019Arkan', diamondmine: 'Mine' }[sp.kind] || '';
   labels.push({ x: cx, y: cy - 15, text: tag, size: 7, color: '#fff', bg: 'rgba(30,20,40,.85)' });
 }
+// A little striped market tent with a red pennant \u2014 warm and obviously a shop, unlike the cool gem lairs.
+function drawBazaar(ctx, cx, cy) {
+  ctx.save(); ctx.translate(cx, cy);
+  ctx.fillStyle = 'rgba(0,0,0,.28)'; ctx.beginPath(); ctx.ellipse(0, 11, 13, 4, 0, 0, Math.PI * 2); ctx.fill();
+  // tent body
+  ctx.fillStyle = '#cf9a34'; ctx.strokeStyle = 'rgba(45,28,10,.85)'; ctx.lineWidth = 1.2;
+  ctx.beginPath(); ctx.moveTo(-12, 10); ctx.lineTo(0, -9); ctx.lineTo(12, 10); ctx.closePath(); ctx.fill(); ctx.stroke();
+  // stripes
+  ctx.fillStyle = 'rgba(240,220,150,.75)';
+  for (const sx of [-6, 2]) { ctx.beginPath(); ctx.moveTo(sx, 10); ctx.lineTo(sx + 3, 10); ctx.lineTo(0 + (sx + 1.5) * 0.05, -8); ctx.closePath(); ctx.fill(); }
+  // doorway
+  ctx.fillStyle = 'rgba(50,30,15,.85)'; ctx.beginPath(); ctx.moveTo(-3, 10); ctx.lineTo(-3, 3); ctx.lineTo(0, 0); ctx.lineTo(3, 3); ctx.lineTo(3, 10); ctx.closePath(); ctx.fill();
+  // pole + pennant
+  ctx.fillStyle = '#7a5326'; ctx.fillRect(-0.5, -18, 1.5, 10);
+  ctx.fillStyle = '#d34b4b'; ctx.beginPath(); ctx.moveTo(1, -18); ctx.lineTo(9, -15.5); ctx.lineTo(1, -13); ctx.closePath(); ctx.fill();
+  ctx.restore();
+  labels.push({ x: cx, y: cy - 22, text: 'Bazaar', size: 7, color: '#ffe6a8', bg: 'rgba(60,40,10,.9)' });
+}
 function drawLandmark(ctx, cx, cy, lm) {
   const rect = SPRITES[lm.kind];
   if (atlasReady() && rect) { if (lm.used) ctx.globalAlpha = 0.6; blitAt(ctx, rect, cx, cy + PX / 2 - 1, tileFit(rect, { volcano: 1.15, skull: 0.5, bones: 0.5, seaRock: 0.6, lavaVent: 0.6, pond: 0.6 }[lm.kind] || 0.95)); ctx.globalAlpha = 1; }
@@ -237,7 +255,25 @@ const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 function blockedForEnemy(world, x, y) {
   return !inBounds(world, x, y) || !!cityAt(world, x, y) || !!linkAt(world, x, y) || !!enemyAt(world, x, y)
     || !!castleAt(world, x, y) || !!dungeonAt(world, x, y)
-    || !!landmarkAt(world, x, y) || !!specialAt(world, x, y);
+    || !!landmarkAt(world, x, y) || !!specialAt(world, x, y) || !!bazaarAt(world, x, y);
+}
+// The Nomad's Bazaar: a rare travelling market that appears on open ground near you as you explore, then
+// packs up and moves on. At most one exists at a time. Stored on the world so it saves and renders like
+// any other feature.
+export function bazaarAt(world, x, y) { const b = world.bazaar; return b && b.x === x && b.y === y ? b : null; }
+export function spawnBazaar(world, player, rng) {
+  if (world.bazaar) return world.bazaar;
+  for (let i = 0; i < 140; i++) {
+    const r = 3 + Math.floor(rng() * 4);                       // 3..6 tiles from the player, on open land
+    const a = rng() * Math.PI * 2;
+    const x = Math.round(player.x + Math.cos(a) * r), y = Math.round(player.y + Math.sin(a) * r);
+    if (!inBounds(world, x, y) || tileAt(world, x, y) === 'U') continue;
+    if (moteBlocked(world, x, y)) continue;
+    if (Math.abs(x - player.x) + Math.abs(y - player.y) < 3) continue;
+    world.bazaar = { x, y, born: player.steps };
+    return world.bazaar;
+  }
+  return null;
 }
 // Roaming AI: enemies within sight give chase and step toward the player; otherwise they wander their
 // own terrain. An enemy that steps onto the player's tile catches them — returned so the caller can
@@ -818,6 +854,7 @@ export function drawMinimap(canvas, world, player, cam) {
   for (const e of world.enemies) if (e.bounty) dot(e.x, e.y, '#ffd54a', 2);
   for (const lm of world.landmarks || []) if (!lm.used) dot(lm.x, lm.y, '#ffe9a8', 1.5);
   for (const sp of world.specials || []) dot(sp.x, sp.y, { gemcutter: '#7fe0ff', lostcity: '#ffd76a', diamondmine: '#e6b3ff' }[sp.kind] || '#fff', 2);
+  if (world.bazaar) dot(world.bazaar.x, world.bazaar.y, '#ffcf5a', 2.5);
   for (const ca of allCastles(world)) dot(ca.x, ca.y, ca.fallen ? '#6a6a66' : '#ff3b3b', 2.5);
   dot(player.x, player.y, '#ffffff', 2.5);
   if (cam) { ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 1; ctx.strokeRect(cam.x * k + 0.5, cam.y * k + 0.5, VIEW.w * k - 1, VIEW.h * k - 1); }
@@ -850,6 +887,7 @@ export function drawWorld(canvas, world, player, opts = {}) {
   }
   for (const lm of world.landmarks || []) if (vis(lm.x, lm.y)) { const [cx, cy] = c(lm.x, lm.y); objs.push({ y: cy - 1, draw: () => drawLandmark(f, cx, cy, lm) }); }
   for (const sp of world.specials || []) if (vis(sp.x, sp.y)) { const [cx, cy] = c(sp.x, sp.y); objs.push({ y: cy - 1, draw: () => drawSpecial(f, cx, cy, sp) }); }
+  if (world.bazaar && vis(world.bazaar.x, world.bazaar.y)) { const [cx, cy] = c(world.bazaar.x, world.bazaar.y); objs.push({ y: cy, draw: () => drawBazaar(f, cx, cy) }); }
   for (const ct of world.cities) if (vis(ct.x, ct.y)) { const [cx, cy] = c(ct.x, ct.y); objs.push({ y: cy, draw: () => { drawCity(f, cx, cy, ct.color, ct.name); if (ct.captured) labels.push({ x: cx, y: cy - PX / 2 - 12, text: 'BESIEGED · fallen', size: 8, color: '#ff8a8a', bg: 'rgba(70,10,10,.9)' }); else if (ct.siege) labels.push({ x: cx, y: cy - PX / 2 - 12, text: '⚔ ' + ct.siege + '/3', size: 9, color: '#ffce8a', bg: 'rgba(70,40,10,.9)' }); } }); }
   for (const ca of allCastles(world)) if (vis(ca.x, ca.y)) { const [cx, cy] = c(ca.x, ca.y); objs.push({ y: cy, draw: () => drawFortress(f, cx, cy, ca.color, ca.name, ca.fallen) }); }
   const robes = { W: ['#d9d2b8', '#f0ead6'], U: ['#2f5f9c', '#5e8cc9'], B: ['#3a2d4a', '#5e4d75'], R: ['#a33a2a', '#d0604a'], G: ['#3f6f2f', '#6a9a4a'] };

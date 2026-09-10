@@ -95,6 +95,9 @@ tr.st-unsupported td:nth-child(7), tr.st-unsupported td:nth-child(3), tr.st-miss
 .mp-hosting { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 10px 12px; margin: 8px 0; border: 1px solid var(--accent); border-radius: 8px; background: color-mix(in srgb, var(--accent) 8%, var(--bg2)); }
 .mp-code.inline { display: inline; font-size: 18px; letter-spacing: 3px; padding: 1px 6px; margin: 0; vertical-align: baseline; }
 .mp-decktext { width: 100%; box-sizing: border-box; font-family: ui-monospace, monospace; font-size: 13px; resize: vertical; background: var(--bg2); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+.baz-gold { font-weight: 700; color: var(--gold); align-self: center; margin-right: auto; }
+.bazaar .cost { color: var(--gold); font-weight: 700; }
+.baz-g { font-size: .8em; opacity: .8; margin-left: 1px; }
 .mpdeck .cols.wide { gap: 16px; }
 .mp-quick { margin: 8px 0; border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; }
 .mp-quick summary { cursor: pointer; color: var(--ink2); }
