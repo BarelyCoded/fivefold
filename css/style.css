@@ -83,8 +83,14 @@ tr.st-unsupported td:nth-child(7), tr.st-unsupported td:nth-child(3), tr.st-miss
 .mplobby input, .mpdeck select, .mplobby select { padding: 6px 8px; }
 .mplobby input[type=text], .mplobby #mp-name, .mplobby #mp-addr { width: 100%; box-sizing: border-box; }
 .mp-code { font-family: ui-monospace, monospace; font-size: 40px; letter-spacing: 8px; text-align: center; color: var(--gold); background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin: 10px 0; }
-.mp-rooms { list-style: none; padding: 0; margin: 8px 0; }
-.mp-rooms li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 0; border-top: 1px solid var(--line); }
+.mp-rooms { list-style: none; padding: 0; margin: 10px 0; }
+.mp-rooms li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; margin: 6px 0; border: 1px solid var(--line); border-radius: 8px; background: var(--bg2); cursor: pointer; transition: border-color .12s, background .12s; }
+.mp-rooms li:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--bg2)); }
+.mp-game-name b { color: var(--ink); }
+.mp-join-hint { color: var(--ink3); font-size: 13px; }
+.mp-rooms li:hover .mp-join-hint { color: var(--accent); }
+.mp-empty { color: var(--ink2); padding: 14px 12px; border: 1px dashed var(--line); border-radius: 8px; text-align: center; }
+.mp-lobbybar { align-items: center; gap: 8px; margin: 6px 0 4px; }
 .mp-ok { color: var(--accent); }
 .mpdeck .cols.wide { gap: 16px; }
 .mp-quick { margin: 8px 0; border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; }

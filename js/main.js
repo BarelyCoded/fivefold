@@ -1486,10 +1486,12 @@ document.addEventListener('click', ev => {
 // Host-authoritative: the host runs the real Duel and streams redacted snapshots over the relay; the
 // guest renders a mirror and sends its inputs back. See js/net.js, js/mp.js, relay.js.
 function mpDefaultAddr() { try { return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`; } catch { return 'ws://localhost:8642/ws'; } }
+function mpName() { try { return localStorage.getItem('ff_mpname') || S.game?.name || 'Duelist'; } catch { return S.game?.name || 'Duelist'; } }
 function mpEnter() {
   mpTeardown();
-  S.mp = { addr: mpDefaultAddr(), name: S.game?.name || 'Duelist', status: 'idle', view: 'connect', rooms: [], role: null, room: null, deckColor: 'G', deckDiff: 'apprentice', deck: null, ready: false, oppReady: false, oppName: null, oppDeck: null, started: false, msg: '' };
+  S.mp = { addr: mpDefaultAddr(), name: mpName(), status: 'idle', view: 'lobby', rooms: [], role: null, room: null, deckColor: 'G', deckDiff: 'apprentice', deck: null, ready: false, oppReady: false, oppName: null, oppDeck: null, started: false, msg: '' };
   go('mplobby');
+  mpConnect();   // auto-connect straight to the lobby of open games
 }
 function mpTeardown() { const mp = S.mp; if (mp?.net) { try { mp.net.close(); } catch {} } S.mp = null; }
 function mpLeave() { const mp = S.mp; if (mp?.net) { try { mp.net.leave(); } catch {} } mpTeardown(); S.modal = null; go('title'); }
@@ -1499,7 +1501,7 @@ async function mpConnect() {
   mp.status = 'connecting'; mp.msg = ''; render();
   const net = new Net(mp.addr); mp.net = net;
   mpWire(net);
-  try { await net.connect(mp.name); mp.status = 'online'; mp.view = 'menu'; net.list(); }
+  try { await net.connect(mp.name); mp.status = 'online'; mp.view = 'lobby'; net.list(); }
   catch { mp.status = 'error'; mp.msg = `Could not reach the relay at ${mp.addr}. Start it with "npm run relay" and check the address.`; }
   render();
 }
@@ -1627,38 +1629,43 @@ function mpPeerLeft(info) {
   const mp = S.mp; if (!mp) return;
   mp.oppReady = false; mp.oppDeck = null; mp.started = false; mp.duel = null; mp.mirror = null; mp.root = null; mp.api = null; mp.winner = null;
   S.modal = null;
-  if (info.roomClosed) { mp.room = null; mp.role = null; mp.view = 'menu'; mp.msg = 'The host closed the room.'; mp.net?.list(); go('mplobby'); }
+  if (info.roomClosed) { mp.room = null; mp.role = null; mp.view = 'lobby'; mp.msg = 'The host closed the room.'; mp.net?.list(); go('mplobby'); }
   else { mp.oppName = null; mp.msg = 'Your opponent left. Waiting for a new challenger…'; mp.view = 'host-wait'; go('mplobby'); }
 }
 
 function mplobby() {
   const mp = S.mp; if (!mp) return title();
   let body = '';
-  if (mp.status !== 'online') {
+  if (mp.status === 'connecting') {
+    body = `<h2>Multiplayer</h2><p class="small">Connecting to the relay…</p>`;
+  } else if (mp.status !== 'online') {
+    // Only shown if the auto-connect failed: let the player fix the relay address and retry.
     body = `<h2>Multiplayer</h2>
-      <p class="small">Play a 1v1 duel against a friend over a relay. Run <code>npm run relay</code> (or <code>node relay.js</code>) somewhere you both can reach, then connect to it.</p>
+      <p class="small">Couldn't reach the relay. It hosts the lobby — run <code>npm run relay</code> somewhere you both can reach, or point at a hosted one.</p>
       <label>Your name <input id="mp-name" value="${esc(mp.name)}" maxlength="24"></label>
       <label>Relay address <input id="mp-addr" value="${esc(mp.addr)}" spellcheck="false"></label>
-      <div class="btnrow"><button class="btn primary" id="mp-connect" ${mp.status === 'connecting' ? 'disabled' : ''}>${mp.status === 'connecting' ? 'Connecting…' : 'Connect'}</button><button class="btn ghost" data-go="title">Back</button></div>`;
-  } else if (mp.view === 'host-wait') {
-    body = `<h2>Waiting for a challenger</h2>
-      <p>Share this room code with your opponent:</p>
-      <p class="mp-code">${esc(mp.room?.code || '????')}</p>
-      <p class="small">${esc(mp.msg || 'They connect to the same relay, choose Join, and enter this code.')}</p>
-      <div class="btnrow"><button class="btn ghost" id="mp-cancel">Cancel</button></div>`;
-  } else if (mp.view === 'join') {
-    body = `<h2>Join a duel</h2>
-      <div class="btnrow"><input id="mp-code" placeholder="Room code" maxlength="4" style="text-transform:uppercase"><button class="btn primary" id="mp-join">Join by code</button></div>
       ${mp.msg ? `<p class="warn small">${esc(mp.msg)}</p>` : ''}
-      <h3>Open rooms</h3>
-      ${mp.rooms.length ? `<ul class="mp-rooms">${mp.rooms.map(r => `<li><span><b>${esc(r.name)}</b> <span class="small">· ${esc(r.host)}</span></span><button class="btn small" data-mpjoin="${esc(r.code)}">Join ${esc(r.code)}</button></li>`).join('')}</ul>` : '<p class="small">No open rooms right now. Ask your friend to Host, or refresh.</p>'}
-      <div class="btnrow"><button class="btn ghost" id="mp-refresh">Refresh</button><button class="btn ghost" id="mp-back-menu">Back</button></div>`;
+      <div class="btnrow"><button class="btn primary" id="mp-connect">Connect</button><button class="btn ghost" data-go="title">Back</button></div>`;
+  } else if (mp.view === 'host-wait') {
+    body = `<h2>Waiting for a challenger…</h2>
+      <p class="small">Your game is listed in the lobby. Anyone connected can pick it — or share this code for a direct join:</p>
+      <p class="mp-code">${esc(mp.room?.code || '????')}</p>
+      ${mp.msg ? `<p class="small">${esc(mp.msg)}</p>` : ''}
+      <div class="btnrow"><button class="btn ghost" id="mp-cancel">Cancel</button></div>`;
   } else if (mp.view === 'starting') {
     body = `<h2>Starting the duel…</h2><p class="small">Both decks are ready. Shuffling up.</p>`;
   } else {
-    body = `<h2>Multiplayer</h2>
-      <p class="small">Connected as <b>${esc(mp.name)}</b>. Host a duel and share the code, or join one.</p>
-      <div class="btnrow"><button class="btn primary" id="mp-host">Host a duel</button><button class="btn" id="mp-join-view">Join a duel</button><button class="btn ghost" id="mp-quit">Disconnect</button></div>`;
+    // The lobby: a live list of open games waiting for a player, plus Host and join-by-code.
+    body = `<div class="rowhead"><h2>Open games</h2><span class="small">playing as <b>${esc(mp.name)}</b> · <button class="linkbtn" id="mp-rename">change</button></span></div>
+      <div class="btnrow mp-lobbybar"><button class="btn primary" id="mp-host">Host a game</button>
+        <input id="mp-code" placeholder="code" maxlength="4" style="text-transform:uppercase;width:5.5em">
+        <button class="btn" id="mp-join">Join by code</button>
+        <button class="btn ghost" id="mp-refresh" title="Refresh the list">↻</button></div>
+      ${mp.msg ? `<p class="warn small">${esc(mp.msg)}</p>` : ''}
+      ${mp.rooms.length
+        ? `<ul class="mp-rooms">${mp.rooms.map(r => `<li data-mpjoin="${esc(r.code)}"><span class="mp-game-name"><b>${esc(r.host)}</b><span class="small"> — ${esc(r.name)}</span></span><span class="mp-join-hint">Join →</span></li>`).join('')}</ul>`
+        : `<p class="small mp-empty">No open games yet. <b>Host a game</b> and it'll appear here for others to join — or wait for someone to host.</p>`}
+      <div class="btnrow"><button class="btn ghost" id="mp-quit">Leave</button></div>`;
   }
   app.innerHTML = `<section class="screen mplobby"><div class="box">${body}</div></section>`;
 }
@@ -1744,13 +1751,12 @@ document.addEventListener('click', ev => {
   const t = ev.target.closest('button'); if (!t || !t.id) return;
   switch (t.id) {
     case 'b-multiplayer': mpEnter(); break;
-    case 'mp-connect': if (mp) { mp.name = (document.getElementById('mp-name')?.value || 'Duelist').trim() || 'Duelist'; mp.addr = (document.getElementById('mp-addr')?.value || mp.addr).trim(); mpConnect(); } break;
-    case 'mp-host': mp?.net.host(`${mp.name}'s duel`); break;
-    case 'mp-join-view': if (mp) { mp.view = 'join'; mp.msg = ''; mp.net.list(); render(); } break;
-    case 'mp-back-menu': if (mp) { mp.view = 'menu'; render(); } break;
+    case 'mp-connect': if (mp) { mp.name = (document.getElementById('mp-name')?.value || 'Duelist').trim() || 'Duelist'; try { localStorage.setItem('ff_mpname', mp.name); } catch {} mp.addr = (document.getElementById('mp-addr')?.value || mp.addr).trim(); mpConnect(); } break;
+    case 'mp-host': mp?.net.host(`${mp.name}'s game`); break;
+    case 'mp-rename': if (mp) { const n = (prompt('Your name in the lobby:', mp.name) || '').trim().slice(0, 24); if (n) { mp.name = n; try { localStorage.setItem('ff_mpname', n); } catch {} render(); } } break;
     case 'mp-refresh': mp?.net.list(); break;
     case 'mp-join': if (mp?.net) { const code = (document.getElementById('mp-code')?.value || '').trim(); if (code) { mp.msg = ''; mp.net.join(code); } } break;
-    case 'mp-cancel': if (mp) { mp.net.leave(); mp.role = null; mp.room = null; mp.view = 'menu'; mp.msg = ''; render(); } break;
+    case 'mp-cancel': if (mp) { mp.net.leave(); mp.role = null; mp.room = null; mp.view = 'lobby'; mp.msg = ''; mp.net.list(); render(); } break;
     case 'mp-reroll': mpReroll(); break;
     case 'mp-clear': mpEdit(d => { for (const k of Object.keys(d)) delete d[k]; }); break;
     case 'mp-ready': mpReady(); break;
