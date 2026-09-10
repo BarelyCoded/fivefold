@@ -330,16 +330,16 @@ const STEPS_PER_DAY = 10;
 // How many cities the Wardens may besiege at once. Just one for the long opening so the early overland
 // isn't swarmed; the war then widens as days pass, but never beyond the Wardens still standing.
 function maxSieges(day) {
-  if (day < 30) return 1;
-  if (day < 60) return 2;
-  if (day < 90) return 3;
+  if (day < 50) return 1;
+  if (day < 75) return 2;
+  if (day < 100) return 3;
   return 4;
 }
 // The surviving Wardens march on your cities. A besieged city, unrelieved, is captured; lose four
 // and the realm collapses. Visiting a city drives the besiegers off and reclaims it.
 function advanceSieges(g) {
   const w = g.world;
-  if (g.player.day < 8) return;                          // a grace period: the Wardens don't march at once
+  if (g.player.day < 30) return;                         // a grace period: the Wardens don't march for the first month
   const aliveWardens = COLORS.filter(col => !(w.castles || []).find(c => c.color === col)?.fallen).length;
   if (!aliveWardens || Math.random() > 0.16) return;   // and then only make a move every several days
   const besieged = w.cities.filter(c => c.siege > 0 && !c.captured);
