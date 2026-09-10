@@ -92,6 +92,8 @@ tr.st-unsupported td:nth-child(7), tr.st-unsupported td:nth-child(3), tr.st-miss
 .mullhand { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 .mullcard { padding: 3px 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg2); font-size: 13px; }
 .mullcard .dot { width: 9px; height: 9px; vertical-align: 0; }
+.hint.waiting { color: var(--gold); font-style: italic; animation: waitpulse 1.6s ease-in-out infinite; }
+@keyframes waitpulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
 .basic { display: inline-flex; align-items: center; gap: 4px; }
 .plain { list-style: none; padding: 0; }
 

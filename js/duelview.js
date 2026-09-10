@@ -354,8 +354,11 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     // On the guest's mirror, mpWaitingOn names who the host is waiting on; fall back to priority elsewhere.
     if (!pend) return `<div class="hint">${esc(duel.players[duel.mpWaitingOn ?? duel.priority]?.name || '')} is thinking…</div>`;
     if (pend.type === 'priority') {
+      // In multiplayer the host holds the real pending even during the opponent's priority — show a
+      // waiting hint (not an inert pass button) whenever it is not this seat's turn to act.
+      if (duel.priority !== localIdx) return `<div class="hint waiting">${esc(duel.players[duel.priority]?.name || '')} is thinking…</div>`;
       const stackTop = duel.stack.length;
-      const mine = duel.active === 0;
+      const mine = duel.active === localIdx;
       const canAtk = mine && duel.step === 'main1' && me.battlefield.some(c => duel.canAttack(c));
       const passLabel = stackTop ? 'Pass (let it resolve)' : mine && duel.step === 'main1' ? (canAtk ? 'Go to combat' : 'Next phase') : mine && duel.step === 'main2' ? 'End turn' : 'Pass';
       const savers = combatSavers();
@@ -365,6 +368,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
         <label class="autopass" title="When you have no land, spell, or ability you could use, pass for you automatically"><input type="checkbox" id="cb-autopass" ${getAutoPass() ? 'checked' : ''}> Auto-pass empty steps</label>`;
     }
     const req = pend.req;
+    if (req.player !== localIdx) return `<div class="hint waiting">${esc(duel.players[req.player]?.name || '')} is thinking…</div>`;
     switch (req.kind) {
       case 'attackers': return `<div class="hint">Declare attackers: click your creatures.${req.must.length ? ' Some must attack.' : ''}</div><button id="b-attack" class="btn primary">Confirm ${ui.attackers.size ? `(${ui.attackers.size})` : 'no attack'}</button><button id="b-attack-all" class="btn" title="Attack with every creature that can attack">Attack with all (${req.options.length})</button>`;
       case 'blockers': return `<div class="hint">Declare blockers: click one of your creatures, then the attacker it blocks. Click a blocker again to clear it.</div><button id="b-block" class="btn primary">Confirm blocks</button>`;
