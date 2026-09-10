@@ -351,7 +351,8 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
       if (w.stage === 'targets') { const spec = w.specs[w.targets.length]; return `<div class="hint">${esc(spec.text)} for <b>${esc(w.card.def.name)}</b>. Click it on the table.</div>${spec.options.some(o => o.type === 'card') ? spec.options.map(o => `<button class="btn small" data-wizref="${o.type}:${o.id}">${esc(o.label)}</button>`).join('') : ''}<button class="btn ghost" data-wiz="cancel">Cancel</button>`; }
     }
     const pend = duel.pending;
-    if (!pend) return `<div class="hint">${esc(duel.players[duel.priority].name)} is thinking…</div>`;
+    // On the guest's mirror, mpWaitingOn names who the host is waiting on; fall back to priority elsewhere.
+    if (!pend) return `<div class="hint">${esc(duel.players[duel.mpWaitingOn ?? duel.priority]?.name || '')} is thinking…</div>`;
     if (pend.type === 'priority') {
       const stackTop = duel.stack.length;
       const mine = duel.active === 0;

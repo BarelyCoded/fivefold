@@ -5,6 +5,8 @@ import { COLORS, COLOR_NAME, manaHtml, statusLabel } from './cards.js';
 import { generateWorld, drawWorld, drawMinimap, tileAt, inBounds, cityAt, linkAt, enemyAt, stepEnemies, BIOME, TILE, VIEW, placeDungeons, dungeonAt, relocateDungeon, placeLandmarks, landmarkAt, placeSpecials, specialAt, placeMotes, moteAt, spawnMote, castleAt, WARDEN_HOLD, roadAt, ensureRoads } from './world.js';
 import { Duel } from './engine.js';
 import { mountDuel, cardHtml } from './duelview.js';
+import { Net } from './net.js';
+import { makeMirror, hydrate, guestInput, applyRemoteInput } from './mp.js';
 import { aiHooks } from './ai.js';
 import { initPreview, hide as hidePreview } from './preview.js';
 import { generateDungeon, drawDungeon, cellAtPixel, cellOf, linked, playerCell, remainingMonsters, makeRiddle, CANVAS as DCANVAS } from './dungeon.js';
@@ -932,9 +934,9 @@ function renderTop() {
 }
 
 function render() {
-  app.classList.toggle('full', S.screen === 'duel');
+  app.classList.toggle('full', S.screen === 'duel' || S.screen === 'mpduel');
   renderTop();
-  const views = { title, collection, deck, map, city, duel, result, end, dungeon, tutorial, tiers };
+  const views = { title, collection, deck, map, city, duel, result, end, dungeon, tutorial, tiers, mplobby, mpdeck, mpduel };
   music({ title: 'title', tutorial: 'title', collection: 'map', deck: 'map', map: 'map', result: 'map', end: 'title', city: 'city', duel: 'duel', dungeon: 'dungeon' }[S.screen] || 'title');
   // The map keeps its canvas between steps (re-creating a full-size canvas every keypress is what made walking feel slow).
   const keepMap = S.screen === 'map' && !!app.querySelector('.mapscreen #map');
@@ -953,7 +955,7 @@ function title() {
     <p class="lede small">Walk a world where geography is color. Duel the mages who roam it with the cards you actually own. Wager cards you cannot buy back. Find which Warden the Usurper is wearing before the Sealing completes.</p>
     <div class="box learn">
       <div><h2>New to Magic?</h2><p>Eight short lessons cover everything a duel needs: lands, mana, creatures, combat and spells. Then fight a practice duel with hints that read the table and tell you what to do next.</p></div>
-      <div class="btnrow"><button class="btn primary" data-go="tutorial">Learn to play</button><button class="btn" id="b-practice">Practice duel</button></div>
+      <div class="btnrow"><button class="btn primary" data-go="tutorial">Learn to play</button><button class="btn" id="b-practice">Practice duel</button><button class="btn" id="b-multiplayer">Multiplayer (1v1)</button></div>
     </div>
     <div class="cols">
       <form id="newgame" class="box">
@@ -1476,6 +1478,215 @@ document.addEventListener('click', ev => {
   if (el.id === 'tier-copy') { const json = JSON.stringify(S.tierOverrides, null, 2); navigator.clipboard?.writeText(json).then(() => toast('Tier changes copied to clipboard.')).catch(() => toast('Could not copy.')); return; }
   if (el.id === 'tier-clear') { if (confirm('Reset all your tier changes back to the shipped ranking?')) { S.tierOverrides = {}; S.tierPick = null; save(); tiers(); } return; }
 });
+// ==================== Multiplayer (1v1) ====================
+// Host-authoritative: the host runs the real Duel and streams redacted snapshots over the relay; the
+// guest renders a mirror and sends its inputs back. See js/net.js, js/mp.js, relay.js.
+function mpDefaultAddr() { try { return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`; } catch { return 'ws://localhost:8642/ws'; } }
+function mpEnter() {
+  mpTeardown();
+  S.mp = { addr: mpDefaultAddr(), name: S.game?.name || 'Duelist', status: 'idle', view: 'connect', rooms: [], role: null, room: null, deckColor: 'G', deckDiff: 'apprentice', deck: null, ready: false, oppReady: false, oppName: null, oppDeck: null, started: false, msg: '' };
+  go('mplobby');
+}
+function mpTeardown() { const mp = S.mp; if (mp?.net) { try { mp.net.close(); } catch {} } S.mp = null; }
+function mpLeave() { const mp = S.mp; if (mp?.net) { try { mp.net.leave(); } catch {} } mpTeardown(); S.modal = null; go('title'); }
+
+async function mpConnect() {
+  const mp = S.mp; if (!mp) return;
+  mp.status = 'connecting'; mp.msg = ''; render();
+  const net = new Net(mp.addr); mp.net = net;
+  mpWire(net);
+  try { await net.connect(mp.name); mp.status = 'online'; mp.view = 'menu'; net.list(); }
+  catch { mp.status = 'error'; mp.msg = `Could not reach the relay at ${mp.addr}. Start it with "npm run relay" and check the address.`; }
+  render();
+}
+function mpWire(net) {
+  net.on('lobby', rooms => { if (S.mp) { S.mp.rooms = rooms; if (S.screen === 'mplobby') render(); } });
+  net.on('hosted', room => { if (!S.mp) return; S.mp.role = 'host'; S.mp.room = room; S.mp.view = 'host-wait'; render(); });
+  net.on('peerJoined', ({ name }) => { if (!S.mp) return; S.mp.oppName = name; mpToDeck(); });      // host: a guest arrived
+  net.on('joined', room => { if (!S.mp) return; S.mp.role = 'guest'; S.mp.room = room; S.mp.oppName = room.host; mpToDeck(); });
+  net.on('joinError', reason => { if (!S.mp) return; S.mp.msg = reason === 'no-such-room' ? 'No room with that code.' : reason === 'room-full' ? 'That room is already full.' : String(reason); render(); });
+  net.on('peerLeft', info => mpPeerLeft(info));
+  net.on('peer', data => mpOnPeer(data));
+  net.on('close', () => { if (S.mp && S.mp.status === 'online') { S.mp.status = 'closed'; S.mp.msg = 'Lost the connection to the relay.'; render(); } });
+}
+function mpToDeck() {
+  const mp = S.mp; mp.view = 'deck'; mp.ready = false; mp.oppReady = false; mp.started = false;
+  if (!mp.deck) mp.deck = buildStartDeck(mp.deckColor, DIFF[mp.deckDiff].colors, Math.random);
+  go('mpdeck');
+}
+function mpSetDeck(color, diff) { const mp = S.mp; mp.deckColor = color; mp.deckDiff = diff; mp.deck = buildStartDeck(color, DIFF[diff].colors, Math.random); mp.ready = false; mp.net.relay({ k: 'ready', ready: false }); render(); }
+function mpReroll() { const mp = S.mp; mp.deck = buildStartDeck(mp.deckColor, DIFF[mp.deckDiff].colors, Math.random); mp.ready = false; mp.net.relay({ k: 'ready', ready: false }); render(); }
+function mpReady() { const mp = S.mp; mp.ready = true; mp.net.relay({ k: 'deck', deck: mp.deck, name: mp.name, ready: true }); render(); mpTryStart(); }
+function mpOnPeer(data) {
+  const mp = S.mp; if (!mp || !data) return;
+  switch (data.k) {
+    case 'deck': mp.oppDeck = data.deck; mp.oppName = data.name || mp.oppName; mp.oppReady = !!data.ready; if (S.screen === 'mpdeck') render(); mpTryStart(); break;
+    case 'ready': mp.oppReady = !!data.ready; if (S.screen === 'mpdeck') render(); break;
+    case 'start': mpGuestStart(); break;         // guest: host says both are ready — build the mirror
+    case 'ready2': if (mp.role === 'host') mpHostStart(); break;   // host: guest's mirror is mounted — start
+    case 'snap': mpGuestSnap(data.snap); break;
+    case 'input': mpHostInput(data.action); break;
+    case 'rematch': mpToDeck(); break;
+  }
+}
+function mpTryStart() {
+  const mp = S.mp; if (mp.role !== 'host' || mp.started) return;
+  if (!mp.ready || !mp.oppReady || !mp.deck || !mp.oppDeck) return;
+  mp.started = true; mp.view = 'starting'; mp.net.relay({ k: 'start' }); render();   // wait for the guest's mirror (ready2)
+}
+function mpGuestStart() {
+  const mp = S.mp; mp.localIdx = 1; mp.winner = null; mp.duel = null; mp.api = null; mp.root = null;
+  mp.mirror = makeMirror({ me: mp.name, foe: mp.oppName || 'Opponent' });
+  go('mpduel');
+  mp.net.relay({ k: 'ready2' });
+}
+function mpHostStart() {
+  const mp = S.mp; mp.localIdx = 0; mp.winner = null; mp.root = null; mp.api = null; mp.mirror = null;
+  const duel = new Duel({
+    player: { name: mp.name, deck: expandDeck(mp.deck), life: 20, ai: false },
+    ai: { name: mp.oppName || 'Opponent', deck: expandDeck(mp.oppDeck), life: 20, ai: false },
+    hooks: null,
+  });
+  mp.duel = duel;
+  // Broadcast a redacted snapshot to the guest on each change, coalesced to at most one per frame.
+  let queued = false;
+  duel.onChange(() => { if (queued) return; queued = true; queueMicrotask(() => { queued = false; if (S.mp?.net && S.mp.duel === duel) S.mp.net.relay({ k: 'snap', snap: duel.snapshot(1) }); }); });
+  go('mpduel');
+}
+function mpGuestSnap(snap) {
+  const mp = S.mp; if (!mp) return;
+  if (!mp.mirror) { mp.pendingSnap = snap; return; }
+  hydrate(mp.mirror, snap, defOf, 1);
+  if (snap.winner !== null && snap.winner !== undefined) mp.winner = snap.winner;
+}
+function mpHostInput(action) {
+  const mp = S.mp; if (!mp || !mp.duel) return;
+  if (action.type === 'concede') { mp.duel.end(0, `${mp.oppName || 'Your opponent'} concedes.`); }
+  else applyRemoteInput(mp.duel, action, 1);
+  mp.api?.run();   // resume ticking after the guest's action
+}
+function mpOnEnd(winner) {
+  const mp = S.mp; if (!mp) return;
+  mp.winner = winner;
+  const iWon = winner === mp.localIdx;
+  S.modal = {
+    title: iWon ? 'Victory' : 'Defeat',
+    body: `<p>${iWon ? `You defeated ${esc(mp.oppName || 'your opponent')}.` : `${esc(mp.oppName || 'Your opponent')} defeated you.`}</p>`,
+    buttons: [{ label: 'Rematch', primary: true, action: () => { S.modal = null; mp.net.relay({ k: 'rematch' }); mpToDeck(); } }, { label: 'Leave', action: () => { S.modal = null; mpLeave(); } }],
+  };
+  render();
+}
+function mpPeerLeft(info) {
+  const mp = S.mp; if (!mp) return;
+  mp.oppReady = false; mp.oppDeck = null; mp.started = false; mp.duel = null; mp.mirror = null; mp.root = null; mp.api = null; mp.winner = null;
+  S.modal = null;
+  if (info.roomClosed) { mp.room = null; mp.role = null; mp.view = 'menu'; mp.msg = 'The host closed the room.'; mp.net?.list(); go('mplobby'); }
+  else { mp.oppName = null; mp.msg = 'Your opponent left. Waiting for a new challenger…'; mp.view = 'host-wait'; go('mplobby'); }
+}
+
+function mplobby() {
+  const mp = S.mp; if (!mp) return title();
+  let body = '';
+  if (mp.status !== 'online') {
+    body = `<h2>Multiplayer</h2>
+      <p class="small">Play a 1v1 duel against a friend over a relay. Run <code>npm run relay</code> (or <code>node relay.js</code>) somewhere you both can reach, then connect to it.</p>
+      <label>Your name <input id="mp-name" value="${esc(mp.name)}" maxlength="24"></label>
+      <label>Relay address <input id="mp-addr" value="${esc(mp.addr)}" spellcheck="false"></label>
+      <div class="btnrow"><button class="btn primary" id="mp-connect" ${mp.status === 'connecting' ? 'disabled' : ''}>${mp.status === 'connecting' ? 'Connecting…' : 'Connect'}</button><button class="btn ghost" data-go="title">Back</button></div>`;
+  } else if (mp.view === 'host-wait') {
+    body = `<h2>Waiting for a challenger</h2>
+      <p>Share this room code with your opponent:</p>
+      <p class="mp-code">${esc(mp.room?.code || '????')}</p>
+      <p class="small">${esc(mp.msg || 'They connect to the same relay, choose Join, and enter this code.')}</p>
+      <div class="btnrow"><button class="btn ghost" id="mp-cancel">Cancel</button></div>`;
+  } else if (mp.view === 'join') {
+    body = `<h2>Join a duel</h2>
+      <div class="btnrow"><input id="mp-code" placeholder="Room code" maxlength="4" style="text-transform:uppercase"><button class="btn primary" id="mp-join">Join by code</button></div>
+      ${mp.msg ? `<p class="warn small">${esc(mp.msg)}</p>` : ''}
+      <h3>Open rooms</h3>
+      ${mp.rooms.length ? `<ul class="mp-rooms">${mp.rooms.map(r => `<li><span><b>${esc(r.name)}</b> <span class="small">· ${esc(r.host)}</span></span><button class="btn small" data-mpjoin="${esc(r.code)}">Join ${esc(r.code)}</button></li>`).join('')}</ul>` : '<p class="small">No open rooms right now. Ask your friend to Host, or refresh.</p>'}
+      <div class="btnrow"><button class="btn ghost" id="mp-refresh">Refresh</button><button class="btn ghost" id="mp-back-menu">Back</button></div>`;
+  } else if (mp.view === 'starting') {
+    body = `<h2>Starting the duel…</h2><p class="small">Both decks are ready. Shuffling up.</p>`;
+  } else {
+    body = `<h2>Multiplayer</h2>
+      <p class="small">Connected as <b>${esc(mp.name)}</b>. Host a duel and share the code, or join one.</p>
+      <div class="btnrow"><button class="btn primary" id="mp-host">Host a duel</button><button class="btn" id="mp-join-view">Join a duel</button><button class="btn ghost" id="mp-quit">Disconnect</button></div>`;
+  }
+  app.innerHTML = `<section class="screen mplobby"><div class="box">${body}</div></section>`;
+}
+function mpDeckSummary(deck) {
+  const rows = Object.entries(deck).map(([n, c]) => ({ n, c, d: defOf(n) })).filter(r => r.d).sort((a, b) => (a.d.kind === 'land') - (b.d.kind === 'land') || (a.d.cmc || 0) - (b.d.cmc || 0) || a.n.localeCompare(b.n));
+  const lands = rows.filter(r => r.d.kind === 'land').reduce((a, r) => a + r.c, 0);
+  const size = rows.reduce((a, r) => a + r.c, 0);
+  return { rows, lands, size };
+}
+function mpdeck() {
+  const mp = S.mp; if (!mp) return title();
+  const { rows, lands, size } = mpDeckSummary(mp.deck);
+  const oppState = mp.oppReady ? `<b class="mp-ok">${esc(mp.oppName || 'Opponent')} is ready.</b>` : `Waiting for ${esc(mp.oppName || 'your opponent')} to pick a deck…`;
+  app.innerHTML = `<section class="screen mpdeck"><div class="cols wide">
+    <div class="box">
+      <h2>Build your duel deck</h2>
+      <p class="small">Pick a colour and how many colours (Apprentice 1 · Magician 2 · Sorcerer 3). Reroll for a fresh 40-card list — full card-by-card editing is coming next.</p>
+      <fieldset><legend>Main colour</legend>${COLORS.map(c => `<label class="radio"><input type="radio" name="mpcolor" value="${c}" ${c === mp.deckColor ? 'checked' : ''}> <i class="dot c-${c}"></i>${COLOR_NAME[c]}</label>`).join('')}</fieldset>
+      <label>Colours <select id="mp-diff">${Object.entries(DIFF).map(([k, d]) => `<option value="${k}" ${k === mp.deckDiff ? 'selected' : ''}>${['', 'One colour', 'Two colours', 'Three colours'][d.colors]}</option>`).join('')}</select></label>
+      <div class="btnrow"><button class="btn" id="mp-reroll">Reroll deck</button>
+        <button class="btn primary" id="mp-ready" ${mp.ready ? 'disabled' : ''}>${mp.ready ? 'Ready ✓' : "I'm ready"}</button></div>
+      <p class="small">${mp.ready ? 'Waiting for your opponent…' : ''} ${oppState}</p>
+      <div class="btnrow"><button class="btn ghost" id="mp-quit">Leave</button></div>
+    </div>
+    <div class="box">
+      <h3>Deck · ${size} cards, ${lands} lands</h3>
+      <table class="coll"><tr><th>Card</th><th>Cost</th><th>Qty</th></tr>
+      ${rows.map(r => `<tr><td data-preview="${esc(r.n)}">${esc(r.n)}</td><td>${r.d.kind !== 'land' ? manaHtml(r.d.cost) : ''}</td><td>${r.c}</td></tr>`).join('')}</table>
+    </div>
+  </div></section>`;
+}
+function mpduel() {
+  const mp = S.mp; if (!mp) return title();
+  if (!mp.root) {
+    mp.root = document.createElement('div'); mp.root.id = 'duelroot';
+    const ph = Math.max(80, Math.min(150, Math.round((window.innerHeight - 700) * 0.2 + 110)));
+    const portrait = frames => { frames = frames.filter(Boolean); return { frames, scale: Math.min(2.6, ph / Math.max(...frames.map(f => f[3]))) }; };
+    const heroP = portrait([SPRITES.hero, SPRITES['hero-alt']]);
+    const portraits = { me: heroP, foe: heroP };
+    if (mp.role === 'host') {
+      mp.api = mountDuel(mp.root, mp.duel, { onEnd: mpOnEnd, portraits, localIdx: 0, allowMulligan: false, autoStart: true });
+    } else {
+      const input = guestInput(a => mp.net.relay({ k: 'input', action: a }));
+      mp.api = mountDuel(mp.root, mp.mirror, { onEnd: mpOnEnd, portraits, localIdx: 1, input, allowMulligan: false, autoStart: false });
+      if (mp.pendingSnap) { hydrate(mp.mirror, mp.pendingSnap, defOf, 1); mp.pendingSnap = null; }
+    }
+  }
+  app.innerHTML = '';
+  const sec = document.createElement('section'); sec.className = 'screen duelscreen'; sec.appendChild(mp.root); app.appendChild(sec);
+}
+// Dedicated MP event handling, isolated from the main click delegation.
+document.addEventListener('click', ev => {
+  const mp = S.mp;
+  const jb = ev.target.closest('[data-mpjoin]'); if (jb && mp?.net) { mp.msg = ''; mp.net.join(jb.dataset.mpjoin); return; }
+  const t = ev.target.closest('button'); if (!t || !t.id) return;
+  switch (t.id) {
+    case 'b-multiplayer': mpEnter(); break;
+    case 'mp-connect': if (mp) { mp.name = (document.getElementById('mp-name')?.value || 'Duelist').trim() || 'Duelist'; mp.addr = (document.getElementById('mp-addr')?.value || mp.addr).trim(); mpConnect(); } break;
+    case 'mp-host': mp?.net.host(`${mp.name}'s duel`); break;
+    case 'mp-join-view': if (mp) { mp.view = 'join'; mp.msg = ''; mp.net.list(); render(); } break;
+    case 'mp-back-menu': if (mp) { mp.view = 'menu'; render(); } break;
+    case 'mp-refresh': mp?.net.list(); break;
+    case 'mp-join': if (mp?.net) { const code = (document.getElementById('mp-code')?.value || '').trim(); if (code) { mp.msg = ''; mp.net.join(code); } } break;
+    case 'mp-cancel': if (mp) { mp.net.leave(); mp.role = null; mp.room = null; mp.view = 'menu'; mp.msg = ''; render(); } break;
+    case 'mp-reroll': mpReroll(); break;
+    case 'mp-ready': mpReady(); break;
+    case 'mp-quit': mpLeave(); break;
+  }
+});
+document.addEventListener('change', ev => {
+  const mp = S.mp; if (!mp) return;
+  if (ev.target.name === 'mpcolor') mpSetDeck(ev.target.value, mp.deckDiff);
+  else if (ev.target.id === 'mp-diff') mpSetDeck(mp.deckColor, ev.target.value);
+});
+
 // Web Audio starts only after a gesture; the first click or key unlocks it and starts the score for the current screen.
 document.addEventListener('pointerdown', () => unlock(), { capture: true });
 document.addEventListener('keydown', () => unlock(), { capture: true });
