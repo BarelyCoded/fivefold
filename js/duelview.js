@@ -13,7 +13,8 @@ const AUTOPASS_KEY = 'ff.autopass';
 const getAutoPass = () => { try { return localStorage.getItem(AUTOPASS_KEY) === '1'; } catch { return false; } };
 const setAutoPass = v => { try { localStorage.setItem(AUTOPASS_KEY, v ? '1' : '0'); } catch {} };
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const KW_ABBR = k => (typeof k === 'string' ? k : k.k === 'Protection' ? 'Pro ' + k.from : k.k === 'Landwalk' ? k.land + 'walk' : k.k).split(' ').map(w => w[0]).join('');
+const kwFull = k => typeof k === 'string' ? k : k.k === 'Protection' ? 'Protection from ' + k.from : k.k === 'Landwalk' ? k.land + 'walk' : k.k;
+const KW_ABBR = k => kwFull(k).split(' ').map(w => w[0]).join('');
 const PHASES = [['untap', 'Untap', '↻'], ['upkeep', 'Upkeep', '☼'], ['draw', 'Draw', '▤'], ['main1', 'Main', '✦'], ['combat', 'Combat', '⚔'], ['main2', 'Main 2', '✦'], ['end', 'End', '◗']];
 const COMBAT_STEPS = new Set(['beginCombat', 'attackers', 'blockers', 'firstStrike', 'damage', 'endCombat']);
 
@@ -30,7 +31,7 @@ export function cardHtml(def, opts = {}) {
     ${!art ? `<div class="card-body"><span class="card-type">${esc(def.typeLine)}</span></div>` : ''}
     ${hasOwnArt(def) ? '<span class="card-own" title="Your art">★</span>' : ''}
     ${pt ? `<div class="card-pt${opts.ptClass ? ' ' + opts.ptClass : ''}">${pt}</div>` : ''}
-    ${opts.badge ? `<div class="card-badge">${esc(opts.badge)}</div>` : ''}
+    ${opts.badge ? `<div class="card-badge"${opts.badgeTitle ? ` title="${esc(opts.badgeTitle)}"` : ''}>${esc(opts.badge)}</div>` : ''}
     ${opts.extra || ''}
   </div>`;
 }
@@ -196,6 +197,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     if (isCreature(c)) { pt = `${power(c)}/${toughness(c) - c.damage}`; if (c.damage || power(c) !== c.def.power || toughness(c) !== c.def.toughness) ptClass = 'mod'; }
     const kws = [...c.cur.kw].filter(k => typeof k === 'string' ? !['Changeling'].includes(k) : true);
     const badge = kws.length ? kws.map(KW_ABBR).join(' ') : '';
+    const badgeTitle = kws.length ? kws.map(kwFull).join(', ') : '';   // hover shows the keywords spelled out
     let extra = '';
     const counters = Object.entries(c.counters).filter(([k, v]) => v > 0 && k !== 'age').map(([k, v]) => `${v}×${k}`);
     if (counters.length) extra += `<div class="card-counters">${esc(counters.join(' '))}</div>`;
@@ -206,7 +208,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     if (c.attachedTo) extra += `<div class="card-attachedto">on ${esc(c.attachedTo.def.name)}</div>`;
     const blockedBy = ui.blocks[c.id] || duel.blocks[c.id];
     if (blockedBy && blockedBy.length) extra += `<div class="card-blocked">blocked</div>`;
-    return cardHtml(c.def, { id: c.id, zone: 'bf', classes, pt, ptClass, badge, extra });
+    return cardHtml(c.def, { id: c.id, zone: 'bf', classes, pt, ptClass, badge, badgeTitle, extra });
   }
   function handCard(c) {
     const classes = [];
