@@ -244,6 +244,7 @@ async function newGame({ name, color, difficulty }) {
 
 function move(dx, dy) {
   const g = S.game; if (!g || g.status !== 'playing' || S.modal) return;
+  const ox = g.player.x, oy = g.player.y;   // where the walk animation slides from
   let probs = deckProblems(g.deck);
   if (probs.length && probs.every(p => p.startsWith('Deck has'))) { fillBasics(g.deck); save(); probs = deckProblems(g.deck); toast('Your deck was short of 40 cards, so basic lands were added. You can change them in the deck builder.'); }
   if (probs.length) { S.modal = { title: 'Your deck is not ready', body: `<ul>${probs.map(p => `<li>${esc(p)}</li>`).join('')}</ul>`, buttons: [{ label: 'Open deck builder', action: () => { S.modal = null; go('deck'); } }, { label: 'Close', action: () => { S.modal = null; render(); } }] }; render(); return; }
@@ -269,6 +270,7 @@ function move(dx, dy) {
     collectMote(mote);
   }
   const onRoad = roadAt(g.world, nx, ny);                       // roads let you outpace pursuit, as in the old overland
+  const eprev = g.world.enemies.map(e => ({ e, x: e.x, y: e.y }));      // snapshot so movers can slide, not teleport
   const caught = stepEnemies(g.world, Math.random, g.player, onRoad);   // roaming foes give chase and may catch you
   if (Math.random() < 0.1) spawnMote(g.world, Math.random, g.player);   // the world keeps seeding fresh motes
   save();
@@ -279,7 +281,11 @@ function move(dx, dy) {
   if (lm && !lm.used) { landmarkRiddle(lm); return; }
   const sp = specialAt(g.world, nx, ny);
   if (sp) { specialPrompt(sp); return; }
-  render();
+  // A plain step onto open ground: slide there instead of snapping, and let any roaming mage that moved
+  // slide with us. Event tiles (foes, cities, dungeons, landmarks) returned above and just cut to the event.
+  const enemyFrom = new Map();
+  for (const p of eprev) if (p.e.x !== p.x || p.e.y !== p.y) enemyFrom.set(p.e, { x: p.x, y: p.y });
+  startWalk(ox, oy, enemyFrom);
 }
 // ---- landmark riddles ---------------------------------------------------------------
 const LANDMARK_TEXT = { well: 'An old well. A voice echoes up from the water', standingStone: 'A standing stone carved with runes', signpost: 'A signpost with a riddle scratched into it', tower: 'A watchtower. The lookout wants a password', pond: 'An oasis. Something under the water speaks', volcano: 'A volcano. A voice rumbles from the crater', cave: 'A cave mouth. Something inside asks a question', lavaVent: 'A lava vent hisses a question', skull: 'A skull on a pike. Its jaw moves', bones: 'Bones arranged into words', wreck: 'A wreck. A drowned sailor asks', seaRock: 'A rock in the surf. A siren sings a question' };
@@ -1242,6 +1248,72 @@ function compassTo(g, spot) {
   const dist = Math.max(Math.abs(dx), Math.abs(dy));
   return `${ns}${ew} · ${dist} tile${dist === 1 ? '' : 's'}`;
 }
+// ---- overworld motion (smooth glide, following camera, hold-to-walk, limited sight) -------------------
+const SMOOTH = true;        // master switch: set false to fall back to instant tile-jumps
+const WALK_MS = 150;        // time to glide one tile — brisk, like the original overland
+const SIGHT = 6.5;          // tiles you can see roaming mages within; the land itself is always visible
+const DIRS = { arrowup: [0, -1], w: [0, -1], arrowdown: [0, 1], s: [0, 1], arrowleft: [-1, 0], a: [-1, 0], arrowright: [1, 0], d: [1, 0] };
+let heldDirs = [];          // direction keys currently held, newest last (for hold-to-walk)
+let mapRAF = null;          // the single overworld animation-loop handle
+const reduceMotion = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; } };
+const activeDir = () => { for (let i = heldDirs.length - 1; i >= 0; i--) { const d = DIRS[heldDirs[i]]; if (d) return d; } return null; };
+const easeInOut = e => (e < 0.5 ? 2 * e * e : 1 - Math.pow(-2 * e + 2, 2) / 2);
+function neighborHighlight(g) { return [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dy]) => [g.player.x + dx, g.player.y + dy]).filter(([x, y]) => inBounds(g.world, x, y)); }
+
+// Begin a visual slide from (fx,fy) to the player's already-updated tile. Game state changed the instant
+// move() ran; only the pixels lag behind by WALK_MS.
+function startWalk(fx, fy, enemyFrom) {
+  const g = S.game; if (!g) return;
+  if (!SMOOTH || reduceMotion() || (fx === g.player.x && fy === g.player.y)) { render(); return; }
+  S.walk = { fx, fy, t0: performance.now(), dur: WALK_MS, enemyFrom: enemyFrom && enemyFrom.size ? enemyFrom : null };
+  ensureMapLoop();
+}
+// Draw one overworld frame, interpolating the hero (and any moved mages) if a walk is in progress.
+function drawMapFrame(canvas) {
+  const g = S.game; if (!g) return null;
+  const world = g.world, player = g.player;
+  let heroPos = { x: player.x, y: player.y }, enemyPos = null, bob = 0, hl = null;
+  const w = S.walk;
+  if (w) {
+    const raw = (performance.now() - w.t0) / w.dur;
+    if (raw >= 1) { S.walk = null; }
+    else {
+      const es = easeInOut(raw);
+      heroPos = { x: w.fx + (player.x - w.fx) * es, y: w.fy + (player.y - w.fy) * es };
+      bob = -Math.abs(Math.sin(raw * Math.PI)) * 3;
+      if (w.enemyFrom) { enemyPos = new Map(); for (const [en, fr] of w.enemyFrom) enemyPos.set(en, { x: fr.x + (en.x - fr.x) * es, y: fr.y + (en.y - fr.y) * es }); }
+    }
+  }
+  if (!S.walk) hl = neighborHighlight(g);   // step hints only while standing still
+  const cam = drawWorld(canvas, world, player, { heroPos, enemyPos, heroBob: bob, highlight: hl, sight: SIGHT });
+  S._mapCam = cam;
+  return cam;
+}
+// A single rAF loop lives while the map is on screen: it animates walks at full rate and idles at a gentle
+// rate so torches, water and mana motes keep breathing without burning the CPU.
+function ensureMapLoop() {
+  if (mapRAF != null || !SMOOTH) return;
+  let lastIdle = 0;
+  const tick = () => {
+    if (S.screen !== 'map' || !S.game) { mapRAF = null; return; }
+    const canvas = document.getElementById('map');
+    if (!canvas) { mapRAF = null; return; }
+    const now = performance.now();
+    if (S.walk) {
+      const wasWalking = true;
+      drawMapFrame(canvas);
+      if (wasWalking && !S.walk) { render(); pump(); }   // step finished: refresh panel/minimap, maybe chain
+    } else if (now - lastIdle >= 40) { lastIdle = now; drawMapFrame(canvas); }
+    mapRAF = requestAnimationFrame(tick);
+  };
+  mapRAF = requestAnimationFrame(tick);
+}
+// If a direction is held and we're free to move, take the next step (drives continuous hold-to-walk).
+function pump() {
+  if (S.walk || S.modal || S.screen !== 'map' || !S.game || S.game.status !== 'playing') return;
+  const d = activeDir(); if (d) move(d[0], d[1]);
+}
+
 function map() {
   const g = S.game; if (!g) return title();
   const here = tileAt(g.world, g.player.x, g.player.y);
@@ -1290,15 +1362,16 @@ function map() {
   }
   if (!g.usurper) { g.usurper = rnd(COLORS); save(); }
   if (!g.player.amulets) { g.player.amulets = newAmulets(); g.quests ||= []; save(); }
-  const hl = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dy]) => [g.player.x + dx, g.player.y + dy]).filter(([x, y]) => inBounds(g.world, x, y));
-  const cam = drawWorld(canvas, g.world, g.player, { highlight: hl });
+  const cam = drawMapFrame(canvas) || { x: g.player.x - VIEW.w / 2, y: g.player.y - VIEW.h / 2 };
   drawMinimap(document.getElementById('minimap'), g.world, g.player, cam);
   canvas.onclick = ev => {
     const r = canvas.getBoundingClientRect();
-    const x = cam.x + Math.floor((ev.clientX - r.left) / r.width * VIEW.w), y = cam.y + Math.floor((ev.clientY - r.top) / r.height * VIEW.h);
+    const view = S._mapCam || cam;   // map the click through the camera that's actually on screen
+    const x = Math.floor(view.x + (ev.clientX - r.left) / r.width * VIEW.w), y = Math.floor(view.y + (ev.clientY - r.top) / r.height * VIEW.h);
     const dx = x - g.player.x, dy = y - g.player.y;
     if (Math.abs(dx) + Math.abs(dy) === 1) move(dx, dy);
   };
+  ensureMapLoop();
 }
 
 // A few fantasy ways to say the inn topped you off, so a city visit always heals to full for free.
@@ -1867,11 +1940,12 @@ document.addEventListener('keydown', ev => {
     if (d && cur) { ev.preventDefault(); dungeonMove(cellOf(cur.layout, cur.layout.px + d[0], cur.layout.py + d[1])); }
     return;
   }
-  if (S.screen !== 'map' || S.modal) return;
+  if (S.screen !== 'map' || S.modal) { heldDirs.length = 0; return; }
   const k = ev.key.toLowerCase();
-  const d = { arrowup: [0, -1], w: [0, -1], arrowdown: [0, 1], s: [0, 1], arrowleft: [-1, 0], a: [-1, 0], arrowright: [1, 0], d: [1, 0] }[k];
-  if (d) { ev.preventDefault(); move(d[0], d[1]); }
+  if (DIRS[k]) { ev.preventDefault(); if (!ev.repeat) { if (!heldDirs.includes(k)) heldDirs.push(k); pump(); } }   // hold to keep walking; the loop chains the next step
 });
+document.addEventListener('keyup', ev => { const i = heldDirs.indexOf(ev.key.toLowerCase()); if (i >= 0) heldDirs.splice(i, 1); });
+window.addEventListener('blur', () => { heldDirs.length = 0; });   // don't let a key stick if focus leaves
 
 // ---- boot -----------------------------------------------------------------------
 // Debug handle for the console and for automated tests: window.ff.S is the app state.

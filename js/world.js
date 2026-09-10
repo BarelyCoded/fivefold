@@ -761,20 +761,22 @@ function drawCrystal(ctx, cx, cy, taken) {
   }
 }
 function drawFigure(ctx, cx, cy, robe, robeL, hat, opts = {}) {
+  const bob = opts.bob || 0;   // a small vertical hop while walking; the ground shadow/ring stay put
   if (atlasReady() && opts.sprite) {
     if (opts.ring) { ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(cx, cy + PX / 2 - 3, 12, 4, 0, 0, Math.PI * 2); ctx.stroke(); }
-    blitAt(ctx, opts.sprite, cx, cy + PX / 2 - 1, Math.min(0.8, 38 / opts.sprite[3]));
+    blitAt(ctx, opts.sprite, cx, cy + PX / 2 - 1 + bob, Math.min(0.8, 38 / opts.sprite[3]));
     if (opts.tier) labels.push({ x: cx + 13, y: cy + 12, text: String(opts.tier), size: 6, color: '#fff', bg: 'rgba(20,18,16,.85)' });
     return;
   }
   shade(ctx, cx, cy + 3, 8);
   if (opts.ring) { ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(cx, cy + 3, 6, 2.5, 0, 0, Math.PI * 2); ctx.stroke(); }
-  px(ctx, cx - 3, cy - 6, 6, 9, robe); px(ctx, cx - 3, cy - 6, 2, 9, robeL);
-  px(ctx, cx - 2, cy - 9, 4, 3, '#e9c39c'); // head
-  if (opts.legs) { px(ctx, cx - 3, cy - 1, 6, 4, opts.legs); px(ctx, cx - 3, cy + 1, 2, 2, opts.legs); }
-  if (hat) { px(ctx, cx - 4, cy - 10, 8, 1, hat); ctx.fillStyle = hat; ctx.beginPath(); ctx.moveTo(cx - 3, cy - 10); ctx.lineTo(cx + 1, cy - 16); ctx.lineTo(cx + 3, cy - 10); ctx.closePath(); ctx.fill(); }
-  else px(ctx, cx - 2, cy - 11, 4, 2, '#4a2e1a'); // hair
-  if (opts.staff) { px(ctx, cx + 4, cy - 12, 1, 15, '#6b4a2a'); px(ctx, cx + 3, cy - 14, 3, 2, '#9fe7ff'); }
+  const by = cy + bob;
+  px(ctx, cx - 3, by - 6, 6, 9, robe); px(ctx, cx - 3, by - 6, 2, 9, robeL);
+  px(ctx, cx - 2, by - 9, 4, 3, '#e9c39c'); // head
+  if (opts.legs) { px(ctx, cx - 3, by - 1, 6, 4, opts.legs); px(ctx, cx - 3, by + 1, 2, 2, opts.legs); }
+  if (hat) { px(ctx, cx - 4, by - 10, 8, 1, hat); ctx.fillStyle = hat; ctx.beginPath(); ctx.moveTo(cx - 3, by - 10); ctx.lineTo(cx + 1, by - 16); ctx.lineTo(cx + 3, by - 10); ctx.closePath(); ctx.fill(); }
+  else px(ctx, cx - 2, by - 11, 4, 2, '#4a2e1a'); // hair
+  if (opts.staff) { px(ctx, cx + 4, by - 12, 1, 15, '#6b4a2a'); px(ctx, cx + 3, by - 14, 3, 2, '#9fe7ff'); }
   if (opts.tier) { px(ctx, cx + 3, cy, 7, 7, '#15120f'); labels.push({ x: cx + 6.5, y: cy + 3.5, text: String(opts.tier), size: 5.5, box: false, color: '#fff' }); }
 }
 
@@ -825,15 +827,20 @@ export function drawWorld(canvas, world, player, opts = {}) {
   let terrain = terrainCache.get(world);
   if (!terrain || !!terrain.atlas !== atlasReady()) { terrain = paintTerrain(world); terrainCache.set(world, terrain); }
   labels = [];
-  const cam = cameraFor(world, player);
   const fw = VIEW.w * PX, fh = VIEW.h * PX;
+  // The camera follows the hero's live (possibly fractional, mid-step) position, clamped to the world and
+  // snapped to whole internal pixels so the pixel-art scroll stays crisp. heroPos lets the caller slide the
+  // hero between tiles; with none given it sits on its tile (the old, instant behaviour).
+  const heroPos = opts.heroPos || { x: player.x, y: player.y };
+  const camPxX = Math.round(Math.max(0, Math.min(world.w * PX - fw, heroPos.x * PX + PX / 2 - fw / 2)));
+  const camPxY = Math.round(Math.max(0, Math.min(world.h * PX - fh, heroPos.y * PX + PX / 2 - fh / 2)));
   if (!frame) { frame = document.createElement('canvas'); }
   frame.width = fw; frame.height = fh;
   const f = frame.getContext('2d'); f.imageSmoothingEnabled = false;
-  f.drawImage(terrain, cam.x * PX, cam.y * PX, fw, fh, 0, 0, fw, fh);
-  const vis = (x, y) => x >= cam.x - 1 && y >= cam.y - 1 && x <= cam.x + VIEW.w && y <= cam.y + VIEW.h;
-  const c = (x, y) => [(x - cam.x) * PX + PX / 2, (y - cam.y) * PX + PX / 2];
-  if (opts.highlight) { f.strokeStyle = 'rgba(255,255,255,.5)'; f.lineWidth = 1; f.setLineDash([2, 2]); for (const [x, y] of opts.highlight) if (vis(x, y)) f.strokeRect((x - cam.x) * PX + 2.5, (y - cam.y) * PX + 2.5, PX - 5, PX - 5); f.setLineDash([]); }
+  f.drawImage(terrain, camPxX, camPxY, fw, fh, 0, 0, fw, fh);
+  const vis = (x, y) => x * PX >= camPxX - PX * 2 && y * PX >= camPxY - PX * 2 && x * PX <= camPxX + fw + PX && y * PX <= camPxY + fh + PX;
+  const c = (x, y) => [x * PX - camPxX + PX / 2, y * PX - camPxY + PX / 2];
+  if (opts.highlight) { f.strokeStyle = 'rgba(255,255,255,.5)'; f.lineWidth = 1; f.setLineDash([2, 2]); for (const [x, y] of opts.highlight) if (vis(x, y)) f.strokeRect(x * PX - camPxX + 2.5, y * PX - camPxY + 2.5, PX - 5, PX - 5); f.setLineDash([]); }
   const objs = [];
   for (const m of world.motes || []) if (vis(m.x, m.y)) { const [cx, cy] = c(m.x, m.y); objs.push({ y: cy - 2, draw: () => drawMote(f, cx, cy) }); }
   for (const l of world.links) if (vis(l.x, l.y)) { const [cx, cy] = c(l.x, l.y); objs.push({ y: cy, draw: () => drawCrystal(f, cx, cy, l.taken) }); }
@@ -846,8 +853,19 @@ export function drawWorld(canvas, world, player, opts = {}) {
   for (const ct of world.cities) if (vis(ct.x, ct.y)) { const [cx, cy] = c(ct.x, ct.y); objs.push({ y: cy, draw: () => { drawCity(f, cx, cy, ct.color, ct.name); if (ct.captured) labels.push({ x: cx, y: cy - PX / 2 - 12, text: 'BESIEGED · fallen', size: 8, color: '#ff8a8a', bg: 'rgba(70,10,10,.9)' }); else if (ct.siege) labels.push({ x: cx, y: cy - PX / 2 - 12, text: '⚔ ' + ct.siege + '/3', size: 9, color: '#ffce8a', bg: 'rgba(70,40,10,.9)' }); } }); }
   for (const ca of allCastles(world)) if (vis(ca.x, ca.y)) { const [cx, cy] = c(ca.x, ca.y); objs.push({ y: cy, draw: () => drawFortress(f, cx, cy, ca.color, ca.name, ca.fallen) }); }
   const robes = { W: ['#d9d2b8', '#f0ead6'], U: ['#2f5f9c', '#5e8cc9'], B: ['#3a2d4a', '#5e4d75'], R: ['#a33a2a', '#d0604a'], G: ['#3f6f2f', '#6a9a4a'] };
-  for (const e of world.enemies) if (vis(e.x, e.y)) { const [cx, cy] = c(e.x, e.y); const [r, rl] = robes[e.color] || robes.B; const sp = (SPRITES.mage[e.color] || SPRITES.mage.M)[e.tier >= 2 ? 1 : 0]; objs.push({ y: cy, draw: () => { drawFigure(f, cx, cy, r, rl, r, { tier: e.level || e.tier, sprite: sp }); if (e.bounty) labels.push({ x: cx, y: cy - PX / 2 - 10, text: '\u2605', size: 10, color: '#ffd54a', bg: 'rgba(60,40,10,.9)' }); } }); }
-  { const [cx, cy] = c(player.x, player.y); objs.push({ y: cy + 0.1, draw: () => drawFigure(f, cx, cy, '#c8322a', '#e0604a', null, { legs: '#2f4f9c', staff: true, ring: true, sprite: SPRITES.hero }) }); }
+  // Roaming mages are only seen within the hero's sight, as in the original: the land is fully drawn but a
+  // wanderer stays hidden until you come near. A soft edge fades them in over the last tile and a half.
+  const sight = opts.sight != null ? opts.sight : Infinity;
+  for (const e of world.enemies) {
+    const ep = (opts.enemyPos && opts.enemyPos.get(e)) || e;
+    if (!vis(ep.x, ep.y)) continue;
+    const dist = Math.hypot(ep.x - heroPos.x, ep.y - heroPos.y);
+    if (dist > sight + 0.01) continue;
+    const fade = Math.max(0, Math.min(1, (sight - dist) / 1.5));
+    const [cx, cy] = c(ep.x, ep.y); const [r, rl] = robes[e.color] || robes.B; const sp = (SPRITES.mage[e.color] || SPRITES.mage.M)[e.tier >= 2 ? 1 : 0];
+    objs.push({ y: cy, draw: () => { const a0 = f.globalAlpha; if (fade < 1) f.globalAlpha = a0 * fade; drawFigure(f, cx, cy, r, rl, r, { tier: e.level || e.tier, sprite: sp }); f.globalAlpha = a0; if (e.bounty && fade > 0.4) labels.push({ x: cx, y: cy - PX / 2 - 10, text: '\u2605', size: 10, color: '#ffd54a', bg: 'rgba(60,40,10,.9)' }); } });
+  }
+  { const [cx, cy] = c(heroPos.x, heroPos.y); objs.push({ y: cy + 0.1, draw: () => drawFigure(f, cx, cy, '#c8322a', '#e0604a', null, { legs: '#2f4f9c', staff: true, ring: true, sprite: SPRITES.hero, bob: opts.heroBob || 0 }) }); }
   objs.sort((a, b) => a.y - b.y);
   for (const o of objs) o.draw();
   // vignette frame like the original's border
@@ -855,5 +873,5 @@ export function drawWorld(canvas, world, player, opts = {}) {
   g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,.35)'); f.fillStyle = g; f.fillRect(0, 0, fw, fh);
 
   present(canvas, frame, fw, fh, labels);
-  return cam;
+  return { x: camPxX / PX, y: camPxY / PX, pxX: camPxX, pxY: camPxY, fw, fh };
 }
