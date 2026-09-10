@@ -250,12 +250,14 @@ tr.st-unsupported td:nth-child(7), tr.st-unsupported td:nth-child(3), tr.st-miss
   repeating-linear-gradient(-45deg, rgba(0,0,0,.12) 0 2px, transparent 2px 8px),
   radial-gradient(ellipse at 50% 100%, #2f4a35 0%, #223626 55%, #192a1d 100%); }
 .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.row { display: flex; flex-wrap: wrap; gap: 10px; min-height: calc(var(--ch) + 12px); padding: 6px; border-radius: 6px; background: rgba(0,0,0,.18); box-shadow: inset 0 0 0 1px rgba(255,255,255,.05); }
+/* An opaque mat so the felt crosshatch stays strictly behind the board and never shows around — or through
+   a tapped/dim — card. Cards read as sitting on top of the surface, not embedded in it. */
+.row { display: flex; flex-wrap: wrap; gap: 10px; min-height: calc(var(--ch) + 12px); padding: 6px; border-radius: 6px; background: #191510; box-shadow: inset 0 0 0 1px rgba(255,255,255,.05), inset 0 1px 8px rgba(0,0,0,.45); }
 .row.perms { min-height: 50px; --ch: 76px; --cw: 54px; }
 .row.perms .card-top { font-size: 8px; padding: 2px 3px; }
 .row.perms .card-body { display: none; }
-.row.perms:empty { display: none; }
-.lands { background: rgba(0,0,0,.28); border: 1px solid rgba(255,255,255,.08); border-radius: 6px; padding: 6px; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 4px; }
+.row:empty { display: none; }   /* an empty mat would float as a dark bar on the felt — show a mat only when it holds cards */
+.lands { background: #191510; border: 1px solid rgba(255,255,255,.08); border-radius: 6px; padding: 6px; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 4px; }
 .lands-title { width: 100%; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink3); margin-bottom: 2px; }
 .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 2px 7px 2px 4px; border-radius: 999px; background: #2a2622; border: 1px solid #4a433c; color: var(--ink); cursor: pointer; user-select: none; }
 .pill i { width: 9px; height: 9px; border-radius: 50%; background: var(--C); border: 1px solid rgba(0,0,0,.5); }
