@@ -323,6 +323,7 @@ export class Duel {
           for (const [aid, bids] of Object.entries(this.blocks)) this.fx.push({ type: 'block', attacker: Number(aid), blockers: bids.slice() });
           for (const [aid, bids] of Object.entries(this.blocks)) {
             const a = this.card(Number(aid));
+            a.flags.add('blocked');   // a creature that has been blocked stays blocked even if its blockers later leave combat (e.g. regenerate)
             this.fireEvent({ type: 'becomesBlocked', card: a, by: bids.map(id => this.card(id)) });
             const ramp = a.def.keywords.find(k => k.k === 'Rampage');
             if (ramp && bids.length > 1) { const n = ramp.n * (bids.length - 1); a.temp.p += n; a.temp.t += n; this.say(`${a.def.name} rampages +${n}/+${n}.`); }
@@ -345,6 +346,7 @@ export class Duel {
         case 'endCombat': {
           this.fireEvent({ type: 'endCombat' });
           for (const c of this.permanents()) if (c.flags.has('destroyAtEndOfCombat')) { c.flags.delete('destroyAtEndOfCombat'); this.destroy(c, false); }
+          for (const c of this.permanents()) c.flags.delete('blocked');
           this.attackers = []; this.blocks = {}; priority = false; break;
         }
         case 'end': {
@@ -1456,7 +1458,10 @@ export class Duel {
     for (const aid of this.attackers.slice()) {
       const a = atk.battlefield.find(x => x.id === aid); if (!a) continue;
       const blockers = (this.blocks[aid] || []).map(id => def.battlefield.find(x => x.id === id)).filter(Boolean);
-      const wasBlocked = (this.blocks[aid] || []).length > 0;
+      // Once blocked, always blocked: even if every blocker has left combat (regenerated, destroyed) the attacker
+      // deals no damage to the defending player unless it has trample. Without trample and with no blockers left,
+      // its combat damage simply goes nowhere.
+      const wasBlocked = a.flags.has('blocked') || (this.blocks[aid] || []).length > 0;
       if (deals(a)) {
         let dmg = power(a);
         if (!wasBlocked) { this.dealDamage(a, def, dmg, { combat: true }); if (which !== 'first' || !has(a, 'Double strike')) this.fireEvent({ type: 'unblocked', card: a }); }
