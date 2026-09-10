@@ -260,7 +260,7 @@ function move(dx, dy) {
   if (g.player.cloak > 0) g.player.cloak--;
   if (g.player.food > 0) g.player.food--;
   else if (g.player.steps % 2 === 0 && g.player.life > 1) { g.player.life--; toast('You are starving: 1 life lost. Buy food in any city.'); }
-  if (g.player.steps % 5 === 0) { g.player.day++; advanceSieges(g); if (g.status !== 'playing') return; if (g.player.day % 30 === 0) bossLink(); if (g.status !== 'playing') return; }
+  if (g.player.steps % STEPS_PER_DAY === 0) { g.player.day++; advanceSieges(g); if (g.status !== 'playing') return; if (g.player.day % 30 === 0) bossLink(); if (g.status !== 'playing') return; }
   const link = linkAt(g.world, nx, ny);
   if (link && !link.taken) { link.taken = true; g.player.maxLife += 2; g.player.life += 2; toast(`Mana link claimed. Maximum life is now ${g.player.maxLife}.`); }
   const mote = moteAt(g.world, nx, ny);
@@ -322,20 +322,24 @@ function bossLink() {
   if (g.boss.links >= BOSS_LINKS) { g.status = 'lost'; g.lostBy = 'seal'; save(); go('end'); return; }
   toast(`The Usurper has bound ${g.boss.links} of ${BOSS_LINKS} mana links. Hurry.`);
 }
-// How many cities the Wardens may besiege at once. Just one for the opening fortnight so the early
-// overland isn't swarmed; the war then widens as days pass, but never beyond the Wardens still standing.
+// A day passes every this-many overland steps. With hold-to-walk you cover ground quickly, so the calendar
+// is deliberately slow — otherwise the war (and food, and the Usurper) would race by in seconds of walking.
+const STEPS_PER_DAY = 10;
+// How many cities the Wardens may besiege at once. Just one for the long opening so the early overland
+// isn't swarmed; the war then widens as days pass, but never beyond the Wardens still standing.
 function maxSieges(day) {
-  if (day < 20) return 1;
-  if (day < 45) return 2;
-  if (day < 75) return 3;
+  if (day < 30) return 1;
+  if (day < 60) return 2;
+  if (day < 90) return 3;
   return 4;
 }
 // The surviving Wardens march on your cities. A besieged city, unrelieved, is captured; lose four
 // and the realm collapses. Visiting a city drives the besiegers off and reclaims it.
 function advanceSieges(g) {
   const w = g.world;
+  if (g.player.day < 8) return;                          // a grace period: the Wardens don't march at once
   const aliveWardens = COLORS.filter(col => !(w.castles || []).find(c => c.color === col)?.fallen).length;
-  if (!aliveWardens || Math.random() > 0.26) return;   // a Warden makes a move every few days
+  if (!aliveWardens || Math.random() > 0.16) return;   // and then only make a move every several days
   const besieged = w.cities.filter(c => c.siege > 0 && !c.captured);
   const open = w.cities.filter(c => !c.siege && !c.captured);
   const cap = Math.min(maxSieges(g.player.day), aliveWardens);   // clearing guilds also eases the pressure
