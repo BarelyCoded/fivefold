@@ -1515,6 +1515,7 @@ function mpWire(net) {
 }
 function mpToDeck() {
   const mp = S.mp; mp.view = 'deck'; mp.ready = false; mp.oppReady = false; mp.started = false;
+  mp.mull = false; mp.begun = false; mp.guestKeptLocal = false; mp.lastSnap = null; mp.duel = null; mp.mirror = null; mp.root = null; mp.api = null;
   if (!mp.deck) mp.deck = buildStartDeck(mp.deckColor, DIFF[mp.deckDiff].colors, Math.random);
   go('mpdeck');
 }
@@ -1526,8 +1527,11 @@ function mpOnPeer(data) {
   switch (data.k) {
     case 'deck': mp.oppDeck = data.deck; mp.oppName = data.name || mp.oppName; mp.oppReady = !!data.ready; if (S.screen === 'mpdeck') render(); mpTryStart(); break;
     case 'ready': mp.oppReady = !!data.ready; if (S.screen === 'mpdeck') render(); break;
-    case 'start': mpGuestStart(); break;         // guest: host says both are ready — build the mirror
-    case 'ready2': if (mp.role === 'host') mpHostStart(); break;   // host: guest's mirror is mounted — start
+    case 'start': mpGuestStart(); break;              // guest: host says both are ready — stand by for hands
+    case 'ready2': if (mp.role === 'host') mpHostStart(); break;   // host: guest is ready — build+deal+mulligan
+    case 'mullstart': mp.mull = true; if (mp.lastSnap && !mp.guestKeptLocal) mpGuestMull(); break;   // guest: decide opening hand
+    case 'mullkeep': if (mp.role === 'host') { mp.mull.guestKept = true; mpMaybeBegin(); } break;   // host: guest kept
+    case 'begin': mpGuestBegin(); break;              // guest: mulligans done — mount and play
     case 'snap': mpGuestSnap(data.snap); break;
     case 'input': mpHostInput(data.action); break;
     case 'rematch': mpToDeck(); break;
@@ -1538,14 +1542,13 @@ function mpTryStart() {
   if (!mp.ready || !mp.oppReady || !mp.deck || !mp.oppDeck) return;
   mp.started = true; mp.view = 'starting'; mp.net.relay({ k: 'start' }); render();   // wait for the guest's mirror (ready2)
 }
-function mpGuestStart() {
-  const mp = S.mp; mp.localIdx = 1; mp.winner = null; mp.duel = null; mp.api = null; mp.root = null;
-  mp.mirror = makeMirror({ me: mp.name, foe: mp.oppName || 'Opponent' });
-  go('mpduel');
+function mpGuestStart() {   // guest: reset for a fresh match and tell the host we are ready for it to deal
+  const mp = S.mp; mp.localIdx = 1; mp.winner = null; mp.duel = null; mp.api = null; mp.root = null; mp.mirror = null;
+  mp.begun = false; mp.mull = false; mp.guestKeptLocal = false; mp.lastSnap = null;
   mp.net.relay({ k: 'ready2' });
 }
-function mpHostStart() {
-  const mp = S.mp; mp.localIdx = 0; mp.winner = null; mp.root = null; mp.api = null; mp.mirror = null;
+function mpHostStart() {   // host: build the authoritative duel, deal hands, and run the mulligan phase
+  const mp = S.mp; mp.localIdx = 0; mp.winner = null; mp.root = null; mp.api = null; mp.mirror = null; mp.begun = false;
   const duel = new Duel({
     player: { name: mp.name, deck: expandDeck(mp.deck), life: 20, ai: false },
     ai: { name: mp.oppName || 'Opponent', deck: expandDeck(mp.oppDeck), life: 20, ai: false },
@@ -1555,16 +1558,56 @@ function mpHostStart() {
   // Broadcast a redacted snapshot to the guest on each change, coalesced to at most one per frame.
   let queued = false;
   duel.onChange(() => { if (queued) return; queued = true; queueMicrotask(() => { queued = false; if (S.mp?.net && S.mp.duel === duel) S.mp.net.relay({ k: 'snap', snap: duel.snapshot(1) }); }); });
+  duel.start();   // deals both hands (its emit sends the guest its first snapshot)
+  mp.mull = { hostKept: false, guestKept: false };
+  mp.net.relay({ k: 'mullstart' });
+  mpHostMull();
+}
+// The free opening-hand mulligan, coordinated across both clients: each sees their hand and keeps or
+// redraws; the game only starts once both have kept.
+function mpHandLands(names) { return names.filter(n => defOf(n)?.kind === 'land').length; }
+function mpMullModal(names, onKeep, onMull) {
+  const lands = mpHandLands(names);
+  S.modal = {
+    title: 'Your opening hand',
+    body: `<p>${names.length} cards · <b>${lands} land${lands === 1 ? '' : 's'}</b>.</p>
+      <div class="mullhand">${names.map(n => `<span class="mullcard" data-preview="${esc(n)}">${esc(n)}${defOf(n)?.kind === 'land' ? ' <i class="dot c-' + ({ Plains: 'W', Island: 'U', Swamp: 'B', Mountain: 'R', Forest: 'G' }[n] || 'C') + '"></i>' : ''}</span>`).join('')}</div>
+      <p class="small">${lands <= 1 ? 'A land-light hand — you may mulligan (reshuffle and redraw the same number, free).' : 'A workable hand.'}</p>`,
+    buttons: [{ label: 'Keep', primary: true, action: onKeep }, { label: 'Mulligan', action: onMull }],
+  };
+  render();
+}
+function mpHostMull() {
+  const mp = S.mp, duel = mp.duel; if (!duel) return;
+  mpMullModal(duel.players[0].hand.map(c => c.def.name),
+    () => { S.modal = null; mp.mull.hostKept = true; render(); mpMaybeBegin(); },
+    () => { duel.mulligan(0); mpHostMull(); });   // mulligan(0) redraws and re-broadcasts
+}
+function mpGuestMull() {
+  const mp = S.mp; if (!mp.lastSnap) return;
+  mpMullModal(mp.lastSnap.players[1].hand.map(c => c.name),
+    () => { S.modal = null; mp.guestKeptLocal = true; render(); mp.net.relay({ k: 'mullkeep' }); },
+    () => { mp.net.relay({ k: 'input', action: { type: 'mulligan' } }); });   // host redraws; a fresh snapshot reopens this
+}
+function mpMaybeBegin() {
+  const mp = S.mp; if (!mp.mull || !mp.mull.hostKept || !mp.mull.guestKept || mp.begun) return;
+  mp.begun = true; mp.net.relay({ k: 'begin' }); go('mpduel');   // host mounts (autoStart false) and runs
+}
+function mpGuestBegin() {
+  const mp = S.mp; mp.begun = true; S.modal = null;
+  mp.mirror = makeMirror({ me: mp.name, foe: mp.oppName || 'Opponent' });
   go('mpduel');
+  if (mp.lastSnap) hydrate(mp.mirror, mp.lastSnap, defOf, 1);
 }
 function mpGuestSnap(snap) {
   const mp = S.mp; if (!mp) return;
-  if (!mp.mirror) { mp.pendingSnap = snap; return; }
-  hydrate(mp.mirror, snap, defOf, 1);
-  if (snap.winner !== null && snap.winner !== undefined) mp.winner = snap.winner;
+  mp.lastSnap = snap;
+  if (mp.begun) { if (!mp.mirror) { mp.pendingSnap = snap; return; } hydrate(mp.mirror, snap, defOf, 1); if (snap.winner !== null && snap.winner !== undefined) mp.winner = snap.winner; return; }
+  if (mp.mull && !mp.guestKeptLocal) mpGuestMull();   // (re)show the opening-hand choice with the latest hand
 }
 function mpHostInput(action) {
   const mp = S.mp; if (!mp || !mp.duel) return;
+  if (mp.mull && !mp.begun) { if (action.type === 'mulligan') mp.duel.mulligan(1); return; }   // mulligan phase
   if (action.type === 'concede') { mp.duel.end(0, `${mp.oppName || 'Your opponent'} concedes.`); }
   else applyRemoteInput(mp.duel, action, 1);
   mp.api?.run();   // resume ticking after the guest's action
@@ -1671,7 +1714,9 @@ function mpduel() {
     const heroP = portrait([SPRITES.hero, SPRITES['hero-alt']]);
     const portraits = { me: heroP, foe: heroP };
     if (mp.role === 'host') {
-      mp.api = mountDuel(mp.root, mp.duel, { onEnd: mpOnEnd, portraits, localIdx: 0, allowMulligan: false, autoStart: true });
+      // The duel was already started (hands dealt) during the mulligan phase; mount without re-dealing, then tick.
+      mp.api = mountDuel(mp.root, mp.duel, { onEnd: mpOnEnd, portraits, localIdx: 0, allowMulligan: false, autoStart: false });
+      mp.api.run();
     } else {
       const input = guestInput(a => mp.net.relay({ k: 'input', action: a }));
       mp.api = mountDuel(mp.root, mp.mirror, { onEnd: mpOnEnd, portraits, localIdx: 1, input, allowMulligan: false, autoStart: false });
