@@ -138,7 +138,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
         }
         case 'cast': { const s = root.querySelector('.stack-item.top'); if (s) s.classList.add('fx-cast'); sfx('cast'); wait = Math.max(wait, 300); break; }
         case 'land': sfx('land'); break;
-        case 'die': { const z = f.controller === 0 ? '.zone.mine .field' : '.zone.opp .field'; floatText(root.querySelector(z), `${f.name} ✝`, 'fx-die'); sfx('die'); wait = Math.max(wait, 500); break; }
+        case 'die': { const z = f.controller === localIdx ? '.zone.mine .field' : '.zone.opp .field'; floatText(root.querySelector(z), `${f.name} ✝`, 'fx-die'); sfx('die'); wait = Math.max(wait, 500); break; }
         case 'chaosOrb': chaosConfetti(f.orb, f.victims); sfx('die'); wait = Math.max(wait, 1150); break;
       }
     }
@@ -325,7 +325,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
   }
   function phaseStrip() {
     const cur = COMBAT_STEPS.has(duel.step) ? 'combat' : duel.step === 'cleanup' ? 'end' : duel.step;
-    return `<div class="phases ${duel.active === 0 ? 'mine' : 'theirs'}"><div class="phases-who">${duel.active === 0 ? 'Your turn' : esc(ai.name)}</div>${PHASES.map(([k, label, icon]) => `<div class="phase${k === cur ? ' on' : ''}"><span class="ph-icon">${icon}</span><span class="ph-label">${label}</span></div>`).join('')}<div class="phases-step">${esc(STEP_NAME[duel.step] || duel.step)}</div></div>`;
+    return `<div class="phases ${duel.active === localIdx ? 'mine' : 'theirs'}"><div class="phases-who">${duel.active === localIdx ? 'Your turn' : esc(ai.name)}</div>${PHASES.map(([k, label, icon]) => `<div class="phase${k === cur ? ' on' : ''}"><span class="ph-icon">${icon}</span><span class="ph-label">${label}</span></div>`).join('')}<div class="phases-step">${esc(STEP_NAME[duel.step] || duel.step)}</div></div>`;
   }
 
   function tutor() {
@@ -565,7 +565,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
   // Double-click a permanent with exactly one unambiguous ability -> use it straight away (Vampire Bats,
   // Llanowar Elves). Anything more (a choice of colours or several abilities) still opens the menu.
   function permDblClick(card) {
-    if (duel.pending?.type !== 'priority' || card.controller !== 0) return;
+    if (duel.pending?.type !== 'priority' || card.controller !== localIdx) return;
     const manas = []; card.def.manaAbilities.forEach((ma, i) => { if (!card.tapped || !ma.cost.tap) manas.push({ i, ma }); });
     const acts = []; abilitiesOf(card).forEach((ab, i) => { if (ab.type === 'activated' && duel.canActivate(me, card, i)) acts.push({ i, ab }); });
     if (acts.length === 1 && manas.length === 0) { startActivate(card, acts[0].i); return; }
@@ -643,7 +643,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     if (ui.paying) {   // manual-mana mode: tap your own lands to pay for the pending spell
       if (btn.id === 'b-pay-cancel') { ui.paying = null; render(); return; }
       if (btn.id === 'b-pay-cast') { castPoolOnly(ui.paying.card, ui.paying.opts); return; }
-      if ((btn.classList.contains('card') || btn.classList.contains('pill')) && btn.dataset.zone === 'bf') { const c = cardOf(btn.dataset.id); if (c && c.controller === 0 && !c.tapped && c.def.manaAbilities.length) tapToward(c); }
+      if ((btn.classList.contains('card') || btn.classList.contains('pill')) && btn.dataset.zone === 'bf') { const c = cardOf(btn.dataset.id); if (c && c.controller === localIdx && !c.tapped && c.def.manaAbilities.length) tapToward(c); }
       return;
     }
     if (cardChoiceActive()) {   // card-picker overlay: click cards to select, then Confirm
@@ -692,9 +692,9 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     if (targeting()) { if (z === 'bf') pickRef({ type: 'perm', id: card.id }); else if (z === 'grave') pickRef({ type: 'card', id: card.id }); return; }
     if (ui.menu) return;
     const req = duel.pending?.req;
-    if (req?.kind === 'attackers' && z === 'bf' && card.controller === 0) { if (!req.options.includes(card.id)) return; if (ui.attackers.has(card.id)) ui.attackers.delete(card.id); else ui.attackers.add(card.id); render(); return; }
+    if (req?.kind === 'attackers' && z === 'bf' && card.controller === localIdx) { if (!req.options.includes(card.id)) return; if (ui.attackers.has(card.id)) ui.attackers.delete(card.id); else ui.attackers.add(card.id); render(); return; }
     if (req?.kind === 'blockers' && z === 'bf') {
-      if (card.controller === 0) {
+      if (card.controller === localIdx) {
         if (!isCreature(card) || card.tapped) return;
         for (const k of Object.keys(ui.blocks)) if (ui.blocks[k].includes(card.id)) { ui.blocks[k] = ui.blocks[k].filter(id => id !== card.id); if (!ui.blocks[k].length) delete ui.blocks[k]; ui.blocker = null; render(); return; }
         ui.blocker = ui.blocker === card.id ? null : card.id; render(); return;
@@ -707,9 +707,9 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
       return;
     }
     if (duel.pending?.type !== 'priority') return;
-    if (z === 'hand' && card.controller === 0) { scheduleCardClick(card, 'hand'); return; }
-    if (z === 'grave' && card.owner === 0) { if (duel.canCast(me, card)) { ui.viewer = null; startCast(card); } return; }
-    if (z === 'bf' && card.controller === 0) { scheduleCardClick(card, 'bf'); return; }
+    if (z === 'hand' && card.controller === localIdx) { scheduleCardClick(card, 'hand'); return; }
+    if (z === 'grave' && card.owner === localIdx) { if (duel.canCast(me, card)) { ui.viewer = null; startCast(card); } return; }
+    if (z === 'bf' && card.controller === localIdx) { scheduleCardClick(card, 'bf'); return; }
   });
   root.addEventListener('change', ev => {
     if (ev.target.id === 'cb-autopass') { setAutoPass(ev.target.checked); if (ev.target.checked) run(); return; }
