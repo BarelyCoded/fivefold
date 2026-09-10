@@ -160,6 +160,7 @@ function handle(conn, msg) {
       break;
     }
     case 'leave': leaveRoom(conn, 'left'); break;
+    case 'ping': conn.send({ t: 'pong', ts: msg.ts }); break;   // app-level keepalive (browsers can't send WS pings)
     default: break;
   }
 }
