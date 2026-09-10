@@ -73,7 +73,8 @@ export class Duel {
   start() {
     for (const p of this.players) this.drawCards(p, p.idx === 0 ? (this.rules.handSize || 7) : 7);
     // The AI takes the same mulligan the human is offered: redraw a hand of one land or none (bounded retries).
-    for (let tries = 0; tries < 3 && this.players[1].hand.filter(isLand).length <= 1; tries++) this.mulligan(1);
+    // A remote (human) opponent is offered the mulligan through the UI instead, so don't auto-mulligan them.
+    for (let tries = 0; this.players[1].ai && tries < 3 && this.players[1].hand.filter(isLand).length <= 1; tries++) this.mulligan(1);
     for (const [idx, defs] of [[0, this.rules.playerStart], [1, this.rules.oppStart]]) for (const def of defs || []) { const c = this.instance(def, idx); c.zone = 'limbo'; this.moveTo(c, 'battlefield', { controller: idx }); c.sick = false; }
     this.events.length = 0;
     this.active = this.rng() < 0.5 ? 0 : 1; this.firstPlayer = this.active;
@@ -138,13 +139,78 @@ export class Duel {
     }
     return false;
   }
-  // human entry points
-  humanPass() { const p = this.players[0]; if (this.pending?.type !== 'priority') return false; this.pending = null; this.pass(p); this.refresh(); return true; }
-  humanEndTurn() { const p = this.players[0]; if (this.pending?.type !== 'priority') return false; p.skipToEnd = true; return this.humanPass(); }
-  humanCast(card, opts) { if (this.pending?.type !== 'priority') return false; const ok = this.cast(this.players[0], card, opts); if (ok) { this.pending = null; } this.refresh(); return ok; }
-  humanActivate(card, i, opts) { if (this.pending?.type !== 'priority') return false; const ok = this.activate(this.players[0], card, i, opts); if (ok) this.pending = null; this.refresh(); return ok; }
-  humanMana(card, i, color) { if (this.pending?.type !== 'priority') return false; const ok = this.activateMana(this.players[0], card, i, color); this.refresh(); return ok; }
-  humanAnswer(value) { if (this.pending?.type !== 'request') return false; this.pending.job.answer = value; this.pending = null; return true; }
+  // ---- player input (index-aware) ----------------------------------------------------
+  // The engine pauses (pending) for any non-AI player; whoever provides that player's input calls these.
+  // Single-player is player 0 only (the human* wrappers); multiplayer routes the remote player's input
+  // to their own index. Each guards that it really is that player's turn to act, so out-of-turn or
+  // spoofed input is a no-op.
+  actingPlayer() {   // index of the player who currently owes an action, or null
+    if (this.pending?.type === 'priority') return this.priority;
+    if (this.pending?.type === 'request') return this.pending.req.player;
+    return null;
+  }
+  canAct(idx) { return this.actingPlayer() === idx; }
+  hasPriority(idx) { return this.pending?.type === 'priority' && this.priority === idx; }
+  passFor(idx) { if (!this.hasPriority(idx)) return false; this.pending = null; this.pass(this.players[idx]); this.refresh(); return true; }
+  endTurnFor(idx) { if (!this.hasPriority(idx)) return false; this.players[idx].skipToEnd = true; return this.passFor(idx); }
+  castFor(idx, card, opts) { if (!this.hasPriority(idx)) return false; const ok = this.cast(this.players[idx], card, opts); if (ok) this.pending = null; this.refresh(); return ok; }
+  activateFor(idx, card, i, opts) { if (!this.hasPriority(idx)) return false; const ok = this.activate(this.players[idx], card, i, opts); if (ok) this.pending = null; this.refresh(); return ok; }
+  manaFor(idx, card, i, color) { if (!this.hasPriority(idx)) return false; const ok = this.activateMana(this.players[idx], card, i, color); this.refresh(); return ok; }
+  answerFor(idx, value) { if (this.pending?.type !== 'request' || this.pending.req.player !== idx) return false; this.pending.job.answer = value; this.pending = null; return true; }
+
+  // human entry points — single-player: the local human is always player 0
+  humanPass() { return this.passFor(0); }
+  humanEndTurn() { return this.endTurnFor(0); }
+  humanCast(card, opts) { return this.castFor(0, card, opts); }
+  humanActivate(card, i, opts) { return this.activateFor(0, card, i, opts); }
+  humanMana(card, i, color) { return this.manaFor(0, card, i, color); }
+  humanAnswer(value) { return this.answerFor(0, value); }
+
+  // ---- multiplayer serialization -----------------------------------------------------
+  // A redacted, plain-object snapshot of the whole game as `forIdx` is allowed to see it: their own
+  // hand is visible, the opponent's hand and both libraries are face-down (id + count only). Public
+  // zones (battlefield, graveyard, exile, stack) are fully visible. Card names let the receiver rebuild
+  // a render mirror via defOf; the per-card fields let it re-derive current characteristics with refresh().
+  snapshot(forIdx) {
+    const serCard = c => ({
+      id: c.id, name: c.def.name, controller: c.controller, owner: c.owner,
+      tapped: !!c.tapped, sick: !!c.sick, damage: c.damage | 0, token: !!c.token,
+      counters: { ...c.counters }, temp: { p: c.temp.p | 0, t: c.temp.t | 0, kw: [...c.temp.kw], flags: [...c.temp.flags] },
+      flags: [...c.flags], regen: c.regen | 0, shield: c.shield | 0, chosenColor: c.chosenColor || null,
+      attachedTo: c.attachedTo ? c.attachedTo.id : null,
+      power: isCreature(c) ? power(c) : null, toughness: isCreature(c) ? toughness(c) : null,
+    });
+    const serPlayer = i => {
+      const p = this.players[i], mine = i === forIdx;
+      return {
+        idx: i, name: p.name, life: p.life, poison: p.poison, landPlayed: p.landPlayed,
+        pool: { ...p.pool }, shield: p.shield | 0, cop: [...p.cop], ai: !!p.ai,
+        battlefield: p.battlefield.map(serCard), graveyard: p.graveyard.map(serCard), exile: p.exile.map(serCard),
+        hand: mine ? p.hand.map(serCard) : p.hand.map(c => ({ id: c.id, hidden: true })),
+        handCount: p.hand.length, libraryCount: p.library.length,
+      };
+    };
+    const stack = this.stack.map(it => ({
+      id: it.id, kind: it.kind, controller: it.controller,
+      name: it.card ? it.card.def.name : (it.label || it.name || 'ability'),
+      targets: (it.targets || []).map(t => ({ ...t })),
+    }));
+    // The opponent's private requests are hidden — the receiver only learns that they are waiting on them.
+    let pending = null;
+    if (this.pending?.type === 'priority') pending = { type: 'priority', player: this.priority };
+    else if (this.pending?.type === 'request') {
+      const req = this.pending.req;
+      pending = req.player === forIdx ? { type: 'request', req } : { type: 'request', player: req.player, waiting: true };
+    }
+    return {
+      forIdx, turn: this.turn, active: this.active, priority: this.priority, step: this.step,
+      stepIndex: this.stepIndex, firstPlayer: this.firstPlayer, winner: this.winner,
+      fog: this.fog, extraTurns: this.extraTurns, attackers: [...this.attackers],
+      blocks: Object.fromEntries(Object.entries(this.blocks).map(([k, v]) => [k, [...v]])),
+      stack, pending, fx: this.fx.map(f => ({ ...f })), log: this.log.slice(-60),
+      players: [serPlayer(0), serPlayer(1)],
+    };
+  }
 
   pass(p) {
     this.passes++;
