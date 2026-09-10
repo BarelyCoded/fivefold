@@ -43,14 +43,26 @@ function trim(c) {
   };
 }
 
-async function getJson(url, init) {
-  const res = await fetch(url, { ...init, headers: { ...HEADERS, ...(init?.headers || {}) } });
-  if (!res.ok) {
+async function getJson(url, init, tries = 3) {
+  let lastErr;
+  for (let attempt = 0; attempt < tries; attempt++) {
+    let res;
+    try {
+      res = await fetch(url, { ...init, headers: { ...HEADERS, ...(init?.headers || {}) } });
+    } catch (e) {
+      // Network-level failure (fetch rejects with "Failed to fetch"): a blip, rate limiter, or offline.
+      // Back off and retry a couple of times before giving up.
+      lastErr = e;
+      if (attempt < tries - 1) { await pause(500 * (attempt + 1)); continue; }
+      throw e;
+    }
+    if (res.ok) return res.json();
     if (res.status === 404) return null;
+    if ((res.status === 429 || res.status >= 500) && attempt < tries - 1) { await pause(600 * (attempt + 1)); continue; }
     let detail = ''; try { detail = (await res.json()).details || ''; } catch { /* ignore */ }
     throw new Error(`Scryfall returned ${res.status}${detail ? ': ' + detail : ''}`);
   }
-  return res.json();
+  throw lastErr || new Error('request failed');
 }
 
 // Find the earliest paper printing for a set of names. Returns Map(norm(name) -> card json).

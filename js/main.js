@@ -118,11 +118,23 @@ async function ensureContent() {
   for (const n of Object.keys(S.collection)) names.add(n);
   if (S.game) for (const n of Object.keys(S.game.deck)) names.add(n);
   setBusy('Fetching card data from Scryfall…');
-  await fetchCards([...names], (done, total, phase) => setBusy(phase === 'art' ? `Finding original printings for art… ${done}/${total}` : `Fetching card data from Scryfall… ${done}/${total}`));
+  // Scryfall is an enhancement (rules text + art), not part of the game shell. A blip or an offline
+  // player who already has cards cached should still get into the game, so a fetch failure here degrades
+  // to "play from cache" rather than bricking the boot. New cards that couldn't be fetched are simply
+  // unavailable until the next successful load.
+  try {
+    await fetchCards([...names], (done, total, phase) => setBusy(phase === 'art' ? `Finding original printings for art… ${done}/${total}` : `Fetching card data from Scryfall… ${done}/${total}`));
+  } catch (e) {
+    console.warn('Scryfall fetch failed; continuing from cache', e);
+    S.cardWarn = cacheSize()
+      ? 'Could not reach Scryfall — playing from cached cards. Some cards may be missing until you reconnect and reload.'
+      : 'Could not reach Scryfall to load card data. Check your connection and reload — the game needs it the first time.';
+  }
   forgetDefs();
   await loadArtIndex();
   S.ready = true; setBusy(null);
   if (S.game?.world) placeDungeons(S.game.world, Math.random, S.dungeons.dungeons);
+  if (S.cardWarn) toast(S.cardWarn);
 }
 function dungeonTemplate(id) { return S.dungeons.dungeons.find(d => d.id === id); }
 function setBusy(msg) { S.busy = msg; const el = document.getElementById('status'); if (el) { el.textContent = msg || ''; el.hidden = !msg; } }
@@ -1867,4 +1879,9 @@ window.ff = { S, defOf, save, render, startDuel, enemyById, startTutorialDuel, r
 initPreview();
 load();
 render();
-ensureContent().then(() => { if (S.game && S.game.status === 'playing') go(S.game.dungeon ? 'dungeon' : 'map'); else render(); prefetchCatalog(); }).catch(e => { setBusy('Could not load card data: ' + e.message + ' (is the internet reachable?)'); });
+ensureContent().then(() => { if (S.game && S.game.status === 'playing') go(S.game.dungeon ? 'dungeon' : 'map'); else render(); prefetchCatalog(); }).catch(e => {
+  // We only reach here if the game's own data files (content/*.json) couldn't be loaded — a server or
+  // deployment problem, or opening index.html directly over file://. Card data (Scryfall) no longer fails boot.
+  console.error('boot failed loading game content', e);
+  setBusy(`Could not load the game's data files (${e.message}). Serve the folder with "node server.js" (or "node relay.js") and open the address it prints — opening index.html directly won't work.`);
+});
