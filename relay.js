@@ -110,7 +110,10 @@ const rooms = new Map();   // code -> { code, name, host, guest }
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';   // no easily-confused chars
 function newCode() { let c; do { c = Array.from({ length: 4 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join(''); } while (rooms.has(c)); return c; }
 function openRooms() { return [...rooms.values()].filter(r => r.host && !r.guest).map(r => ({ code: r.code, name: r.name, host: r.host.name })); }
-function broadcastLobby() { for (const c of conns) if (c.alive && !c.room) c.send({ t: 'lobby', rooms: openRooms() }); }
+// Everyone who is choosing a game gets the live list: idle connections AND a host still waiting for a
+// challenger (so a waiting host can see other open games and drop their own to join one). Connections in
+// a full room (mid-match) are left alone.
+function broadcastLobby() { for (const c of conns) if (c.alive && (!c.room || (c.room.host === c && !c.room.guest))) c.send({ t: 'lobby', rooms: openRooms() }); }
 const conns = new Set();
 
 function leaveRoom(conn, reason) {
@@ -145,6 +148,7 @@ function handle(conn, msg) {
     case 'join': {
       const room = rooms.get(String(msg.code || '').toUpperCase().trim());
       if (!room) { conn.send({ t: 'joinError', reason: 'no-such-room' }); break; }
+      if (room.host === conn) break;   // can't join your own game (a waiting host clicking its own row) — ignore
       if (room.guest) { conn.send({ t: 'joinError', reason: 'room-full' }); break; }
       if (conn.room) leaveRoom(conn, 'rejoining');
       if (msg.name) conn.name = String(msg.name).slice(0, 24);

@@ -1507,7 +1507,7 @@ async function mpConnect() {
 }
 function mpWire(net) {
   net.on('lobby', rooms => { if (S.mp) { S.mp.rooms = rooms; if (S.screen === 'mplobby') render(); } });
-  net.on('hosted', room => { if (!S.mp) return; S.mp.role = 'host'; S.mp.room = room; S.mp.view = 'host-wait'; render(); });
+  net.on('hosted', room => { if (!S.mp) return; S.mp.role = 'host'; S.mp.room = room; S.mp.view = 'lobby'; S.mp.msg = ''; render(); });
   net.on('peerJoined', ({ name }) => { if (!S.mp) return; S.mp.oppName = name; mpToDeck(); });      // host: a guest arrived
   net.on('joined', room => { if (!S.mp) return; S.mp.role = 'guest'; S.mp.room = room; S.mp.oppName = room.host; mpToDeck(); });
   net.on('joinError', reason => { if (!S.mp) return; S.mp.msg = reason === 'no-such-room' ? 'No room with that code.' : reason === 'room-full' ? 'That room is already full.' : String(reason); render(); });
@@ -1630,7 +1630,7 @@ function mpPeerLeft(info) {
   mp.oppReady = false; mp.oppDeck = null; mp.started = false; mp.duel = null; mp.mirror = null; mp.root = null; mp.api = null; mp.winner = null;
   S.modal = null;
   if (info.roomClosed) { mp.room = null; mp.role = null; mp.view = 'lobby'; mp.msg = 'The host closed the room.'; mp.net?.list(); go('mplobby'); }
-  else { mp.oppName = null; mp.msg = 'Your opponent left. Waiting for a new challenger…'; mp.view = 'host-wait'; go('mplobby'); }
+  else { mp.oppName = null; mp.msg = 'Your opponent left. Your game is open again, listed in the lobby.'; mp.view = 'lobby'; mp.net?.list(); go('mplobby'); }
 }
 
 function mplobby() {
@@ -1646,25 +1646,25 @@ function mplobby() {
       <label>Relay address <input id="mp-addr" value="${esc(mp.addr)}" spellcheck="false"></label>
       ${mp.msg ? `<p class="warn small">${esc(mp.msg)}</p>` : ''}
       <div class="btnrow"><button class="btn primary" id="mp-connect">Connect</button><button class="btn ghost" data-go="title">Back</button></div>`;
-  } else if (mp.view === 'host-wait') {
-    body = `<h2>Waiting for a challenger…</h2>
-      <p class="small">Your game is listed in the lobby. Anyone connected can pick it — or share this code for a direct join:</p>
-      <p class="mp-code">${esc(mp.room?.code || '????')}</p>
-      ${mp.msg ? `<p class="small">${esc(mp.msg)}</p>` : ''}
-      <div class="btnrow"><button class="btn ghost" id="mp-cancel">Cancel</button></div>`;
   } else if (mp.view === 'starting') {
     body = `<h2>Starting the duel…</h2><p class="small">Both decks are ready. Shuffling up.</p>`;
   } else {
-    // The lobby: a live list of open games waiting for a player, plus Host and join-by-code.
+    // The lobby: a live list of open games. A waiting host sees the same list (their own game shown as a
+    // banner, everyone else's still joinable) so they can drop their host and join another game instead.
+    const hosting = mp.role === 'host' && mp.room;
+    const others = mp.rooms.filter(r => r.code !== mp.room?.code);   // don't list your own game as joinable
     body = `<div class="rowhead"><h2>Open games</h2><span class="small">playing as <b>${esc(mp.name)}</b> · <button class="linkbtn" id="mp-rename">change</button></span></div>
-      <div class="btnrow mp-lobbybar"><button class="btn primary" id="mp-host">Host a game</button>
-        <input id="mp-code" placeholder="code" maxlength="4" style="text-transform:uppercase;width:5.5em">
-        <button class="btn" id="mp-join">Join by code</button>
-        <button class="btn ghost" id="mp-refresh" title="Refresh the list">↻</button></div>
+      ${hosting
+        ? `<div class="mp-hosting"><div><b>You're hosting.</b> Waiting for a challenger — share code <span class="mp-code inline">${esc(mp.room.code)}</span> for a direct join.</div>
+             <button class="btn ghost" id="mp-cancel">Stop hosting</button></div>`
+        : `<div class="btnrow mp-lobbybar"><button class="btn primary" id="mp-host">Host a game</button>
+             <input id="mp-code" placeholder="code" maxlength="4" style="text-transform:uppercase;width:5.5em">
+             <button class="btn" id="mp-join">Join by code</button>
+             <button class="btn ghost" id="mp-refresh" title="Refresh the list">↻</button></div>`}
       ${mp.msg ? `<p class="warn small">${esc(mp.msg)}</p>` : ''}
-      ${mp.rooms.length
-        ? `<ul class="mp-rooms">${mp.rooms.map(r => `<li data-mpjoin="${esc(r.code)}"><span class="mp-game-name"><b>${esc(r.host)}</b><span class="small"> — ${esc(r.name)}</span></span><span class="mp-join-hint">Join →</span></li>`).join('')}</ul>`
-        : `<p class="small mp-empty">No open games yet. <b>Host a game</b> and it'll appear here for others to join — or wait for someone to host.</p>`}
+      ${others.length
+        ? `<ul class="mp-rooms">${others.map(r => `<li data-mpjoin="${esc(r.code)}"><span class="mp-game-name"><b>${esc(r.host)}</b><span class="small"> — ${esc(r.name)}</span></span><span class="mp-join-hint">${hosting ? 'Drop &amp; join →' : 'Join →'}</span></li>`).join('')}</ul>`
+        : `<p class="small mp-empty">${hosting ? 'No other open games right now — sit tight, or share your code.' : "No open games yet. <b>Host a game</b> and it'll appear here for others to join — or wait for someone to host."}</p>`}
       <div class="btnrow"><button class="btn ghost" id="mp-quit">Leave</button></div>`;
   }
   app.innerHTML = `<section class="screen mplobby"><div class="box">${body}</div></section>`;
@@ -1680,6 +1680,76 @@ function mpPool() {
 }
 // Editing the deck un-readies you and tells your opponent so a match can't start on a stale deck.
 function mpEdit(fn) { const mp = S.mp; fn(mp.deck); if (mp.ready) { mp.ready = false; mp.net.relay({ k: 'ready', ready: false }); } render(); }
+// ---- deck import / export (bring a list in, save one out) --------------------------
+// A decklist as plain text: "N Card Name" per line, spells first then lands, so it round-trips cleanly.
+function mpDeckText(deck) {
+  const rows = Object.entries(deck).filter(([, c]) => c > 0).map(([n, c]) => ({ n, c, d: defOf(n) }));
+  rows.sort((a, b) => ((a.d?.kind === 'land') - (b.d?.kind === 'land')) || ((a.d?.cmc || 0) - (b.d?.cmc || 0)) || a.n.localeCompare(b.n));
+  return rows.map(r => `${r.c} ${r.n}`).join('\n');
+}
+function mpDownload(name, text) {
+  try {
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+    const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch { toast('Could not start the download.'); }
+}
+function mpExport() {
+  const mp = S.mp; if (!mp || !deckSize(mp.deck)) { toast('Build a deck first.'); return; }
+  const text = mpDeckText(mp.deck);
+  S.modal = {
+    title: 'Export deck',
+    body: `<p class="small">Copy this list or download it, then bring it back with <b>Import</b> here or on another machine.</p>
+      <textarea id="mp-exp" class="mp-decktext" readonly rows="12">${esc(text)}</textarea>`,
+    buttons: [
+      { label: 'Copy', primary: true, action: () => { const t = document.getElementById('mp-exp'); if (t) { t.focus(); t.select(); try { navigator.clipboard?.writeText(t.value); } catch {} try { document.execCommand('copy'); } catch {} } toast('Deck copied to the clipboard.'); } },
+      { label: 'Download', action: () => mpDownload(`${(mp.name || 'deck').replace(/[^\w-]+/g, '_') || 'deck'}.txt`, text) },
+      { label: 'Close', action: () => { S.modal = null; render(); } },
+    ],
+  };
+  render();
+  setTimeout(() => { const t = document.getElementById('mp-exp'); if (t) { t.focus(); t.select(); } }, 0);
+}
+function mpImportPrompt() {
+  S.modal = {
+    title: 'Import deck',
+    body: `<p class="small">Paste a decklist — one card per line, like <code>4 Lightning Bolt</code>. Set codes in parentheses are ignored. Only cards this demo supports are added; anything else is listed back to you.</p>
+      <textarea id="mp-imp" class="mp-decktext" rows="12" placeholder="20 Mountain&#10;4 Lightning Bolt&#10;4 Shock&#10;..."></textarea>`,
+    buttons: [
+      { label: 'Import', primary: true, action: () => { const t = document.getElementById('mp-imp'); mpImport(t ? t.value : ''); } },
+      { label: 'Cancel', action: () => { S.modal = null; render(); } },
+    ],
+  };
+  render();
+  setTimeout(() => { document.getElementById('mp-imp')?.focus(); }, 0);
+}
+function mpImport(text) {
+  const mp = S.mp; if (!mp) return;
+  const entries = parseList(text || '');
+  if (!entries.length) { toast('No card lines found to import.'); return; }
+  // Resolve names against the cached, supported catalogue (case-insensitive); basics always resolve.
+  const byLower = new Map();
+  for (const c of allCached()) { const k = c.name.toLowerCase(); if (!byLower.has(k)) byLower.set(k, c.name); }
+  const deck = {}; const missing = []; let capped = false;
+  for (const { name, count } of entries) {
+    const canon = defOf(name) ? name : byLower.get(name.toLowerCase());
+    const d = canon ? defOf(canon) : null;
+    if (!d || d.kind === 'unsupported') { missing.push(name); continue; }
+    const cap = copyCap(canon), have = deck[canon] || 0;
+    const want = Math.min(have + Math.max(0, count), cap);
+    if (have + count > cap) capped = true;
+    deck[canon] = want;
+  }
+  if (!Object.keys(deck).length) { toast('None of those cards are available in this demo.'); return; }
+  mp.deck = deck;
+  if (mp.ready) { mp.ready = false; mp.net?.relay({ k: 'ready', ready: false }); }
+  S.modal = null;
+  const notes = [];
+  if (missing.length) notes.push(`${missing.length} skipped (not in this demo): ${missing.slice(0, 5).join(', ')}${missing.length > 5 ? '…' : ''}`);
+  if (capped) notes.push(`some entries were trimmed to the ${MAX_COPIES}-copy limit`);
+  toast(notes.length ? `Imported. ${notes.join('; ')}.` : `Imported ${deckSize(deck)} cards.`);
+  render();
+}
 function mpdeck() {
   const mp = S.mp; if (!mp) return title();
   const sandbox = mpSandbox();
@@ -1696,7 +1766,7 @@ function mpdeck() {
       ${owned.map(r => { const used = mp.deck[r.n] || 0; const room = deckRoom(r.n, mp.deck, sandbox); const atCap = used >= copyCap(r.n); return `<tr><td data-preview="${esc(r.n)}">${esc(r.n)}<span class="small"> ${esc(r.d.typeLine)}</span></td><td>${r.d.kind === 'land' ? '' : manaHtml(r.d.cost)}</td><td>${used}${atCap ? ' <span class="small">(max)</span>' : ''}</td><td class="nowrap"><button class="btn tiny" data-mpadd="${esc(r.n)}" ${room <= 0 ? 'disabled' : ''}>+</button><button class="btn tiny" data-mpaddmax="${esc(r.n)}" ${room <= 0 ? 'disabled' : ''} title="Add up to ${copyCap(r.n)}">+all</button></td></tr>`; }).join('')}</table>
     </div>
     <div class="box">
-      <div class="rowhead"><h2>Your deck · ${size} cards, ${lands} lands</h2><span class="rowtools"><button class="btn" id="mp-clear"${size ? '' : ' disabled'}>Clear</button></span></div>
+      <div class="rowhead"><h2>Your deck · ${size} cards, ${lands} lands</h2><span class="rowtools"><button class="btn" id="mp-import">Import</button><button class="btn" id="mp-export"${size ? '' : ' disabled'}>Export</button><button class="btn" id="mp-clear"${size ? '' : ' disabled'}>Clear</button></span></div>
       <details class="mp-quick"><summary>Quick deck</summary>
         <fieldset><legend>Main colour</legend>${COLORS.map(c => `<label class="radio"><input type="radio" name="mpcolor" value="${c}" ${c === mp.deckColor ? 'checked' : ''}> <i class="dot c-${c}"></i>${COLOR_NAME[c]}</label>`).join('')}</fieldset>
         <label>Colours <select id="mp-diff">${Object.entries(DIFF).map(([k, d]) => `<option value="${k}" ${k === mp.deckDiff ? 'selected' : ''}>${['', 'One colour', 'Two colours', 'Three colours'][d.colors]}</option>`).join('')}</select></label>
@@ -1759,6 +1829,8 @@ document.addEventListener('click', ev => {
     case 'mp-cancel': if (mp) { mp.net.leave(); mp.role = null; mp.room = null; mp.view = 'lobby'; mp.msg = ''; mp.net.list(); render(); } break;
     case 'mp-reroll': mpReroll(); break;
     case 'mp-clear': mpEdit(d => { for (const k of Object.keys(d)) delete d[k]; }); break;
+    case 'mp-import': mpImportPrompt(); break;
+    case 'mp-export': mpExport(); break;
     case 'mp-ready': mpReady(); break;
     case 'mp-quit': mpLeave(); break;
   }
