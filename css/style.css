@@ -580,3 +580,5 @@ svg.arrows { position: absolute; left: 0; top: 0; pointer-events: none; z-index:
 .bw-grp-h { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #a8946a; border-bottom: 1px solid #4a3c2c; margin: 6px 0 2px; }
 .bw-more { text-align: center; color: #a8946a; padding: 6px; }
 .dot.c-gold { background: linear-gradient(135deg, #e8c060, #c88a30); }
+
+.reqrefs { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }

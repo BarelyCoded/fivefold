@@ -37,7 +37,7 @@ function show(def, host, ev) {
   const own = hasOwnArt(def);
   const pt = host.querySelector('.card-pt')?.textContent || (def.kind === 'creature' ? `${def.power}/${def.toughness}` : '');
   const kws = def.kwNames?.length ? def.kwNames.join(', ') : (def.keywords || []).map(k => typeof k === 'string' ? k : k.k).join(', ');
-  const showText = !art || own;
+  const showText = true;   // always: the art alone doesn't tell you what an unfamiliar card does
   el.innerHTML = `
     <div class="bc-img${art ? '' : ' none'}" style="${art ? `background-image:url('${art}')` : ''}">
       ${!art ? `<div class="bc-fallback"><b>${esc(def.name)}</b><span>${esc(def.typeLine)}</span></div>` : ''}

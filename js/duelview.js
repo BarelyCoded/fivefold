@@ -263,7 +263,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
       const target = targeting() ? (g.all.find(c => isLegal({ type: 'perm', id: c.id })) || first) : first;
       if (p === me && duel.pending?.type === 'priority' && untapped.length) cls.push('usable');
       if (ui.paying && p === me && untapped.length && g.def.manaAbilities.length) cls.push('pay-source');
-      return `<div class="${cls.join(' ')}" data-id="${target.id}" data-zone="bf" data-name="${esc(g.name)}"><i></i>${esc(g.name)}<b>${untapped.length}/${g.all.length}</b></div>`;
+      return `<div class="${cls.join(' ')}" data-id="${target.id}" data-zone="bf" data-name="${esc(g.name)}" data-preview="${esc(g.name)}"><i></i>${esc(g.name)}<b>${untapped.length}/${g.all.length}</b></div>`;
     });
     return `<div class="lands"><div class="lands-title">Lands</div>${items.join('') || '<div class="small">none</div>'}</div>`;
   }
@@ -386,7 +386,12 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
       case 'yesno': return `<div class="hint">${esc(req.text)}</div><button class="btn primary" data-answer="yes">Yes</button><button class="btn" data-answer="no">No</button>`;
       case 'number': return `<div class="hint">${esc(req.text)} (${req.min}–${req.max})</div><div class="xrow"><input id="numval" type="number" min="${req.min}" max="${req.max}" value="${req.default ?? req.min}"><button class="btn primary" data-num="ok">OK</button></div>`;
       case 'color': return `<div class="hint">${esc(req.text)}</div>${COLORS.map(c => `<button class="btn" data-color="${c}">${c}</button>`).join('')}`;
-      case 'target': return `<div class="hint">${esc(req.text)} — click it on the table.</div>${req.options.filter(o => o.type === 'card').map(o => `<button class="btn small" data-reqref="${o.type}:${o.id}">${esc(o.label)}</button>`).join('')}`;
+      case 'target': {
+        // Every legal target is also a button, named by owner, so a choice among lands or lookalikes is explicit.
+        const label = o => { if (o.type === 'perm') { const c = cardOf(o.id); const who = c ? duel.players[c.controller] : null; return `${who ? (who === me ? 'Your' : who.name + "'s") + ' ' : ''}${o.label}`; } if (o.type === 'player') return o.label; return `${o.label} (graveyard)`; };
+        const key = o => o.type === 'player' ? `player:${o.idx}` : `${o.type}:${o.id}`;
+        return `<div class="hint">${esc(req.text)} — click it on the table or pick below.</div><div class="reqrefs">${req.options.map(o => `<button class="btn small" data-reqref="${key(o)}">${esc(label(o))}</button>`).join('')}</div>`;
+      }
       case 'look': return `<div class="hint">${esc(req.text)}.</div><div class="choices">${req.options.map((o, i) => `<div class="choice" data-preview="${esc(o.label)}">${i + 1}. ${esc(o.label)}</div>`).join('')}</div><button class="btn primary" id="b-look">OK</button>`;
       case 'order': {
         if (!ui.order || ui.order.length !== req.options.length || ui.order.some(id => !req.options.some(o => o.id === id))) ui.order = req.options.map(o => o.id);
@@ -579,7 +584,12 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
       ] }; render(); return;
     }
     if (canCast) { startCast(card, {}, auto); return; }
-    act.cast(card, { cycling: true }); run();
+    // Cycling is the only option: confirm first — it discards the card and can't be taken back.
+    const cy = card.def.keywords.find(k => k.k === 'Cycling');
+    ui.menu = { title: card.def.name, items: [
+      { label: `Cycle (${costText({ mana: cy.cost })}): discard it, draw a card`, primary: true, action: () => { ui.menu = null; act.cast(card, { cycling: true }); run(); } },
+      { label: 'Cancel', action: () => { ui.menu = null; render(); } },
+    ] }; render();
   }
   // Double-click a permanent with exactly one unambiguous ability -> use it straight away (Vampire Bats,
   // Llanowar Elves). Anything more (a choice of colours or several abilities) still opens the menu.
@@ -675,7 +685,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     if (btn.dataset.wiz === 'cancel') { ui.wizard = null; ui.menu = null; render(); return; }
     if (btn.dataset.wiz === 'x') { const v = Math.max(0, Math.min(ui.wizard.maxX, Number(root.querySelector('#xval').value) || 0)); if (ui.wizard.ability !== undefined) ui.wizard.onX(v); else { ui.wizard.opts.x = v; next(ui.wizard); } return; }
     if (btn.dataset.wizref) { const [type, id] = btn.dataset.wizref.split(':'); pickRef({ type, id: Number(id) }); return; }
-    if (btn.dataset.reqref) { const [type, id] = btn.dataset.reqref.split(':'); pickRef({ type, id: Number(id) }); return; }
+    if (btn.dataset.reqref) { const [type, id] = btn.dataset.reqref.split(':'); pickRef(type === 'player' ? { type, idx: Number(id) } : { type, id: Number(id) }); return; }
     if (btn.dataset.answer) { act.answer(btn.dataset.answer === 'yes'); run(); return; }
     if (btn.dataset.num) { const req = duel.pending?.req; if (!req || req.kind !== 'number') return; const v = Math.max(req.min, Math.min(req.max, Number(root.querySelector('#numval')?.value) || 0)); act.answer(v); run(); return; }
     if (btn.dataset.order && ui.order) { const i = Number(btn.dataset.idx), j = btn.dataset.order === 'up' ? i - 1 : i + 1; if (j >= 0 && j < ui.order.length) { [ui.order[i], ui.order[j]] = [ui.order[j], ui.order[i]]; render(); } return; }
