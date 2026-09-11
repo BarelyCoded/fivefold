@@ -283,7 +283,8 @@ export function spawnBazaar(world, player, rng) {
 //   Black / Wastes   → swamp   : slow to cross (double time & food); mages avoid it (a refuge).
 //   Green / Forest   → bramble : passable but thorny — costs life to push through; mages cross it.
 //   Blue / Coast     → fog     : passable, but your sight collapses inside it; mages cross it.
-// Lava and swamp are in blockedForEnemy (walls to mages); bramble and fog are not.
+//   White / Plains   → salt    : passable, but out on the open flats mages spot you from far off; they cross it.
+// Lava and swamp are in blockedForEnemy (walls to mages); bramble, fog and salt are not.
 const lkey = (x, y) => `${x},${y}`;
 function poolAt(world, prop, cacheProp, x, y) {
   const arr = world && world[prop];
@@ -295,6 +296,7 @@ export function lavaAt(world, x, y) { return poolAt(world, 'lava', '_lavaSet', x
 export function swampAt(world, x, y) { return poolAt(world, 'swamp', '_swampSet', x, y); }
 export function brambleAt(world, x, y) { return poolAt(world, 'bramble', '_brambleSet', x, y); }
 export function fogAt(world, x, y) { return poolAt(world, 'fog', '_fogSet', x, y); }
+export function saltAt(world, x, y) { return poolAt(world, 'salt', '_saltSet', x, y); }
 // Grow a scatter of pools (mostly small, a few large) over one biome, avoiding roads and anything already
 // on the map. Stored on the world so it saves; deterministic given the rng passed in.
 function placePools(world, rng, player, biome, prop) {
@@ -327,14 +329,16 @@ export function placeLava(world, rng, player = null) { return placePools(world, 
 export function placeSwamp(world, rng, player = null) { return placePools(world, rng, player, 'B', 'swamp'); }
 export function placeBrambles(world, rng, player = null) { return placePools(world, rng, player, 'G', 'bramble'); }
 export function placeFog(world, rng, player = null) { return placePools(world, rng, player, 'U', 'fog'); }
+export function placeSalt(world, rng, player = null) { return placePools(world, rng, player, 'W', 'salt'); }
 // Roaming AI: enemies within sight give chase and step toward the player; otherwise they wander their
 // own terrain. An enemy that steps onto the player's tile catches them — returned so the caller can
 // start the duel. Cities, mana links and landmarks are safe: enemies never step onto them.
 export function stepEnemies(world, rng, player, haste) {
   let caught = null;
+  const exposed = saltAt(world, player.x, player.y);   // out on the open salt flats there is nowhere to hide
   for (const e of world.enemies) {
     const pd = Math.abs(e.x - player.x) + Math.abs(e.y - player.y);
-    const sight = e.tier >= 2 ? 6 : 4;                 // tougher foes notice you from farther off
+    const sight = (e.tier >= 2 ? 6 : 4) + (exposed ? 4 : 0);   // tougher foes notice you from farther off; flats farther still
     const chase = pd <= sight && !player.cloak && !haste;  // a Shadow Cloak, or a road underfoot, breaks pursuit
     if (!chase && rng() > 0.45) continue;              // idle enemies only amble
     let opts;
@@ -459,7 +463,7 @@ function paintTiles(world) {
     }
     return { mask, near };
   };
-  const lavaP = buildPools(world.lava), swampP = buildPools(world.swamp), bramblP = buildPools(world.bramble), fogP = buildPools(world.fog);
+  const lavaP = buildPools(world.lava), swampP = buildPools(world.swamp), bramblP = buildPools(world.bramble), fogP = buildPools(world.fog), saltP = buildPools(world.salt);
   // Sum of a smooth radial falloff from each nearby pool-tile centre. A lone tile makes a rounded pool;
   // neighbours merge with a rounded neck; convex corners of a run round off — like liquid, not tiles.
   const POOL_RK = PX * 1.02, POOL_ISO = 0.46, POOL_CORE = 0.60, r2 = POOL_RK * POOL_RK;
@@ -525,7 +529,7 @@ function paintTiles(world) {
   for (let y = 0; y < Hp; y++) for (let x = 0; x < Wp; x++) {
     const b = owner(x, y);
     const tx = Math.floor(x / PX), ty = Math.floor(y / PX);
-    let rect, lavaRim = false, lavaCore = false, swampRim = false, swampCore = false, bramRim = false, bramCore = false, fogA = 0;
+    let rect, lavaRim = false, lavaCore = false, swampRim = false, swampCore = false, bramRim = false, bramCore = false, saltRim = false, saltCore = false, fogA = 0;
     const idx = ty * W_ + tx, lt = TERRAIN[at(tx, ty)] && TERRAIN[at(tx, ty)].accent;
     // Perturbed metaball value of a pool at this pixel: big lobes swell and pinch the pool, mid ripples and
     // a little fine crenellation break the perfect oval so no edge or corner reads as geometric.
@@ -553,6 +557,13 @@ function paintTiles(world) {
       const c = poolAtPx(bramblP.mask);
       if (c === 'core') { rect = pick(lt, h(tx, ty, 6)); bramCore = true; }
       else if (c === 'rim') { rect = groundRect(b, tx, ty, x, y); bramRim = true; }
+      else rect = groundRect(b, tx, ty, x, y);
+    } else if (saltP.near[idx]) {
+      // salt pans have no accent texture of their own, so bleach the plains ground into a bright cracked flat
+      const st = TERRAIN.W && TERRAIN.W.base, e = poolE(saltP.mask), split = POOL_CORE + (vnoise(x / 16, y / 16, seed + 205) - 0.5) * 0.12;
+      const c = st && st.length ? (e > split ? 'core' : e > POOL_ISO ? 'rim' : null) : null;
+      if (c === 'core') { rect = pick(st, h(tx, ty, 6)); saltCore = true; }
+      else if (c === 'rim') { rect = groundRect(b, tx, ty, x, y); saltRim = true; }
       else rect = groundRect(b, tx, ty, x, y);
     } else if (fogP.near[idx]) {
       // fog has no crisp shore: draw the water/ground beneath and feather a pale mist over it, densest in
@@ -585,6 +596,12 @@ function paintTiles(world) {
       const t = (0.3 * R + 0.59 * G + 0.11 * B) / 255;
       R = 32 + t * 44; G = 28 + t * 34; B = 15 + t * 16;   // dark shadowed earth; the briar sprites sit on top
     } else if (bramRim) { R = 26; G = 22; B = 12; }   // dark thorny earth at the edge
+    else if (saltCore) {
+      // bleach the plains into a glaring salt pan: bright, near-white and slightly cool so it reads as
+      // exposed flats rather than warm sand.
+      const t = (0.3 * R + 0.59 * G + 0.11 * B) / 255;
+      R = 182 + t * 56; G = 184 + t * 54; B = 180 + t * 50;
+    } else if (saltRim) { R = 150; G = 140; B = 112; }   // cracked tan crust at the edge
     if (fogA > 0) { R += (224 - R) * fogA; G += (230 - G) * fogA; B += (240 - B) * fogA; }   // pale drifting mist
     img[di] = R; img[di + 1] = G; img[di + 2] = B; img[di + 3] = 255;
   }
@@ -596,7 +613,7 @@ function paintTiles(world) {
   const nearCity = (x, y) => world.cities.some(ct => Math.abs(ct.x - x) <= 3 && Math.abs(ct.y - y) <= 3 && (Math.abs(ct.x - x) + Math.abs(ct.y - y)) >= 2);
   for (let y = 0; y < world.h; y++) for (let x = 0; x < world.w; x++) {
     const b = at(x, y), X = x * PX, Y = y * PX;
-    if (reserved.has(`${x},${y}`) || lavaAt(world, x, y) || swampAt(world, x, y)) continue;   // nothing grows in a pool
+    if (reserved.has(`${x},${y}`) || lavaAt(world, x, y) || swampAt(world, x, y) || saltAt(world, x, y)) continue;   // nothing grows in a pool or on the flats
     // objects sit on their tile: feet near the tile's bottom edge, a little jitter, sized to the tile by `frac`
     const spot = (i) => [X + PX / 2 + Math.round((h(x, y, 400 + i) - 0.5) * 10) + (i === 1 ? 9 : i === 0 ? -3 : 0), Y + PX - 2 + Math.round((h(x, y, 420 + i) - 0.5) * 4)];
     const add = (rect, fx, fy, frac) => feats.push({ y: fy, draw: () => blitAt(ctx, rect, fx, fy, tileFit(rect, frac)) });
