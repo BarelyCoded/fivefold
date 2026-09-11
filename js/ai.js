@@ -517,6 +517,7 @@ export const aiHooks = {
     switch (req.kind) {
       case 'attackers': return chooseAttackers(duel, p);
       case 'blockers': return chooseBlocks(duel, p);
+      case 'number': return req.default ?? req.min;
       case 'yesno': {
         if (req.value === 'upkeep') { const c = duel.card(req.card); return c ? value(c) >= 3.5 : false; }
         if (req.value === 'payTrigger') { const c = duel.card(req.card); if (!c) return true; if (c.controller === p.idx) return true; const host = c.attachedTo; return host ? value(host) >= 3 : false; }

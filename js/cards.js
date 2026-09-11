@@ -332,6 +332,25 @@ const rules = [
   [/^destroy each (.+?) with mana value equal to the number of (\w+) counters on ~$/, m => { const k = T('each ' + m[1]); if (!k) return null; return [{ type: 'destroyAll', restrict: k.restrict, cmcEq: { calc: 'counters', kind: m[2] } }]; }],
   // Karn, Silver Golem: animate a noncreature artifact with P/T equal to its mana value.
   [/^(target .+?) becomes an artifact creature with power and toughness each equal to its mana value until end of turn$/, m => tgt({ type: 'animateTarget' }, m[1])],
+  // Buried Alive: tutor straight to the graveyard.
+  [/^search your library for up to (\w+) (.+?) cards?, put them into your graveyard, then shuffle$/, m => [{ type: 'tutor', what: m[2], to: 'graveyard', n: amt(m[1]) || 1 }]],
+  // Exhume / Living Death.
+  [/^each player puts a creature card from their graveyard onto the battlefield$/, () => [{ type: 'eachReanimate' }]],
+  [/^each player exiles all creature cards from their graveyard, then sacrifices all creatures they control, then puts all cards they exiled this way onto the battlefield$/, () => [{ type: 'livingDeath' }]],
+  // Donate: the player is chosen first, then the permanent that changes hands.
+  [/^target player gains control of target permanent you control$/, () => [{ type: 'pickPlayer', sel: 'player' }, { type: 'donate', sel: 'permanent', restrict: { control: 'you' } }]],
+  // Pernicious Deed: sweep by mana value paid.
+  [/^destroy each (.+?) with mana value x or less$/, m => { const k = T('each ' + m[1]); if (!k) return null; return [{ type: 'destroyAll', restrict: k.restrict, cmcLE: 'X' }]; }],
+  // Mishra's Helix (approximated: taps up to X of target opponent's lands).
+  [/^tap x target lands$/, () => [{ type: 'tapMany', sel: 'opponent', restrict: { types: ['land'] }, amount: 'X', chooser: 'controller', note: 'taps up to X of target opponent\'s lands' }]],
+  // Tangle Wire: that player taps permanents for each fade counter.
+  [/^that player taps (?:an? )?(.+?) they control for each (\w+) counter on ~$/, m => { const k = T('each ' + m[1]); if (!k) return null; return [{ type: 'tapMany', sel: 'thatPlayer', restrict: k.restrict, amount: { calc: 'counters', kind: m[2] }, chooser: 'subject' }]; }],
+  // Phyrexian Processor.
+  [/^pay any amount of life$/, () => [{ type: 'payAnyLife' }]],
+  [/^create an? x\/x (.*?) creature tokens?, where x is the life paid(?: as ~ entered)?$/, m => { const desc = m[1].split(/\s+/); return [{ type: 'token', count: 1, p: { calc: 'paidLife' }, t: { calc: 'paidLife' }, colors: desc.filter(w => COLOR_WORD[w]).map(w => COLOR_WORD[w]), types: ['creature'], subtypes: desc.filter(w => !COLOR_WORD[w]).map(cap), keywords: [] }]; }],
+  // Cunning Wish: fetch a card from the sideboard, then the spell exiles itself.
+  [/^(?:choose an? (instant|sorcery|creature|artifact|enchantment|land) card you own from outside the game, reveal that card, and put it into your hand|reveal an? (instant|sorcery|creature|artifact|enchantment|land) card you own from outside the game and put it into your hand)$/, m => [{ type: 'wish', what: m[1] || m[2] }]],
+  [/^exile ~$/, () => [{ type: 'exileSelfSpell' }]],
   [/^(?:~|it|that creature) deals (\S+) damage to (.+?)(?: and (\S+) damage to (.+))?$/, m => {
     const a = tgt({ type: 'damage', amount: amt(m[1]) }, m[2]); if (!a) return null;
     if (m[3]) { const b = tgt({ type: 'damage', amount: amt(m[3]) }, m[4]); if (!b) return null; a.push(...b); }
@@ -571,6 +590,14 @@ export function parseEffects(text) {
   if (/^draw a card, then draw cards equal to the number of cards named ~ in all graveyards$/.test(whole)) { out.effects.push({ type: 'draw', amount: 1, sel: 'you' }, { type: 'draw', amount: { calc: 'graveyardNameAll' }, sel: 'you' }); return out; }
   // Hand disruption: Duress / Unmask ("... that player discards that card") and Mesmeric Fiend ("exile that card").
   if ((wm = whole.match(/^(target opponent|target player) reveals their hand(?:,? and|\.) you choose (?:a|an) (.+?) card from it\. (exile that card|(?:that player|they) discards? that card)$/))) { const k = T(wm[1]); if (k) { out.effects.push({ type: 'handPick', action: wm[3].startsWith('exile') ? 'exile' : 'discard', filter: parseCardFilter(wm[2]), ...k }); return out; } }
+  // Cabal Therapy (approximated: you see the hand and name a card in it; all copies are discarded).
+  if ((wm = whole.match(/^choose a nonland card name\. (target player|target opponent) reveals their hand and discards all cards with that name$/))) { const k = T(wm[1]); if (k) { out.effects.push({ type: 'handPick', action: 'discardName', filter: { not: ['land'] }, note: 'the hand is revealed before the name is chosen', ...k }); return out; } }
+  // Intuition: three cards, the opponent picks the one you keep.
+  if (/^search your library for three cards and reveal them\. target opponent chooses one\. put that card into your hand and the rest into your graveyard(?:\. then shuffle)?$/.test(whole)) { out.effects.push({ type: 'intuition', sel: 'opponent' }); return out; }
+  // Fact or Fiction.
+  if (/^reveal the top five cards of your library\. an opponent separates those cards into two piles\. put one pile into your hand and the other into your graveyard$/.test(whole)) { out.effects.push({ type: 'fof' }); return out; }
+  // Cursed Scroll.
+  if ((wm = whole.match(/^choose a card name(?:, then|\.) reveal a card at random from your hand\. if that card has the chosen name, ~ deals (\d+) damage to any target$/))) { out.effects.push({ type: 'cursedScroll', amount: Number(wm[1]), sel: 'any', restrict: {} }); return out; }
   // Goblin Ringleader: reveal the top N, take the matching ones, bottom the rest.
   if ((wm = whole.match(/^reveal the top (\S+) cards? of your library\. put all (.+?) cards revealed this way into your hand and the rest on the bottom of your library(?: in any order)?$/))) { out.effects.push({ type: 'revealTake', amount: amt(wm[1]), filter: parseCardFilter(wm[2]) }); return out; }
 
@@ -632,6 +659,7 @@ function parseAbilityCost(text) {
     }
     else if (/^exile ~$/i.test(p)) cost.exileSelf = true;
     else if ((m = p.match(/^put a ([+-]\d+\/[+-]\d+|\w+) counter on ~$/i))) cost.addCounter = { kind: m[1].toLowerCase(), n: 1 };   // Wall of Roots
+    else if (/^return ~ to its owner's hand$/i.test(p)) cost.returnSelf = true;   // Recurring Nightmare
     else if ((m = p.match(/^exile the top (\w+) cards? of your library$/i))) cost.exileTop = amt(m[1].toLowerCase()) || 1;
     else if ((m = p.match(/^tap an untapped (plains|island|swamp|mountain|forest) you control$/i))) cost.tapLand = cap(m[1].toLowerCase());
     else if ((m = p.match(/^remove any number of (\w+) counters from ~$/i))) cost.removeCounter = { kind: m[1].toLowerCase(), n: 'all' };
@@ -658,6 +686,7 @@ function parseKeywordLine(line, def) {
     if (KEYWORDS.has(p)) found.push(p);
     else if (IGNORED_KW.has(p) || (m = p.match(/^(Rampage|Bushido|Annihilator|Fading|Vanishing|Soulshift|Amplify|Modular) (\d+)$/)) && IGNORED_KW.has(m?.[1] || p)) {
       if (m && m[1] === 'Rampage') found.push({ k: 'Rampage', n: Number(m[2]) });
+      else if (m && m[1] === 'Fading') found.push({ k: 'Fading', n: Number(m[2]) });   // Blastoderm, Tangle Wire
       else def.notes.push(`${p} ignored`);
     }
     else if ((m = p.match(/^Rampage (\d+)$/))) found.push({ k: 'Rampage', n: Number(m[1]) });
@@ -666,7 +695,7 @@ function parseKeywordLine(line, def) {
       const from = m[1].toLowerCase();
       if (COLOR_WORD[from]) found.push({ k: 'Protection', from: COLOR_WORD[from] });
       else if (['artifacts', 'creatures', 'everything', 'instants', 'sorceries', 'enchantments'].includes(from)) found.push({ k: 'Protection', from });
-      else if (/^(white|blue|black|red|green) and (white|blue|black|red|green)$/.test(from)) { for (const c of from.split(' and ')) found.push({ k: 'Protection', from: COLOR_WORD[c] }); }
+      else if (/^(white|blue|black|red|green) and (?:from )?(white|blue|black|red|green)$/.test(from)) { for (const c of from.split(/ and (?:from )?/)) found.push({ k: 'Protection', from: COLOR_WORD[c] }); }   // Akroma: "from black and from red"
       else def.notes.push(`${p} ignored`);
     }
     else if ((m = p.match(/^(Plains|Island|Swamp|Mountain|Forest)walk$/))) found.push({ k: 'Landwalk', land: m[1] });
@@ -676,6 +705,7 @@ function parseKeywordLine(line, def) {
     else if ((m = p.match(/^Cycling (\{.+\})$/))) found.push({ k: 'Cycling', cost: parseCost(m[1]) });
     else if ((m = p.match(/^Kicker (\{.+\})$/))) found.push({ k: 'Kicker', cost: parseCost(m[1]) });
     else if ((m = p.match(/^Flashback (\{.+\})$/))) found.push({ k: 'Flashback', cost: parseCost(m[1]) });
+    else if ((m = p.match(/^Flashback—sacrifice (?:a|an) (\w+)$/i))) found.push({ k: 'Flashback', cost: { pips: [], generic: 0, x: false }, sacrifice: m[1].toLowerCase() });   // Cabal Therapy
     else if ((m = p.match(/^Buyback (\{.+\})$/))) found.push({ k: 'Buyback', cost: parseCost(m[1]) });
     else if ((m = p.match(/^Echo (\{.+\})$/))) found.push({ k: 'Echo', cost: parseCost(m[1]) });
     else if ((m = p.match(/^Equip (\{.+\}|\d+)$/))) found.push({ k: 'Equip', cost: parseCost(m[1].startsWith('{') ? m[1] : `{${m[1]}}`) });
@@ -695,6 +725,8 @@ function parseStatic(t) {
   if ((m = t.match(/^(?:threshold — )?as long as (?:there are )?seven or more cards (?:are )?in your graveyard, (.+)$/))) { const inner = parseStatic(m[1]); if (!inner) return null; for (const o of inner) o.condition = { ...(o.condition || {}), threshold: true }; return inner; }
   // "~ gets +1/+1 and can't block" (Putrid Imp): a P/T change riding with a combat restriction.
   if ((m = t.match(/^(.+?) and can't (block|attack|attack or block)$/))) { const inner = parseStatic(m[1]); if (!inner) return null; return [...inner, { type: 'static', kind: { block: 'cantBlock', attack: 'cantAttack', 'attack or block': 'cantAttackOrBlock' }[m[2]], scope: inner[0].scope }]; }
+  // Crumbling Sanctuary: damage to a player exiles that many cards from their library instead.
+  if (/^if damage would be dealt to a player, that player exiles that many cards from the top of their library instead$/.test(t)) return [{ type: 'static', kind: 'damageToLibrary', scope: { who: 'self' } }];
   if ((m = t.match(/^as long as ~ is untapped, (.+)$/))) { const inner = parseStatic(m[1]); if (!inner) return null; for (const o of inner) o.condition = { selfUntapped: true }; return inner; }
   if ((m = t.match(/^(.+?)\. otherwise, it gets ([+-]\d+)\/([+-]\d+)$/))) { const inner = parseStatic(m[1]); if (!inner || !inner.every(o => o.condition)) return null; return [...inner, { type: 'static', kind: 'pt', p: Number(m[2]), t: Number(m[3]), scope: inner[0].scope, condition: { ...inner[0].condition, negate: true } }]; }
   if ((m = t.match(/^players can't untap more than (one|two) (creature|land|artifact)s? during their untap steps$/))) return [{ type: 'static', kind: 'untapLimit', what: m[2], n: NUM[m[1]], scope: { who: 'self' } }];
@@ -845,7 +877,7 @@ function parseScope(text) {
 function parseAbilityLine(line, ctx) {
   let m;
   let t = line.trim().replace(/\s*this effect doesn't remove ~\.?$/i, '').replace(/\.$/, '');
-  t = t.replace(/^as (~|this [a-z]+) enters(?: the battlefield)?, /i, 'When ~ enters, ');
+  t = t.replace(/^as (~|this [a-z]+) enters(?: the battlefield)?, /i, 'when ~ enters, ');   // lower-case: the trigger matcher below is case-sensitive
   // "Threshold — {R}, {T}, Sacrifice ~: ..." — the ability word is decoration; the condition rides at the end.
   const thresholdWord = /^threshold — /i.test(t); if (thresholdWord) t = t.replace(/^threshold — /i, '');
   // activated: "cost: effect"
@@ -886,6 +918,7 @@ function parseAbilityLine(line, ctx) {
     if ((mm = body.match(/^add (\{[wubrgc]\}) for each (\w+) counter removed this way\.?$/)) && cost.removeCounter?.n === 'all') return { type: 'mana', cost, produces: [mm[1][1].toUpperCase()], amount: 1 };
     if ((mm = body.match(/^add (\S+) mana of any one color\.?$/))) return { type: 'mana', cost, produces: COLORS.slice(), amount: amt(mm[1]), sameColor: true };
     if (/^add one mana of any color\.?$/.test(body)) return { type: 'mana', cost, produces: COLORS.slice(), amount: 1, ...manaExtra };
+    if (/^add one mana of any type that a land you control could produce\.?$/.test(body)) return { type: 'mana', cost, produces: [], reflect: true, amount: 1 };   // Reflecting Pool
     if (/^add one mana of the chosen color\.?$/.test(body)) return { type: 'mana', cost, produces: COLORS.slice(), amount: 1 };
     if (/^add \{c\}\{c\}\.?$/.test(body)) return { type: 'mana', cost, produces: ['C'], amount: 2 };
     if ((mm = body.match(/^add (\{[wubrgc]\}), then add an additional \1 for each (\w+) counter removed this way\.?$/)) && cost.removeCounter?.n === 'all') return { type: 'mana', cost, produces: [mm[1][1].toUpperCase()], amount: 1, plus: 'counters' };
@@ -1200,7 +1233,7 @@ export function compile(c) {
     if (!def.abilities.length && !def.manaAbilities.length && !def.keywords.some(k => k.k === 'Equip')) return unsupported('Artifact with no understood effect');
     if (def.keywords.some(k => k.k === 'Equip')) def.equipment = true;
   }
-  if (def.kind === 'land' && !def.produces.length && !def.abilities.length) return unsupported('Land with no understood ability');
+  if (def.kind === 'land' && !def.produces.length && !def.abilities.length && !def.manaAbilities.length) return unsupported('Land with no understood ability');   // Reflecting Pool produces nothing on its own
   // Abilities whose effects were partly ignored are fine, but a permanent whose only text is ignored is unsupported.
   const ignoredCount = def.notes.filter(n => n.startsWith('Ignored:')).length;
   const understood = def.abilities.length + def.manaAbilities.length + def.keywords.length + (def.spell ? 1 : 0) + def.produces.length;

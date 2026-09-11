@@ -1375,12 +1375,14 @@ async function startBrewDuel(oppChoice) {
     if (preset) { oppName = preset.name; oppDeckMap = preset.deck; mirror = false; }
   }
   const opp = playableSubset(oppDeckMap);
+  // Sideboards ride along as the cards "outside the game" that Wishes can fetch.
+  const mySide = playableSubset(S.brew.side), oppSide = playableSubset(mirror ? S.brew.side : (S.aiDecks.find(x => x.name === oppName)?.side || {}));
   setBusy('Fetching card data…');
-  const need = [...new Set([...Object.keys(mine.supported), ...Object.keys(opp.supported)])];
+  const need = [...new Set([...Object.keys(mine.supported), ...Object.keys(opp.supported), ...Object.keys(mySide.supported), ...Object.keys(oppSide.supported)])];
   try { await fetchCards(need, (d, t) => setBusy(`Fetching cards… ${d}/${t}`), { skipArt: true }); forgetDefs(); } catch (e) { setBusy('Could not load cards: ' + e.message); return; }
   const expOf = m => expandDeck(m).filter(d => d && d.kind !== 'unsupported');
   const tpl = { name: oppName, color: deckColor(oppDeckMap), tier: 1, boss: false, deck: opp.supported };
-  const d = new Duel({ player: { name: S.game?.name || 'You', deck: expOf(mine.supported), life: 20 }, ai: { name: oppName, deck: expOf(opp.supported), life: 20, ai: true }, hooks: aiHooks, rules: {} });
+  const d = new Duel({ player: { name: S.game?.name || 'You', deck: expOf(mine.supported), sideboard: expOf(mySide.supported), life: 20 }, ai: { name: oppName, deck: expOf(opp.supported), sideboard: expOf(oppSide.supported), life: 20, ai: true }, hooks: aiHooks, rules: {} });
   S.duel = { duel: d, tpl, ante: null, roamUid: null, dungeon: null, tutorial: true, brew: true };
   if (!mirror) toast(`Opponent: ${oppName}.`);
   if (mine.unsup.length) toast(`${mine.unsup.length} of your unsupported card${mine.unsup.length > 1 ? 's' : ''} left out.`);
