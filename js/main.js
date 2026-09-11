@@ -2,7 +2,7 @@
 import { parseList, importNames, defOf, forgetDefs, loadArtIndex, artFor, artCount, hasOwnArt, hasServer } from './collection.js';
 import { fetchCards, cacheSize, cached as cachedCard, allCached } from './scryfall.js';
 import { COLORS, COLOR_NAME, manaHtml, statusLabel } from './cards.js';
-import { generateWorld, drawWorld, drawMinimap, tileAt, inBounds, cityAt, linkAt, enemyAt, stepEnemies, BIOME, TILE, VIEW, placeDungeons, dungeonAt, relocateDungeon, placeLandmarks, landmarkAt, placeSpecials, specialAt, placeMotes, moteAt, spawnMote, castleAt, WARDEN_HOLD, roadAt, ensureRoads, bazaarAt, spawnBazaar } from './world.js';
+import { generateWorld, drawWorld, drawMinimap, tileAt, inBounds, cityAt, linkAt, enemyAt, stepEnemies, BIOME, TILE, VIEW, placeDungeons, dungeonAt, relocateDungeon, placeLandmarks, landmarkAt, placeSpecials, specialAt, placeMotes, moteAt, spawnMote, castleAt, WARDEN_HOLD, roadAt, ensureRoads, bazaarAt, spawnBazaar, lavaAt, placeLava } from './world.js';
 import { Duel } from './engine.js';
 import { mountDuel, cardHtml } from './duelview.js';
 import { Net } from './net.js';
@@ -251,6 +251,7 @@ function move(dx, dy) {
   if (probs.length) { S.modal = { title: 'Your deck is not ready', body: `<ul>${probs.map(p => `<li>${esc(p)}</li>`).join('')}</ul>`, buttons: [{ label: 'Open deck builder', action: () => { S.modal = null; go('deck'); } }, { label: 'Close', action: () => { S.modal = null; render(); } }] }; render(); return; }
   const nx = g.player.x + dx, ny = g.player.y + dy;
   if (!inBounds(g.world, nx, ny)) return;
+  if (lavaAt(g.world, nx, ny)) return;   // molten rock — impassable, like a wall
   const enemy = enemyAt(g.world, nx, ny);
   if (enemy) { encounter(enemy); return; }
   const cst = castleAt(g.world, nx, ny);
@@ -1433,6 +1434,7 @@ function map() {
   if (!g.world.motes) { placeMotes(g.world, Math.random); save(); }
   if (!g.world.castles) { migrateCastles(g); save(); }
   if (!g.world.roads) { ensureRoads(g.world); save(); }
+  if (!g.world.lava) { placeLava(g.world, Math.random, g.player); save(); }   // after roads, so pools avoid them
   // Give pre-clue saves the new dungeon intel model: a previously-revealed dungeon counts as fully located.
   if ((g.world.dungeons || []).some(d => d.intel === undefined)) {
     for (const d of g.world.dungeons) if (d.intel === undefined) { d.intel = d.revealed ? FIND_CLUES : 0; d.locClues = d.revealed ? FIND_CLUES : 0; d.sensed = !!d.revealed; d.collected = d.collected || []; d.hint = null; }

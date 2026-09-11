@@ -255,7 +255,7 @@ const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 function blockedForEnemy(world, x, y) {
   return !inBounds(world, x, y) || !!cityAt(world, x, y) || !!linkAt(world, x, y) || !!enemyAt(world, x, y)
     || !!castleAt(world, x, y) || !!dungeonAt(world, x, y)
-    || !!landmarkAt(world, x, y) || !!specialAt(world, x, y) || !!bazaarAt(world, x, y);
+    || !!landmarkAt(world, x, y) || !!specialAt(world, x, y) || !!bazaarAt(world, x, y) || lavaAt(world, x, y);
 }
 // The Nomad's Bazaar: a rare travelling market that appears on open ground near you as you explore, then
 // packs up and moves on. At most one exists at a time. Stored on the world so it saves and renders like
@@ -274,6 +274,80 @@ export function spawnBazaar(world, player, rng) {
     return world.bazaar;
   }
   return null;
+}
+
+// ---- lava pools: coherent molten pools grown from seeds; impassable to the player and to mages --------
+const lkey = (x, y) => `${x},${y}`;
+export function lavaAt(world, x, y) {
+  if (!world || !world.lava || !world.lava.length) return false;
+  if (!world._lavaSet || world._lavaSet.size !== world.lava.length) world._lavaSet = new Set(world.lava);
+  return world._lavaSet.has(lkey(x, y));
+}
+// Grow a scatter of pools (mostly small, a few large) across the rock biomes, avoiding roads and anything
+// already on the map. Stored on the world so it saves; deterministic given the rng passed in.
+export function placeLava(world, rng, player = null) {
+  if (world.lava) return world.lava;
+  const set = new Set();
+  const isRock = (x, y) => { const t = tileAt(world, x, y); return t === 'R' || t === 'B'; };
+  const nearPlayer = (x, y) => player && Math.abs(x - player.x) + Math.abs(y - player.y) <= 1;
+  const free = (x, y) => inBounds(world, x, y) && isRock(x, y) && !set.has(lkey(x, y))
+    && !blockedForEnemy(world, x, y) && !roadAt(world, x, y) && !moteAt(world, x, y)
+    && !nearPlayer(x, y) && dist({ x, y }, world.start) > 4;
+  const pools = Math.max(6, Math.round(world.w * world.h / 70));
+  for (let i = 0; i < pools; i++) {
+    let sx = 0, sy = 0, seeded = false;
+    for (let t = 0; t < 60; t++) { sx = Math.floor(rng() * world.w); sy = Math.floor(rng() * world.h); if (free(sx, sy)) { seeded = true; break; } }
+    if (!seeded) continue;
+    const target = 1 + Math.floor(rng() * rng() * 11);   // biased small, occasionally a big pool
+    const pool = [[sx, sy]]; set.add(lkey(sx, sy));
+    let guard = 0;
+    while (pool.length < target && guard++ < 90) {
+      const [bx, by] = pool[Math.floor(rng() * pool.length)];
+      const [dx, dy] = DIRS[Math.floor(rng() * 4)];
+      const nx = bx + dx, ny = by + dy;
+      if (free(nx, ny)) { set.add(lkey(nx, ny)); pool.push([nx, ny]); }
+    }
+  }
+  world.lava = [...set]; world._lavaSet = null;
+  terrainCache.delete(world);   // force a repaint that includes the pools
+  return world.lava;
+}
+function lavaBlob(path, cx, cy, r, s) {
+  const n = 11;
+  for (let i = 0; i <= n; i++) {
+    const a = i / n * Math.PI * 2;
+    const rr = r * (0.8 + 0.4 * vnoise(Math.cos(a) * 2 + s, Math.sin(a) * 2 + s, (s | 0) % 97));
+    const px = cx + Math.cos(a) * rr, py = cy + Math.sin(a) * rr;
+    if (i === 0) path.moveTo(px, py); else path.lineTo(px, py);
+  }
+  path.closePath();
+}
+function drawLava(ctx, world, seed, frameH) {
+  const lava = world.lava; if (!lava || !lava.length) return;
+  const tiles = lava.map(k => k.split(',').map(Number));
+  const rim = new Path2D(), body = new Path2D();
+  for (const [x, y] of tiles) {
+    const cx = x * PX + PX / 2, cy = y * PX + PX / 2, s = x * 7 + y * 13;
+    lavaBlob(rim, cx, cy, PX * 0.66, s * 0.01);
+    lavaBlob(body, cx, cy, PX * 0.54, s * 0.01 + 3.3);
+  }
+  ctx.save();
+  ctx.shadowColor = 'rgba(255,110,25,.55)'; ctx.shadowBlur = 9;
+  ctx.fillStyle = '#1c0f0a'; ctx.fill(rim);          // charred rock rim + molten glow
+  ctx.shadowBlur = 0;
+  const grad = ctx.createLinearGradient(0, 0, 0, frameH);
+  grad.addColorStop(0, '#ef6b1e'); grad.addColorStop(1, '#b6300e');
+  ctx.fillStyle = grad; ctx.fill(body);
+  ctx.clip(body);                                     // hot cracks confined to the molten body
+  for (const [x, y] of tiles) {
+    const cx = x * PX + PX / 2, cy = y * PX + PX / 2;
+    for (let i = 0; i < 3; i++) {
+      const a = hash(x, y, seed + i) * Math.PI * 2, rr = hash(x, y, seed + 10 + i) * PX * 0.32;
+      ctx.fillStyle = i === 0 ? 'rgba(255,224,130,.9)' : 'rgba(255,168,60,.75)';
+      ctx.beginPath(); ctx.arc(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr, 1.4 + hash(x, y, seed + 20 + i) * 2, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  ctx.restore();
 }
 // Roaming AI: enemies within sight give chase and step toward the player; otherwise they wander their
 // own terrain. An enemy that steps onto the player's tile catches them — returned so the caller can
@@ -422,7 +496,8 @@ function paintTiles(world) {
   const tileFor = (b, tx, ty, x, y) => {
     const tab = rectTable[b] || (rectTable[b] = new Array(W_ * H_)); let r = tab[ty * W_ + tx];
     if (!r) { const t = TERRAIN[b] || TERRAIN.G; const a = h(tx, ty, 5), pk = h(tx, ty, 6); r = { base: pick(t.base, pk), accent: a < (ACCENT_RATE[b] ?? 0.15) && t.accent.length ? pick(t.accent, pk) : null }; tab[ty * W_ + tx] = r; }
-    if (r.accent && x !== undefined) {
+    // Rock biomes no longer scatter lava as random accent discs — lava is drawn as real pools below.
+    if (r.accent && x !== undefined && b !== 'R' && b !== 'B') {
       // pools: noise inside a soft disc around the cell centre, so no pool follows a cell edge
       const nx = x - (tx * PX + PX / 2), ny = y - (ty * PX + PX / 2);
       const nz = vnoise(x / 9, y / 9, seed + 21);
@@ -450,6 +525,7 @@ function paintTiles(world) {
     img[di] = sheet.data[si]; img[di + 1] = sheet.data[si + 1]; img[di + 2] = sheet.data[si + 2]; img[di + 3] = 255;
   }
   ctx.putImageData(image, 0, 0);
+  drawLava(ctx, world, seed, Hp);   // coherent molten pools over the rock, before roads and scenery
   paintRoads(ctx, world, seed);
   // scenery, back to front
   const reserved = new Set([...world.cities.map(ct => `${ct.x},${ct.y}`), ...castleKeys(world), ...world.links.map(l => `${l.x},${l.y}`), ...(world.dungeons || []).map(d => `${d.x},${d.y}`), ...(world.landmarks || []).map(l => `${l.x},${l.y}`)]);
@@ -457,7 +533,7 @@ function paintTiles(world) {
   const nearCity = (x, y) => world.cities.some(ct => Math.abs(ct.x - x) <= 3 && Math.abs(ct.y - y) <= 3 && (Math.abs(ct.x - x) + Math.abs(ct.y - y)) >= 2);
   for (let y = 0; y < world.h; y++) for (let x = 0; x < world.w; x++) {
     const b = at(x, y), X = x * PX, Y = y * PX;
-    if (reserved.has(`${x},${y}`)) continue;
+    if (reserved.has(`${x},${y}`) || lavaAt(world, x, y)) continue;   // nothing grows in a lava pool
     // objects sit on their tile: feet near the tile's bottom edge, a little jitter, sized to the tile by `frac`
     const spot = (i) => [X + PX / 2 + Math.round((h(x, y, 400 + i) - 0.5) * 10) + (i === 1 ? 9 : i === 0 ? -3 : 0), Y + PX - 2 + Math.round((h(x, y, 420 + i) - 0.5) * 4)];
     const add = (rect, fx, fy, frac) => feats.push({ y: fy, draw: () => blitAt(ctx, rect, fx, fy, tileFit(rect, frac)) });
