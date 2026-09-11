@@ -594,8 +594,10 @@ function paintTiles(world) {
       // a dead-briar tangle: dark, dry brown-olive thorns kept well below the vivid grass in brightness
       // so the thicket reads as an obstacle, not more lawn — the texture supplies the tangle.
       const t = (0.3 * R + 0.59 * G + 0.11 * B) / 255;
-      R = 32 + t * 44; G = 28 + t * 34; B = 15 + t * 16;   // dark shadowed earth; the briar sprites sit on top
-    } else if (bramRim) { R = 26; G = 22; B = 12; }   // dark thorny earth at the edge
+      R = 78 + t * 62; G = 46 + t * 40; B = 28 + t * 22;   // dead-briar red-brown, tan highlights — clearly not grass
+      const th = vnoise(x / 2.6, y / 2.6, seed + 833);      // stipple a tangle of near-black thorns over it
+      if (th < 0.2) { R *= 0.5; G *= 0.45; B *= 0.42; } else if (th > 0.9) { R = Math.min(255, R + 26); G = Math.min(255, G + 20); B = Math.min(255, B + 10); }
+    } else if (bramRim) { R = 40; G = 26; B = 15; }   // dark thorny earth at the edge
     else if (saltCore) {
       // bleach the plains into a glaring salt pan: bright, near-white and slightly cool so it reads as
       // exposed flats rather than warm sand.
@@ -613,20 +615,13 @@ function paintTiles(world) {
   const nearCity = (x, y) => world.cities.some(ct => Math.abs(ct.x - x) <= 3 && Math.abs(ct.y - y) <= 3 && (Math.abs(ct.x - x) + Math.abs(ct.y - y)) >= 2);
   for (let y = 0; y < world.h; y++) for (let x = 0; x < world.w; x++) {
     const b = at(x, y), X = x * PX, Y = y * PX;
-    if (reserved.has(`${x},${y}`) || lavaAt(world, x, y) || swampAt(world, x, y) || saltAt(world, x, y)) continue;   // nothing grows in a pool or on the flats
+    if (reserved.has(`${x},${y}`) || lavaAt(world, x, y) || swampAt(world, x, y) || saltAt(world, x, y) || brambleAt(world, x, y)) continue;   // nothing grows in a pool, on the flats, or in a thicket
     // objects sit on their tile: feet near the tile's bottom edge, a little jitter, sized to the tile by `frac`
     const spot = (i) => [X + PX / 2 + Math.round((h(x, y, 400 + i) - 0.5) * 10) + (i === 1 ? 9 : i === 0 ? -3 : 0), Y + PX - 2 + Math.round((h(x, y, 420 + i) - 0.5) * 4)];
     const add = (rect, fx, fy, frac) => feats.push({ y: fy, draw: () => blitAt(ctx, rect, fx, fy, tileFit(rect, frac)) });
     const S = SPRITES, sc = 0.95;
     const any = (...names) => names.map(n => S[n]).filter(Boolean);
     const from = (list, t) => list.length ? pick(list, t) : null;
-    if (brambleAt(world, x, y)) {
-      // a thorny thicket: the dark ground is already painted, so pack the tile with briar sprites to make
-      // an impassable-looking tangle instead of the sparse scatter open forest gets.
-      const briar = any('bush', 'bush-2', 'shrub', 'bushSmall', 'sapling');
-      if (briar.length) for (let i = 0; i < 3; i++) { const [fx, fy] = spot(i); add(pick(briar, h(x, y, 480 + i)), fx, fy, i === 0 ? 0.62 : 0.5); }
-      continue;
-    }
     if ((b === 'G' || b === 'W') && nearCity(x, y) && h(x, y, 390) < 0.05) { const [fx, fy] = spot(9); const r = h(x, y, 391); const hamlet = from(any('hut', 'huts', 'watchtower', 'well', 'signpost'), r) || S.city.town; add(hamlet, fx, fy, hamlet === S.city.town ? 0.8 : 0.85); continue; }
     if (b === 'G') {
       const d = h(x, y, 440); const n = d < 0.55 ? 0 : d < 0.92 ? 1 : 2;
