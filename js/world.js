@@ -255,7 +255,7 @@ const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 function blockedForEnemy(world, x, y) {
   return !inBounds(world, x, y) || !!cityAt(world, x, y) || !!linkAt(world, x, y) || !!enemyAt(world, x, y)
     || !!castleAt(world, x, y) || !!dungeonAt(world, x, y)
-    || !!landmarkAt(world, x, y) || !!specialAt(world, x, y) || !!bazaarAt(world, x, y) || lavaAt(world, x, y);
+    || !!landmarkAt(world, x, y) || !!specialAt(world, x, y) || !!bazaarAt(world, x, y) || lavaAt(world, x, y) || swampAt(world, x, y);
 }
 // The Nomad's Bazaar: a rare travelling market that appears on open ground near you as you explore, then
 // packs up and moves on. At most one exists at a time. Stored on the world so it saves and renders like
@@ -276,22 +276,26 @@ export function spawnBazaar(world, player, rng) {
   return null;
 }
 
-// ---- lava pools: coherent molten pools grown from seeds; impassable to the player and to mages --------
+// ---- terrain pools: coherent pools grown from seeds; impassable to the player and to mages ------------
+// Lava fills the Mountains (Red); swamp fills the Wastes (Black). Both share the pool geometry and the
+// metaball renderer, and differ only in colour.
 const lkey = (x, y) => `${x},${y}`;
-export function lavaAt(world, x, y) {
-  if (!world || !world.lava || !world.lava.length) return false;
-  if (!world._lavaSet || world._lavaSet.size !== world.lava.length) world._lavaSet = new Set(world.lava);
-  return world._lavaSet.has(lkey(x, y));
+function poolAt(world, prop, cacheProp, x, y) {
+  const arr = world && world[prop];
+  if (!arr || !arr.length) return false;
+  if (!world[cacheProp] || world[cacheProp].size !== arr.length) world[cacheProp] = new Set(arr);
+  return world[cacheProp].has(lkey(x, y));
 }
-// Grow a scatter of pools (mostly small, a few large) across the rock biomes, avoiding roads and anything
-// already on the map. Stored on the world so it saves; deterministic given the rng passed in.
-export function placeLava(world, rng, player = null) {
-  if (world.lava) return world.lava;
+export function lavaAt(world, x, y) { return poolAt(world, 'lava', '_lavaSet', x, y); }
+export function swampAt(world, x, y) { return poolAt(world, 'swamp', '_swampSet', x, y); }
+// Grow a scatter of pools (mostly small, a few large) over one biome, avoiding roads and anything already
+// on the map. Stored on the world so it saves; deterministic given the rng passed in.
+function placePools(world, rng, player, biome, prop) {
+  if (world[prop]) return world[prop];
   const set = new Set();
-  const isRock = (x, y) => { const t = tileAt(world, x, y); return t === 'R' || t === 'B'; };
   const nearPlayer = (x, y) => player && Math.abs(x - player.x) + Math.abs(y - player.y) <= 1;
-  const free = (x, y) => inBounds(world, x, y) && isRock(x, y) && !set.has(lkey(x, y))
-    && !blockedForEnemy(world, x, y) && !roadAt(world, x, y) && !moteAt(world, x, y)
+  const free = (x, y) => inBounds(world, x, y) && tileAt(world, x, y) === biome && !set.has(lkey(x, y))
+    && !blockedForEnemy(world, x, y) && !swampAt(world, x, y) && !roadAt(world, x, y) && !moteAt(world, x, y)
     && !nearPlayer(x, y) && dist({ x, y }, world.start) > 4;
   const pools = Math.max(4, Math.round(world.w * world.h / 130));
   for (let i = 0; i < pools; i++) {
@@ -308,10 +312,12 @@ export function placeLava(world, rng, player = null) {
       if (free(nx, ny)) { set.add(lkey(nx, ny)); pool.push([nx, ny]); }
     }
   }
-  world.lava = [...set]; world._lavaSet = null;
+  world[prop] = [...set]; world['_' + prop + 'Set'] = null;
   terrainCache.delete(world);   // force a repaint that includes the pools
-  return world.lava;
+  return world[prop];
 }
+export function placeLava(world, rng, player = null) { return placePools(world, rng, player, 'R', 'lava'); }
+export function placeSwamp(world, rng, player = null) { return placePools(world, rng, player, 'B', 'swamp'); }
 // Roaming AI: enemies within sight give chase and step toward the player; otherwise they wander their
 // own terrain. An enemy that steps onto the player's tile catches them — returned so the caller can
 // start the duel. Cities, mana links and landmarks are safe: enemies never step onto them.
@@ -430,25 +436,29 @@ function paintTiles(world) {
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const t = at(tx + dx, ty + dy); if (t && t !== b) { same = false; if (b === 'U') land = true; } }
     uniform[ty * W_ + tx] = same ? 1 : 0; coast[ty * W_ + tx] = land ? 1 : 0;
   }
-  // Lava is drawn as a metaball field over the lava tiles: adjacent tiles blend into one rounded pool
-  // instead of a union of squares. lavaMask marks lava tiles; lavaNear marks tiles the field can reach.
-  const lavaMask = new Uint8Array(W_ * H_), lavaNear = new Uint8Array(W_ * H_);
-  if (world.lava && world.lava.length) {
-    for (const k of world.lava) { const p = k.split(','), lx = +p[0], ly = +p[1]; if (lx >= 0 && ly >= 0 && lx < W_ && ly < H_) lavaMask[ly * W_ + lx] = 1; }
-    for (let ty = 0; ty < H_; ty++) for (let tx = 0; tx < W_; tx++) {
-      let near = 0;
-      for (let dy = -1; dy <= 1 && !near; dy++) for (let dx = -1; dx <= 1 && !near; dx++) { const nx = tx + dx, ny = ty + dy; if (nx >= 0 && ny >= 0 && nx < W_ && ny < H_ && lavaMask[ny * W_ + nx]) near = 1; }
-      lavaNear[ty * W_ + tx] = near;
+  // Terrain pools are drawn as a metaball field over their tiles: adjacent tiles blend into one rounded
+  // pool instead of a union of squares. mask marks pool tiles; near marks tiles the field can reach.
+  const buildPools = (keys) => {
+    const mask = new Uint8Array(W_ * H_), near = new Uint8Array(W_ * H_);
+    if (keys && keys.length) {
+      for (const k of keys) { const p = k.split(','), lx = +p[0], ly = +p[1]; if (lx >= 0 && ly >= 0 && lx < W_ && ly < H_) mask[ly * W_ + lx] = 1; }
+      for (let ty = 0; ty < H_; ty++) for (let tx = 0; tx < W_; tx++) {
+        let n = 0;
+        for (let dy = -1; dy <= 1 && !n; dy++) for (let dx = -1; dx <= 1 && !n; dx++) { const nx = tx + dx, ny = ty + dy; if (nx >= 0 && ny >= 0 && nx < W_ && ny < H_ && mask[ny * W_ + nx]) n = 1; }
+        near[ty * W_ + tx] = n;
+      }
     }
-  }
-  // Sum of a smooth radial falloff from each nearby lava-tile centre. A lone tile makes a rounded pool;
+    return { mask, near };
+  };
+  const lavaP = buildPools(world.lava), swampP = buildPools(world.swamp);
+  // Sum of a smooth radial falloff from each nearby pool-tile centre. A lone tile makes a rounded pool;
   // neighbours merge with a rounded neck; convex corners of a run round off — like liquid, not tiles.
-  const LAVA_RK = PX * 1.02, LAVA_ISO = 0.46, LAVA_CORE = 0.60, r2 = LAVA_RK * LAVA_RK;
-  const lavaField = (x, y, tx, ty) => {
+  const POOL_RK = PX * 1.02, POOL_ISO = 0.46, POOL_CORE = 0.60, r2 = POOL_RK * POOL_RK;
+  const poolField = (x, y, tx, ty, mask) => {
     let f = 0;
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
       const nx = tx + dx, ny = ty + dy;
-      if (nx < 0 || ny < 0 || nx >= W_ || ny >= H_ || !lavaMask[ny * W_ + nx]) continue;
+      if (nx < 0 || ny < 0 || nx >= W_ || ny >= H_ || !mask[ny * W_ + nx]) continue;
       const cx = nx * PX + PX / 2, cy = ny * PX + PX / 2, d2 = (x - cx) * (x - cx) + (y - cy) * (y - cy);
       if (d2 >= r2) continue; const t = 1 - d2 / r2; f += t * t;
     }
@@ -506,22 +516,30 @@ function paintTiles(world) {
   for (let y = 0; y < Hp; y++) for (let x = 0; x < Wp; x++) {
     const b = owner(x, y);
     const tx = Math.floor(x / PX), ty = Math.floor(y / PX);
-    let rect, lavaRim = false, lavaCore = false;
-    if (lavaNear[ty * W_ + tx]) {
-      // Metaball pool: a muted molten core, a thin crisp charred rim, rounded outer edge that merges
-      // neighbouring tiles. A faint wobble keeps the shore organic without going jagged.
-      const lt = TERRAIN[at(tx, ty)] && TERRAIN[at(tx, ty)].accent;
-      // Layered noise perturbs the shore: big lobes swell and pinch the pool, mid ripples and a little
-      // fine crenellation break the perfect oval so no edge or corner reads as geometric.
-      const e = lavaField(x, y, tx, ty)
+    let rect, lavaRim = false, lavaCore = false, swampRim = false, swampCore = false;
+    const idx = ty * W_ + tx, lt = TERRAIN[at(tx, ty)] && TERRAIN[at(tx, ty)].accent;
+    // Classify a pixel against a pool's metaball field: 'core' (deep), 'rim' (shore band), or null (outside).
+    // Layered noise perturbs the shore — big lobes swell and pinch the pool, mid ripples and a little fine
+    // crenellation break the perfect oval — and the core/rim split drifts so the rim varies in width.
+    const poolAtPx = (mask) => {
+      if (!lt || !lt.length) return null;
+      const e = poolField(x, y, tx, ty, mask)
         + (vnoise(x / 27, y / 27, seed + 91) - 0.5) * 0.20
         + (vnoise(x / 13, y / 13, seed + 53) - 0.5) * 0.11
         + (vnoise(x / 6, y / 6, seed + 17) - 0.5) * 0.05;
-      // the core/rim split drifts on its own noise, so the charred rim is wider in some stretches than others
-      const split = LAVA_CORE + (vnoise(x / 16, y / 16, seed + 205) - 0.5) * 0.12;
-      if (e > split && lt && lt.length) { rect = pick(lt, h(tx, ty, 6)); lavaCore = true; }        // molten core
-      else if (e > LAVA_ISO && lt && lt.length) { rect = groundRect(b, tx, ty, x, y); lavaRim = true; }  // crisp charred rim
-      else rect = groundRect(b, tx, ty, x, y);                                                    // rock outside the pool
+      const split = POOL_CORE + (vnoise(x / 16, y / 16, seed + 205) - 0.5) * 0.12;
+      return e > split ? 'core' : e > POOL_ISO ? 'rim' : null;
+    };
+    if (lavaP.near[idx]) {
+      const c = poolAtPx(lavaP.mask);
+      if (c === 'core') { rect = pick(lt, h(tx, ty, 6)); lavaCore = true; }
+      else if (c === 'rim') { rect = groundRect(b, tx, ty, x, y); lavaRim = true; }
+      else rect = groundRect(b, tx, ty, x, y);
+    } else if (swampP.near[idx]) {
+      const c = poolAtPx(swampP.mask);
+      if (c === 'core') { rect = pick(lt, h(tx, ty, 6)); swampCore = true; }
+      else if (c === 'rim') { rect = groundRect(b, tx, ty, x, y); swampRim = true; }
+      else rect = groundRect(b, tx, ty, x, y);
     } else rect = groundRect(b, tx, ty, x, y);
     // mirror tiles per cell so repeats are less obvious
     const fx = (tx & 1) === 1, fy = (ty & 1) === 1;
@@ -536,6 +554,12 @@ function paintTiles(world) {
       const lum = 0.3 * R + 0.59 * G + 0.11 * B;
       R = (R + (lum - R) * 0.28) * 0.82; G = (G + (lum - G) * 0.28) * 0.82; B = (B + (lum - B) * 0.28) * 0.82;
     } else if (lavaRim) { R = 46; G = 20; B = 15; }   // crisp charred crust ringing the molten core
+    else if (swampCore) {
+      // reuse the molten texture but remap its brightness onto murky swamp water: deep green in the
+      // hollows, a mossy green-teal sheen on the high points.
+      const t = (0.3 * R + 0.59 * G + 0.11 * B) / 255;
+      R = 24 + t * 40; G = 40 + t * 74; B = 32 + t * 52;
+    } else if (swampRim) { R = 30; G = 38; B = 26; }   // muddy bank ringing the water
     img[di] = R; img[di + 1] = G; img[di + 2] = B; img[di + 3] = 255;
   }
   ctx.putImageData(image, 0, 0);
@@ -546,7 +570,7 @@ function paintTiles(world) {
   const nearCity = (x, y) => world.cities.some(ct => Math.abs(ct.x - x) <= 3 && Math.abs(ct.y - y) <= 3 && (Math.abs(ct.x - x) + Math.abs(ct.y - y)) >= 2);
   for (let y = 0; y < world.h; y++) for (let x = 0; x < world.w; x++) {
     const b = at(x, y), X = x * PX, Y = y * PX;
-    if (reserved.has(`${x},${y}`) || lavaAt(world, x, y)) continue;   // nothing grows in a lava pool
+    if (reserved.has(`${x},${y}`) || lavaAt(world, x, y) || swampAt(world, x, y)) continue;   // nothing grows in a pool
     // objects sit on their tile: feet near the tile's bottom edge, a little jitter, sized to the tile by `frac`
     const spot = (i) => [X + PX / 2 + Math.round((h(x, y, 400 + i) - 0.5) * 10) + (i === 1 ? 9 : i === 0 ? -3 : 0), Y + PX - 2 + Math.round((h(x, y, 420 + i) - 0.5) * 4)];
     const add = (rect, fx, fy, frac) => feats.push({ y: fy, draw: () => blitAt(ctx, rect, fx, fy, tileFit(rect, frac)) });
