@@ -6,10 +6,19 @@ import { compile, slug } from './cards.js';
 //   4 Lightning Bolt      4x Lightning Bolt (M10)      Lightning Bolt,4      Lightning Bolt
 export function parseList(text) {
   const out = new Map();
-  for (let raw of text.split(/\r?\n/)) {
-    let line = raw.trim();
+  const lines = text.split(/\r?\n/).map(l => l.trim());
+  const isRule = l => /^[-=_*]{3,}$/.test(l);
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
     if (!line || line.startsWith('#') || line.startsWith('//')) continue;
-    if (/^(deck|sideboard|commander|maindeck)\b/i.test(line)) continue;
+    if (isRule(line)) continue;                                       // separator rules
+    if (/^deck downloaded from\b/i.test(line)) continue;              // export footers
+    if (/^(deck|side ?board|main ?deck|commander|companion|maybeboard)\b/i.test(line)) continue;
+    if (/^[a-z][a-z '/&()-]*:\s*\d+\s*$/i.test(line)) continue;       // category tallies like "Creatures: 12"
+    // A deck title sits alone between two separator rules ("----\nMono Brown\n----"): skip it.
+    let prev = null; for (let j = i - 1; j >= 0; j--) { if (lines[j]) { prev = lines[j]; break; } }
+    let next = null; for (let j = i + 1; j < lines.length; j++) { if (lines[j]) { next = lines[j]; break; } }
+    if (prev && next && isRule(prev) && isRule(next) && !/\d/.test(line)) continue;
     let count = 1, name = line;
     let m;
     if ((m = line.match(/^(\d+)\s*x?\s+(.+)$/i))) { count = Number(m[1]); name = m[2]; }

@@ -545,6 +545,17 @@ svg.arrows { position: absolute; left: 0; top: 0; pointer-events: none; z-index:
 .bw-issues { margin: 0 0 8px; padding: 8px 12px; list-style: none; background: rgba(0,0,0,.25); border: 1px solid #6e5637; border-radius: 6px; font-size: 12px; }
 .bw-issues .err { color: #e8927a; } .bw-issues .warn { color: #e8c87a; }
 .bw-importbox { margin-bottom: 8px; } .bw-importbox textarea { width: 100%; box-sizing: border-box; font-family: monospace; font-size: 12px; }
+.btn.on { background: #6e5637; color: #ffe9a8; border-color: var(--gold); }
+.bw-decksbox { margin-bottom: 10px; padding: 10px 12px; background: rgba(0,0,0,.22); border: 1px solid #6e5637; border-radius: 8px; }
+.bw-decks-save { display: flex; gap: 6px; margin-bottom: 8px; }
+.bw-decks-save input { flex: 1; min-width: 0; }
+.bw-decklist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.bw-deckrow { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; background: rgba(255,255,255,.03); }
+.bw-deckrow.active { outline: 1px solid var(--gold); background: color-mix(in srgb, var(--gold) 10%, transparent); }
+.bw-deck-nm { font-weight: 600; cursor: pointer; }
+.bw-deck-nm:hover { color: var(--gold); }
+.bw-deck-ct { color: #b6a98c; margin-right: auto; }
+.bw-deck-btns { display: flex; gap: 4px; flex-wrap: wrap; }
 .bw-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
 @media (max-width: 900px) { .bw-cols { grid-template-columns: 1fr; } }
 .bw-filters { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }

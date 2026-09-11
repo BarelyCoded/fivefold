@@ -19,6 +19,10 @@ const SAVE_KEY = 'ff.save.v1', COLL_KEY = 'ff.collection.v1', TIER_KEY = 'ff.tie
 const BREW_KEY = 'ff.brew.v1';   // constructed (Premodern) deck, separate from the adventure deck
 function loadBrew() { try { S.brew = JSON.parse(localStorage.getItem(BREW_KEY)) || {}; } catch { S.brew = {}; } S.brew.deck ||= {}; S.brew.side ||= {}; }
 function saveBrew() { try { localStorage.setItem(BREW_KEY, JSON.stringify(S.brew)); } catch {} }
+// Named, saved constructed decks — pick one before a play session.
+const DECKS_KEY = 'ff.decks.v1';
+function loadDecks() { try { S.decks = JSON.parse(localStorage.getItem(DECKS_KEY)) || []; } catch { S.decks = []; } if (!Array.isArray(S.decks)) S.decks = []; }
+function saveDecks() { try { localStorage.setItem(DECKS_KEY, JSON.stringify(S.decks)); } catch {} }
 // The Premodern legal pool (by colour) and format (banned/rules), loaded lazily from content/.
 async function ensurePool() { if (S.pool !== undefined) return S.pool; try { S.pool = (await (await fetch('content/premodern-pool.json')).json()).pool; } catch { S.pool = null; } if (S.pool) { S.poolIndex = new Map(); for (const [col, list] of Object.entries(S.pool)) for (const c of list) S.poolIndex.set(c.name, { ...c, col }); } return S.pool; }
 async function ensureFmt() { if (S.fmt) return S.fmt; try { const f = await (await fetch('content/premodern.json')).json(); S.fmt = { banned: new Set(f.banned || []), rules: f.rules, sets: f.sets }; } catch { S.fmt = { banned: new Set(), rules: {}, sets: [] }; } return S.fmt; }
@@ -87,6 +91,7 @@ function save() {
 function load() {
   try { S.collection = JSON.parse(localStorage.getItem(COLL_KEY) || '{}'); } catch { S.collection = {}; }
   loadBrew();
+  loadDecks();
   try { S.game = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); } catch { S.game = null; }
   try { S.tierOverrides = JSON.parse(localStorage.getItem(TIER_KEY) || '{}') || {}; } catch { S.tierOverrides = {}; }
 }
@@ -1249,6 +1254,34 @@ function brewAdd(name, where, n) {
   const v = Math.max(0, cur + n); if (v) o[name] = v; else delete o[name];
   saveBrew(); brew();
 }
+// ---- saved decks ---------------------------------------------------------------
+const clone = o => JSON.parse(JSON.stringify(o || {}));
+function brewSaveDeck(name) {
+  name = (name || '').trim(); if (!name) { toast('Name your deck first.'); return; }
+  S.decks ||= [];
+  const snap = { deck: clone(S.brew.deck), side: clone(S.brew.side) };
+  const i = S.decks.findIndex(d => d.name.toLowerCase() === name.toLowerCase());
+  if (i >= 0) { S.decks[i] = { ...S.decks[i], ...snap, name, savedAt: Date.now() }; toast(`Updated “${name}”.`); }
+  else { S.decks.push({ id: 'd' + Date.now().toString(36), name, ...snap, savedAt: Date.now() }); toast(`Saved “${name}”.`); }
+  S.newDeckName = ''; saveDecks(); brew();
+}
+function brewLoadDeck(id) {
+  const d = S.decks?.find(x => x.id === id); if (!d) return;
+  S.brew = { deck: clone(d.deck), side: clone(d.side) }; saveBrew();
+  S.activeDeck = id; toast(`Loaded “${d.name}”.`); brew();
+}
+function brewDeleteDeck(id) {
+  const d = S.decks?.find(x => x.id === id); if (!d) return;
+  if (!confirm(`Delete “${d.name}”?`)) return;
+  S.decks = S.decks.filter(x => x.id !== id); if (S.activeDeck === id) S.activeDeck = null;
+  saveDecks(); brew();
+}
+function brewRenameDeck(id) {
+  const d = S.decks?.find(x => x.id === id); if (!d) return;
+  const name = (prompt('Rename deck:', d.name) || '').trim(); if (!name) return;
+  d.name = name; saveDecks(); brew();
+}
+async function brewPlayDeck(id) { brewLoadDeck(id); await startBrewDuel(); }
 function brew() {
   if (S.pool === undefined || !S.fmt) { app.innerHTML = '<section class="screen"><div class="box"><h2>Premodern deck builder</h2><p class="small">Loading the card pool…</p></div></section>'; Promise.all([ensurePool(), ensureFmt()]).then(() => { if (S.screen === 'brew') brew(); }); return; }
   if (!S.pool) { app.innerHTML = `<section class="screen"><div class="box"><h2>Premodern deck builder</h2><p class="small">The card pool has not been built yet. Run <code>node tools/build-catalog.mjs</code>.</p><button class="btn" data-go="title">Back</button></div></section>`; return; }
@@ -1285,8 +1318,12 @@ function brew() {
   const issues = [...leg.errors.map(e => `<li class="err">${esc(e)}</li>`), ...leg.warnings.map(w => `<li class="warn">${esc(w)}</li>`)].join('');
   app.innerHTML = `<section class="screen brewscreen">
     <div class="bw-head"><h2>Premodern deck builder</h2><div class="bw-status">${status} · <b>${main}</b> main, <b>${side}</b> side ${issues ? `<button class="btn tiny ghost" id="bw-issues">${leg.errors.length + leg.warnings.length} note${leg.errors.length + leg.warnings.length > 1 ? 's' : ''}</button>` : ''}</div>
-      <div class="bw-actions"><button class="btn small" id="bw-import">Import</button><button class="btn small" id="bw-export">Export</button><button class="btn small" id="bw-playtest">Playtest</button><button class="btn small ghost" id="bw-clear">Clear</button><button class="btn small ghost" data-go="title">Done</button></div></div>
+      <div class="bw-actions"><button class="btn small${S.brewDecks ? ' on' : ''}" id="bw-decks">My decks${S.decks?.length ? ` (${S.decks.length})` : ''}</button><button class="btn small" id="bw-import">Import</button><button class="btn small" id="bw-export">Export</button><button class="btn small" id="bw-playtest">Playtest</button><button class="btn small ghost" id="bw-clear">Clear</button><button class="btn small ghost" data-go="title">Done</button></div></div>
     ${issues && S.brewShowIssues ? `<ul class="bw-issues">${issues}</ul>` : ''}
+    ${S.brewDecks ? `<div class="bw-decksbox">
+      <div class="bw-decks-save"><input id="bw-deckname" placeholder="Deck name…" value="${esc(S.newDeckName || '')}"><button class="btn small" id="bw-deck-save">Save current deck</button></div>
+      ${(S.decks && S.decks.length) ? `<ul class="bw-decklist">${S.decks.slice().sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0)).map(d => { const dc = brewCount(d.deck), sc = brewCount(d.side); return `<li class="bw-deckrow${S.activeDeck === d.id ? ' active' : ''}"><span class="bw-deck-nm" data-deckload="${d.id}" title="Load into the builder">${esc(d.name)}</span><span class="small bw-deck-ct">${dc} main${sc ? ` · ${sc} side` : ''}</span><span class="bw-deck-btns"><button class="btn tiny" data-deckplay="${d.id}">Play</button><button class="btn tiny ghost" data-deckload="${d.id}">Load</button><button class="btn tiny ghost" data-deckrename="${d.id}">Rename</button><button class="btn tiny ghost" data-deckdel="${d.id}">Delete</button></span></li>`; }).join('')}</ul>` : '<p class="small">No saved decks yet. Build a deck, name it, and save it here — then pick it before a play session.</p>'}
+    </div>` : ''}
     ${S.brewImport ? `<div class="bw-importbox"><textarea id="bw-imp" rows="6" placeholder="Paste a decklist: one card per line, e.g. &#10;4 Lightning Bolt&#10;24 Mountain&#10;&#10;Sideboard&#10;3 Pyroblast"></textarea><div><button class="btn small" id="bw-imp-go">Load into deck</button><button class="btn small ghost" id="bw-imp-cancel">Cancel</button></div></div>` : ''}
     <div class="bw-cols">
       <div class="box bw-pool">
@@ -1791,7 +1828,7 @@ document.addEventListener('click', ev => {
 document.addEventListener('input', ev => { if (ev.target.id === 'dfilter') { S.deckFilter = ev.target.value; deck(); document.getElementById('dfilter').focus(); const el = document.getElementById('dfilter'); el.setSelectionRange(el.value.length, el.value.length); } });
 // ---- constructed deck builder events ----
 function brewImport(text) {
-  const parts = text.split(/^\s*sideboard\s*:?\s*$/im);
+  const parts = text.split(/^\s*side ?board\b.*$/im);   // split at a Sideboard header (e.g. "SIDEBOARD (15)")
   const toMap = t => { const m = {}; for (const { name, count } of parseList(t)) m[name] = (m[name] || 0) + count; return m; };
   S.brew = { deck: toMap(parts[0] || ''), side: toMap(parts[1] || '') };
   saveBrew(); S.brewImport = false; brew();
@@ -1805,10 +1842,16 @@ function brewExport() {
   S.brewImport = true; brew(); const el = document.getElementById('bw-imp'); if (el) el.value = txt;
 }
 document.addEventListener('input', ev => { if (ev.target.id === 'bw-q') { S.brewQ = ev.target.value; brew(); const el = document.getElementById('bw-q'); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } } });
+document.addEventListener('input', ev => { if (ev.target.id === 'bw-deckname') S.newDeckName = ev.target.value; });
+document.addEventListener('keydown', ev => { if (ev.target.id === 'bw-deckname' && ev.key === 'Enter') { ev.preventDefault(); brewSaveDeck(ev.target.value); } });
 document.addEventListener('click', ev => {
-  const el = ev.target.closest('[data-brewadd],[data-brewsb],[data-brewadd-deck],[data-brewsub-deck],[data-brewadd-side],[data-brewsub-side],[data-brewcol],[data-brewcmc],[data-brewtype],[data-brewbad],[data-brewclear],#bw-issues,#bw-import,#bw-export,#bw-playtest,#bw-clear,#bw-imp-go,#bw-imp-cancel');
+  const el = ev.target.closest('[data-brewadd],[data-brewsb],[data-brewadd-deck],[data-brewsub-deck],[data-brewadd-side],[data-brewsub-side],[data-brewcol],[data-brewcmc],[data-brewtype],[data-brewbad],[data-brewclear],[data-deckload],[data-deckplay],[data-deckrename],[data-deckdel],#bw-issues,#bw-import,#bw-export,#bw-playtest,#bw-clear,#bw-imp-go,#bw-imp-cancel,#bw-decks,#bw-deck-save');
   if (!el) return;
   const ds = el.dataset;
+  if (ds.deckload) return brewLoadDeck(ds.deckload);
+  if (ds.deckplay) return void brewPlayDeck(ds.deckplay).catch(e => setBusy('Playtest failed: ' + e.message));
+  if (ds.deckrename) return brewRenameDeck(ds.deckrename);
+  if (ds.deckdel) return brewDeleteDeck(ds.deckdel);
   if (ds.brewadd) return brewAdd(ds.brewadd, 'deck', 1);
   if (ds.brewsb) return brewAdd(ds.brewsb, 'side', 1);
   if (ds.brewaddDeck) return brewAdd(ds.brewaddDeck, 'deck', 1);
@@ -1828,6 +1871,8 @@ document.addEventListener('click', ev => {
     case 'bw-export': return brewExport();
     case 'bw-clear': if (confirm('Clear the whole deck and sideboard?')) { S.brew = { deck: {}, side: {} }; saveBrew(); brew(); } return;
     case 'bw-playtest': return void startBrewDuel().catch(e => setBusy('Playtest failed: ' + e.message));
+    case 'bw-decks': S.brewDecks = !S.brewDecks; return brew();
+    case 'bw-deck-save': return brewSaveDeck(document.getElementById('bw-deckname')?.value || S.newDeckName);
   }
 });
 // ---- power-tier screen: re-ranking, filters, export ----
