@@ -293,12 +293,12 @@ export function placeLava(world, rng, player = null) {
   const free = (x, y) => inBounds(world, x, y) && isRock(x, y) && !set.has(lkey(x, y))
     && !blockedForEnemy(world, x, y) && !roadAt(world, x, y) && !moteAt(world, x, y)
     && !nearPlayer(x, y) && dist({ x, y }, world.start) > 4;
-  const pools = Math.max(6, Math.round(world.w * world.h / 70));
+  const pools = Math.max(4, Math.round(world.w * world.h / 130));
   for (let i = 0; i < pools; i++) {
     let sx = 0, sy = 0, seeded = false;
     for (let t = 0; t < 60; t++) { sx = Math.floor(rng() * world.w); sy = Math.floor(rng() * world.h); if (free(sx, sy)) { seeded = true; break; } }
     if (!seeded) continue;
-    const target = 1 + Math.floor(rng() * rng() * 11);   // biased small, occasionally a big pool
+    const target = 1 + Math.floor(rng() * rng() * 7);   // biased small, occasionally a big pool
     const pool = [[sx, sy]]; set.add(lkey(sx, sy));
     let guard = 0;
     while (pool.length < target && guard++ < 90) {
@@ -506,13 +506,13 @@ function paintTiles(world) {
   for (let y = 0; y < Hp; y++) for (let x = 0; x < Wp; x++) {
     const b = owner(x, y);
     const tx = Math.floor(x / PX), ty = Math.floor(y / PX);
-    let rect, lavaRim = false;
+    let rect, lavaRim = false, lavaCore = false;
     if (lavaNear[ty * W_ + tx]) {
-      // Metaball pool: bright molten core, a thin crisp charred rim, rounded outer edge that merges
+      // Metaball pool: a muted molten core, a thin crisp charred rim, rounded outer edge that merges
       // neighbouring tiles. A faint wobble keeps the shore organic without going jagged.
       const lt = TERRAIN[at(tx, ty)] && TERRAIN[at(tx, ty)].accent;
       const f = lavaField(x, y, tx, ty) + (vnoise(x / 22, y / 22, seed + 91) - 0.5) * 0.07;
-      if (f > LAVA_CORE && lt && lt.length) rect = pick(lt, h(tx, ty, 6));                        // molten core
+      if (f > LAVA_CORE && lt && lt.length) { rect = pick(lt, h(tx, ty, 6)); lavaCore = true; }   // molten core
       else if (f > LAVA_ISO && lt && lt.length) { rect = groundRect(b, tx, ty, x, y); lavaRim = true; }  // crisp charred rim
       else rect = groundRect(b, tx, ty, x, y);                                                    // rock outside the pool
     } else rect = groundRect(b, tx, ty, x, y);
@@ -523,7 +523,12 @@ function paintTiles(world) {
     const sheet = sheetOf(rect); if (!sheet) continue;
     const si = (sy * sheet.w + sx) * 4, di = (y * Wp + x) * 4;
     let R = sheet.data[si], G = sheet.data[si + 1], B = sheet.data[si + 2];
-    if (lavaRim) { R = 52; G = 18; B = 12; }   // crisp charred crust ringing the molten core
+    if (lavaCore) {
+      // pull the neon lava sprite toward a muted ember: desaturate a touch and darken, so it sits in
+      // the same low-contrast register as the rest of the tileset instead of glaring off the rock.
+      const lum = 0.3 * R + 0.59 * G + 0.11 * B;
+      R = (R + (lum - R) * 0.28) * 0.82; G = (G + (lum - G) * 0.28) * 0.82; B = (B + (lum - B) * 0.28) * 0.82;
+    } else if (lavaRim) { R = 46; G = 20; B = 15; }   // crisp charred crust ringing the molten core
     img[di] = R; img[di + 1] = G; img[di + 2] = B; img[di + 3] = 255;
   }
   ctx.putImageData(image, 0, 0);
