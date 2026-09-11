@@ -378,7 +378,7 @@ function tickBazaar(g) {
     if (b) toast('A caravan of bright tents has appeared nearby — a Nomad’s Bazaar. Reach it to trade.');
   }
 }
-function openBazaar() { S.bazaarFilter = ''; stockBazaar(); save(); go('bazaar'); }
+function openBazaar() { S.bazaarFilter = ''; S.bazaarColors = []; S.bazaarCmc = null; stockBazaar(); save(); go('bazaar'); }
 // The buyable pool: the whole catalogue by color plus artifacts, minus the restricted cards — the Power
 // Nine (already dropped by shopOk) and the unique dungeon-vault artifacts, which only dungeons yield.
 function bazaarExcluded() { return new Set([...(S.dungeons?.artifacts || [])]); }
@@ -1529,17 +1529,29 @@ function bazaarRow(name) {
 function bazaar() {
   const g = S.game; if (!g.world.bazaar) return map();
   const q = (S.bazaarFilter || '').toLowerCase();
-  const pool = bazaarPool().filter(n => !q || n.toLowerCase().includes(q)).sort((a, b) => (goldPrice(a) - goldPrice(b)) || a.localeCompare(b));
+  const cols = S.bazaarColors || [], cmc = S.bazaarCmc;
+  const matchColor = d => !cols.length || cols.some(c => c === 'C' ? (d.colors || []).length === 0 : (d.colors || []).includes(c));
+  const matchCmc = d => cmc == null || (cmc >= 6 ? (d.cmc || 0) >= 6 : (d.cmc || 0) === cmc);
+  const pool = bazaarPool().filter(n => {
+    if (q && !n.toLowerCase().includes(q)) return false;
+    const d = defOf(n); return d && matchColor(d) && matchCmc(d);
+  }).sort((a, b) => (goldPrice(a) - goldPrice(b)) || a.localeCompare(b));
   const shown = pool.slice(0, 160);
+  const active = cols.length || cmc != null || q;
+  const colorChip = c => `<button class="baz-chip c-${c}${cols.includes(c) ? ' on' : ''}" data-bazcolor="${c}"><i class="dot c-${c}"></i>${COLOR_NAME[c]}</button>`;
   app.innerHTML = `<section class="screen cityscreen bazaar">
     <div class="box">
       <h2>The Nomad’s Bazaar <span class="small">· a travelling market of every stripe</span></h2>
       <p class="innmsg">Silk tents and a hundred tongues, with a table for almost every card in the world — for the right weight of gold, any colour. The nomads keep no Power Nine, nor the relics of the deep dungeons.</p>
       <div class="btnrow"><span class="baz-gold">◎ ${g.player.gold} gold</span><button class="btn primary" data-go="map">Leave</button></div>
       <div class="rowhead"><h3>Wares</h3><span class="rowtools"><input id="bazaar-filter" placeholder="Search cards…" value="${esc(S.bazaarFilter || '')}"></span></div>
+      <div class="baz-filters">
+        <div class="baz-frow"><span class="baz-flabel">Colour</span>${COLORS.map(colorChip).join('')}<button class="baz-chip${cols.includes('C') ? ' on' : ''}" data-bazcolor="C"><i class="dot c-C"></i>Colourless</button></div>
+        <div class="baz-frow"><span class="baz-flabel">Cost</span>${[0, 1, 2, 3, 4, 5, 6].map(n => `<button class="baz-chip${cmc === n ? ' on' : ''}" data-bazcmc="${n}">${n === 6 ? '6+' : n}</button>`).join('')}${active ? '<button class="baz-chip baz-clear" data-bazclear="1">Clear</button>' : ''}</div>
+      </div>
       ${S.bazaarFetching && !shown.length ? '<p class="small">The traders are unrolling their wares…</p>' : ''}
-      <div class="amushop"><div class="amushop-list">${shown.map(n => bazaarRow(n)).join('') || '<p class="small">No wares match that search.</p>'}</div></div>
-      ${pool.length > shown.length ? `<p class="small">${pool.length - shown.length} more — narrow your search to see them.</p>` : ''}
+      <div class="amushop"><div class="amushop-list">${shown.map(n => bazaarRow(n)).join('') || '<p class="small">No wares match those filters.</p>'}</div></div>
+      ${pool.length > shown.length ? `<p class="small">${pool.length - shown.length} more — narrow with the filters above to see them.</p>` : ''}
     </div>
   </section>`;
 }
@@ -1611,7 +1623,7 @@ app.addEventListener('submit', ev => {
 });
 document.addEventListener('click', ev => {
   if (ev.target.closest('.btn, .tab, .linkbtn')) sfx('click');
-  const t = ev.target.closest('[data-go],[data-modal],[data-filter],[data-add],[data-addmax],[data-rem],[data-remmax],[data-dec],[data-buy],[data-sell],[data-amshop],[data-bazbuy],[data-audio],[data-lesson],#b-import,#b-csv,#b-rescan,#b-clear-coll,#b-fill,#b-addall,#b-clear-deck,#b-rest,#b-food,#b-leave,#b-newgame,#b-dleave,#b-practice,#b-bounty,#wm-heal,#wm-blink,#wm-cloak,#wm-thunder,#wm-sight,#b-reset-all');
+  const t = ev.target.closest('[data-go],[data-modal],[data-filter],[data-add],[data-addmax],[data-rem],[data-remmax],[data-dec],[data-buy],[data-sell],[data-amshop],[data-bazbuy],[data-bazcolor],[data-bazcmc],[data-bazclear],[data-audio],[data-lesson],#b-import,#b-csv,#b-rescan,#b-clear-coll,#b-fill,#b-addall,#b-clear-deck,#b-rest,#b-food,#b-leave,#b-newgame,#b-dleave,#b-practice,#b-bounty,#wm-heal,#wm-blink,#wm-cloak,#wm-thunder,#wm-sight,#b-reset-all');
   if (!t) return;
   const g = S.game;
   if ('audio' in t.dataset) { toggleAudio(); renderTop(); return; }
@@ -1628,6 +1640,9 @@ document.addEventListener('click', ev => {
   if (t.dataset.buy != null) { const c = cityAt(g.world, g.player.x, g.player.y); const it = cityStock(c)[Number(t.dataset.buy)]; if (it && !it.sold && g.player.gold >= it.price) { g.player.gold -= it.price; addTownGold(c.color, it.price); it.sold = true; addCards(S.collection, it.name, 1); sfx('coin'); save(); render(); } return; }
   if (t.dataset.amshop != null) { const name = t.dataset.amshop; const color = t.dataset.amcolor || null; const cost = amuletPrice(name); if (spendAmulets(cost, color)) { addCards(S.collection, name, 1); sfx('coin'); save(); render(); toast(`${name} bought for ${cost} amulet${cost > 1 ? 's' : ''}.`); } return; }
   if (t.dataset.bazbuy != null) { buyFromBazaar(t.dataset.bazbuy); return; }
+  if (t.dataset.bazcolor != null) { const c = t.dataset.bazcolor; S.bazaarColors = S.bazaarColors || []; const i = S.bazaarColors.indexOf(c); if (i >= 0) S.bazaarColors.splice(i, 1); else S.bazaarColors.push(c); bazaar(); return; }
+  if (t.dataset.bazcmc != null) { const n = Number(t.dataset.bazcmc); S.bazaarCmc = S.bazaarCmc === n ? null : n; bazaar(); return; }
+  if (t.dataset.bazclear != null) { S.bazaarColors = []; S.bazaarCmc = null; S.bazaarFilter = ''; bazaar(); return; }
   switch (t.id) {
     case 'b-import': S.importText = document.getElementById('imp').value; doImport(S.importText); break;
     case 'b-csv': fetch('api/collection').then(r => r.ok ? r.text() : Promise.reject(new Error('collection.csv not found next to server.js'))).then(txt => { S.importText = txt; doImport(txt); }).catch(e => { S.report = { error: e.message }; render(); }); break;
