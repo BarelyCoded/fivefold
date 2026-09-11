@@ -299,35 +299,77 @@ export function fogAt(world, x, y) { return poolAt(world, 'fog', '_fogSet', x, y
 export function saltAt(world, x, y) { return poolAt(world, 'salt', '_saltSet', x, y); }
 // Grow a scatter of pools (mostly small, a few large) over one biome, avoiding roads and anything already
 // on the map. Stored on the world so it saves; deterministic given the rng passed in.
-function placePools(world, rng, player, biome, prop) {
+// Each hazard has its own geometry, so they do not all read as the same rounded blob:
+//   blob   — compact pools grown by random neighbour steps (salt, fog)
+//   flow   — lava: a meandering channel that follows a heading, widens into pools and sometimes branches
+//   sprawl — swamp: a broad bog that keeps growing from its frontier into ragged lobes
+//   clump  — brambles: a knot of small tangles with gaps between them, not one pool
+function placePools(world, rng, player, biome, prop, shape = 'blob') {
   if (world[prop]) return world[prop];
   const set = new Set();
   const nearPlayer = (x, y) => player && Math.abs(x - player.x) + Math.abs(y - player.y) <= 1;
   const free = (x, y) => inBounds(world, x, y) && tileAt(world, x, y) === biome && !set.has(lkey(x, y))
     && !blockedForEnemy(world, x, y) && !swampAt(world, x, y) && !roadAt(world, x, y) && !moteAt(world, x, y)
     && !nearPlayer(x, y) && dist({ x, y }, world.start) > 4;
-  const pools = Math.max(4, Math.round(world.w * world.h / 130));
+  const add = (x, y) => { if (!free(x, y)) return false; set.add(lkey(x, y)); return true; };
+  const growBlob = (sx, sy, target) => {
+    const pool = [[sx, sy]]; let guard = 0;
+    while (pool.length < target && guard++ < 90) {
+      const [bx, by] = pool[Math.floor(rng() * pool.length)];
+      const [dx, dy] = DIRS[Math.floor(rng() * 4)];
+      if (add(bx + dx, by + dy)) pool.push([bx + dx, by + dy]);
+    }
+  };
+  const growFlow = (x, y, heading, len, depth) => {
+    for (let k = 0; k < len; k++) {
+      heading += (rng() - 0.5) * 1.0;                                   // meander
+      const hx = Math.cos(heading), hy = Math.sin(heading);
+      const dirs = DIRS.map(([dx, dy]) => ({ dx, dy, w: dx * hx + dy * hy })).sort((a, b) => b.w - a.w);
+      const d = rng() < 0.75 ? dirs[0] : dirs[1];
+      const nx = x + d.dx, ny = y + d.dy;
+      if (!add(nx, ny) && !set.has(lkey(nx, ny))) break;              // the channel hits something it cannot cross
+      x = nx; y = ny;
+      if (rng() < 0.22) { const s = rng() < 0.5 ? 1 : -1; add(x + s * d.dy, y - s * d.dx); }   // widen into a pool
+      if (depth < 2 && k > 1 && rng() < 0.12) growFlow(x, y, heading + (rng() < 0.5 ? 1 : -1) * (0.8 + rng() * 0.8), 2 + Math.floor(rng() * 4), depth + 1);
+    }
+  };
+  const growSprawl = (sx, sy, target) => {
+    const pool = [[sx, sy]]; let guard = 0;
+    while (pool.length < target && guard++ < 160) {
+      // mostly grow from the newest tiles, so the bog reaches out into lobes instead of rounding off
+      const base = rng() < 0.65 ? pool[pool.length - 1 - Math.floor(rng() * Math.min(3, pool.length))] : pool[Math.floor(rng() * pool.length)];
+      const [dx, dy] = DIRS[Math.floor(rng() * 4)];
+      if (add(base[0] + dx, base[1] + dy)) pool.push([base[0] + dx, base[1] + dy]);
+    }
+  };
+  const growClump = (sx, sy) => {
+    growBlob(sx, sy, 1 + Math.floor(rng() * 3));
+    const n = 1 + Math.floor(rng() * 3);                                // satellite tangles a tile or two away
+    for (let i = 0; i < n; i++) {
+      const dx = (rng() < 0.5 ? -1 : 1) * (1 + Math.floor(rng() * 3)), dy = (rng() < 0.5 ? -1 : 1) * (1 + Math.floor(rng() * 3));
+      if (Math.abs(dx) + Math.abs(dy) < 2) continue;
+      if (add(sx + dx, sy + dy)) growBlob(sx + dx, sy + dy, 1 + Math.floor(rng() * 2));
+    }
+  };
+  // flows and clumps each cover several tiles per seed, so they get fewer seeds than compact pools
+  const pools = Math.max(3, Math.round(world.w * world.h / (shape === 'flow' ? 260 : shape === 'clump' ? 170 : 130)));
   for (let i = 0; i < pools; i++) {
     let sx = 0, sy = 0, seeded = false;
     for (let t = 0; t < 60; t++) { sx = Math.floor(rng() * world.w); sy = Math.floor(rng() * world.h); if (free(sx, sy)) { seeded = true; break; } }
     if (!seeded) continue;
-    const target = 1 + Math.floor(rng() * rng() * 7);   // biased small, occasionally a big pool
-    const pool = [[sx, sy]]; set.add(lkey(sx, sy));
-    let guard = 0;
-    while (pool.length < target && guard++ < 90) {
-      const [bx, by] = pool[Math.floor(rng() * pool.length)];
-      const [dx, dy] = DIRS[Math.floor(rng() * 4)];
-      const nx = bx + dx, ny = by + dy;
-      if (free(nx, ny)) { set.add(lkey(nx, ny)); pool.push([nx, ny]); }
-    }
+    set.add(lkey(sx, sy));
+    if (shape === 'flow') growFlow(sx, sy, rng() * Math.PI * 2, 3 + Math.floor(rng() * rng() * 10), 0);
+    else if (shape === 'sprawl') growSprawl(sx, sy, 3 + Math.floor(rng() * rng() * 16));
+    else if (shape === 'clump') growClump(sx, sy);
+    else growBlob(sx, sy, 1 + Math.floor(rng() * rng() * 7));   // biased small, occasionally a big pool
   }
   world[prop] = [...set]; world['_' + prop + 'Set'] = null;
   terrainCache.delete(world);   // force a repaint that includes the pools
   return world[prop];
 }
-export function placeLava(world, rng, player = null) { return placePools(world, rng, player, 'R', 'lava'); }
-export function placeSwamp(world, rng, player = null) { return placePools(world, rng, player, 'B', 'swamp'); }
-export function placeBrambles(world, rng, player = null) { return placePools(world, rng, player, 'G', 'bramble'); }
+export function placeLava(world, rng, player = null) { return placePools(world, rng, player, 'R', 'lava', 'flow'); }
+export function placeSwamp(world, rng, player = null) { return placePools(world, rng, player, 'B', 'swamp', 'sprawl'); }
+export function placeBrambles(world, rng, player = null) { return placePools(world, rng, player, 'G', 'bramble', 'clump'); }
 export function placeFog(world, rng, player = null) { return placePools(world, rng, player, 'U', 'fog'); }
 export function placeSalt(world, rng, player = null) { return placePools(world, rng, player, 'W', 'salt'); }
 // Roaming AI: enemies within sight give chase and step toward the player; otherwise they wander their
@@ -442,7 +484,7 @@ const ENV_CW = 704, ENV_CH = 768;                                               
 const ENV_WORK_W = 112, ENV_WORK_H = 122, ENV_BINS = 64;
 // Per hazard: how deep (world px) the border band reaches into the pool, and what fraction of the blob's
 // radius that border occupies in the art, so the band maps onto the decoration and not into the fill.
-const ENV_RIM = { lava: [9, 0.30], swamp: [7, 0.28], salt: [7, 0.22], bramble: [11, 0.42], fog: [0, 0] };
+const ENV_RIM = { lava: [6, 0.26], swamp: [8, 0.28], salt: [7, 0.22], bramble: [10, 0.42], fog: [0, 0] };
 const envWork = {};
 function envWorkFor(kind) {
   if (envWork[kind]) return envWork[kind];
@@ -463,7 +505,11 @@ function envWorkFor(kind) {
     }
     rb[b] = Math.max(2, r - 1);
   }
-  return (envWork[kind] = { data, w: ENV_WORK_W, h: ENV_WORK_H, cx, cy, rb });
+  // The blobs carry narrow spikes (lava's rock points, thorn tips); a rolling minimum over neighbouring
+  // directions keeps the rim sampling inside the solid ring so those tips never land on a pool's edge.
+  const smooth = new Float32Array(ENV_BINS);
+  for (let b = 0; b < ENV_BINS; b++) { let m = Infinity; for (let k = -4; k <= 4; k++) m = Math.min(m, rb[(b + k + ENV_BINS) % ENV_BINS]); smooth[b] = m; }
+  return (envWork[kind] = { data, w: ENV_WORK_W, h: ENV_WORK_H, cx, cy, rb: smooth });
 }
 // Sprite-sheet ground with organic borders: each pixel takes its biome from the nearest tile centre
 // (jittered by noise, like the painted fallback) and samples that biome's sheet tiles as a texture,
@@ -550,11 +596,22 @@ function paintTiles(world) {
     return { mask, near };
   };
   const pools = [['lava', buildPools(world.lava)], ['swamp', buildPools(world.swamp)], ['bramble', buildPools(world.bramble)], ['salt', buildPools(world.salt)], ['fog', buildPools(world.fog)]];
+  // Each hazard has its own silhouette: the field radius sets how fat a tile's pool is (thin lava channels,
+  // broad swamp), and the shore noise its character — big slow lobes for a bog, fine spiky crenellation
+  // for a thicket so it reads as a tangle rather than a liquid.
+  //   rk: field radius as a multiple of PX; iso: the shore threshold; noise: [scale, amplitude] octaves.
+  const POOL_SHAPE = {
+    lava: { rk: 0.90, iso: 0.46, noise: [[31, 0.18], [12, 0.10], [6, 0.05]] },
+    swamp: { rk: 1.20, iso: 0.44, noise: [[38, 0.32], [15, 0.14], [7, 0.05]] },
+    salt: { rk: 1.02, iso: 0.46, noise: [[27, 0.20], [13, 0.11], [6, 0.05]] },
+    bramble: { rk: 0.92, iso: 0.47, noise: [[19, 0.16], [7, 0.15], [3.2, 0.16]] },
+    fog: { rk: 1.02, iso: 0.46, noise: [[27, 0.20], [13, 0.11], [6, 0.05]] },
+  };
+  for (const k in POOL_SHAPE) POOL_SHAPE[k].r2 = (PX * POOL_SHAPE[k].rk) ** 2;
   // Sum of a smooth radial falloff from each nearby pool-tile centre, plus its gradient (the gradient
   // points inward, so -grad is the outward normal used to orient the art's border around the pool).
-  const POOL_RK = PX * 1.02, POOL_ISO = 0.46, r2 = POOL_RK * POOL_RK;
   let fF = 0, fGx = 0, fGy = 0;
-  const poolFG = (x, y, tx, ty, mask) => {
+  const poolFG = (x, y, tx, ty, mask, r2) => {
     let f = 0, gx = 0, gy = 0;
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
       const nx = tx + dx, ny = ty + dy;
@@ -564,21 +621,20 @@ function paintTiles(world) {
     }
     fF = f; fGx = gx; fGy = gy;
   };
-  // Layered noise on the shore: big lobes swell and pinch the pool, mid ripples and a little fine
-  // crenellation break the perfect oval so no edge or corner reads as geometric.
-  const shoreNoise = (x, y) => (vnoise(x / 27, y / 27, seed + 91) - 0.5) * 0.20 + (vnoise(x / 13, y / 13, seed + 53) - 0.5) * 0.11 + (vnoise(x / 6, y / 6, seed + 17) - 0.5) * 0.05;
+  const shoreNoise = (x, y, oct) => { let n = 0; for (let i = 0; i < oct.length; i++) n += (vnoise(x / oct[i][0], y / oct[i][0], seed + 91 + i * 38) - 0.5) * oct[i][1]; return n; };
   const ENV_FILL_SCALE = 1.2;   // working-art px per world px when tiling a blob's centre fill
   let ovR = 0, ovG = 0, ovB = 0, ovA = 0;
   // Colour a pool pixel from the art: the outer band samples the blob's border radially in the pool's
   // outward direction (so the decoration wraps the outline), the interior tiles the blob's centre fill.
   const hazardPx = (kind, mask, x, y, tx, ty) => {
-    poolFG(x, y, tx, ty, mask);
-    const e = fF + shoreNoise(x, y);
-    if (e <= POOL_ISO) return false;
+    const sh = POOL_SHAPE[kind];
+    poolFG(x, y, tx, ty, mask, sh.r2);
+    const e = fF + shoreNoise(x, y, sh.noise);
+    if (e <= sh.iso) return false;
     const wk = envWorkFor(kind); if (!wk) return false;
     const [rimPx, band] = ENV_RIM[kind];
     const g = Math.hypot(fGx, fGy);
-    const depth = (e - POOL_ISO) / Math.max(g, 0.012);   // first-order distance in from the shore, world px
+    const depth = (e - sh.iso) / Math.max(g, 0.012);   // first-order distance in from the shore, world px
     let u, v;
     if (depth < rimPx) {
       let th = Math.atan2(-fGy, -fGx) + (vnoise(x / 45, y / 45, seed + 311) - 0.5) * 2.0;
@@ -597,8 +653,8 @@ function paintTiles(world) {
   // Fog has no shore: a feathered mist, densest in the core and wispy at the edge, its density textured
   // by the cloud art so it drifts rather than sits as a flat wash.
   const fogPx = (mask, x, y, tx, ty) => {
-    poolFG(x, y, tx, ty, mask);
-    const e = fF + shoreNoise(x, y);
+    poolFG(x, y, tx, ty, mask, POOL_SHAPE.fog.r2);
+    const e = fF + shoreNoise(x, y, POOL_SHAPE.fog.noise);
     let a = Math.max(0, Math.min(0.74, (e - 0.24) * 0.95));
     if (a <= 0) return false;
     const wk = envWorkFor('fog');
@@ -641,13 +697,20 @@ function paintTiles(world) {
   const nearCity = (x, y) => world.cities.some(ct => Math.abs(ct.x - x) <= 3 && Math.abs(ct.y - y) <= 3 && (Math.abs(ct.x - x) + Math.abs(ct.y - y)) >= 2);
   for (let y = 0; y < world.h; y++) for (let x = 0; x < world.w; x++) {
     const b = at(x, y), X = x * PX, Y = y * PX;
-    if (reserved.has(`${x},${y}`) || lavaAt(world, x, y) || swampAt(world, x, y) || saltAt(world, x, y) || brambleAt(world, x, y)) continue;   // nothing grows in a pool, on the flats, or in a thicket
+    if (reserved.has(`${x},${y}`) || lavaAt(world, x, y) || swampAt(world, x, y) || saltAt(world, x, y)) continue;   // nothing grows in a pool or on the flats
     // objects sit on their tile: feet near the tile's bottom edge, a little jitter, sized to the tile by `frac`
     const spot = (i) => [X + PX / 2 + Math.round((h(x, y, 400 + i) - 0.5) * 10) + (i === 1 ? 9 : i === 0 ? -3 : 0), Y + PX - 2 + Math.round((h(x, y, 420 + i) - 0.5) * 4)];
     const add = (rect, fx, fy, frac) => feats.push({ y: fy, draw: () => blitAt(ctx, rect, fx, fy, tileFit(rect, frac)) });
     const S = SPRITES, sc = 0.95;
     const any = (...names) => names.map(n => S[n]).filter(Boolean);
     const from = (list, t) => list.length ? pick(list, t) : null;
+    if (brambleAt(world, x, y)) {
+      // a thicket is not a pool: a dead tree or a scrub of shrubs rises out of the tangle on most tiles
+      const r = h(x, y, 480);
+      if (r < 0.4) { const t = from(any('deadtree'), h(x, y, 481)); if (t) { const [fx, fy] = spot(2); add(t, fx, fy, 0.8); } }
+      else if (r < 0.8) { const t = from(any('shrub', 'bush-2', 'bushSmall'), h(x, y, 482)); if (t) { const [fx, fy] = spot(1); add(t, fx, fy, 0.5); } }
+      continue;
+    }
     if ((b === 'G' || b === 'W') && nearCity(x, y) && h(x, y, 390) < 0.05) { const [fx, fy] = spot(9); const r = h(x, y, 391); const hamlet = from(any('hut', 'huts', 'watchtower', 'well', 'signpost'), r) || S.city.town; add(hamlet, fx, fy, hamlet === S.city.town ? 0.8 : 0.85); continue; }
     if (b === 'G') {
       const d = h(x, y, 440); const n = d < 0.55 ? 0 : d < 0.92 ? 1 : 2;
