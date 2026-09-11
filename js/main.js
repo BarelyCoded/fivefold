@@ -2,7 +2,7 @@
 import { parseList, importNames, defOf, forgetDefs, loadArtIndex, artFor, artCount, hasOwnArt, hasServer } from './collection.js';
 import { fetchCards, cacheSize, cached as cachedCard, allCached } from './scryfall.js';
 import { COLORS, COLOR_NAME, manaHtml, statusLabel } from './cards.js';
-import { generateWorld, drawWorld, drawMinimap, tileAt, inBounds, cityAt, linkAt, enemyAt, stepEnemies, BIOME, TILE, VIEW, placeDungeons, dungeonAt, relocateDungeon, placeLandmarks, landmarkAt, placeSpecials, specialAt, placeMotes, moteAt, spawnMote, castleAt, WARDEN_HOLD, roadAt, ensureRoads, bazaarAt, spawnBazaar, lavaAt, placeLava, swampAt, placeSwamp } from './world.js';
+import { generateWorld, drawWorld, drawMinimap, tileAt, inBounds, cityAt, linkAt, enemyAt, stepEnemies, BIOME, TILE, VIEW, placeDungeons, dungeonAt, relocateDungeon, placeLandmarks, landmarkAt, placeSpecials, specialAt, placeMotes, moteAt, spawnMote, castleAt, WARDEN_HOLD, roadAt, ensureRoads, bazaarAt, spawnBazaar, lavaAt, placeLava, swampAt, placeSwamp, brambleAt, placeBrambles, fogAt, placeFog } from './world.js';
 import { Duel } from './engine.js';
 import { mountDuel, cardHtml } from './duelview.js';
 import { Net } from './net.js';
@@ -268,6 +268,11 @@ function move(dx, dy) {
     else if (g.player.steps % 2 === 0 && g.player.life > 1) { g.player.life--; toast('You are starving: 1 life lost. Buy food in any city.'); }
     if (g.player.steps % STEPS_PER_DAY === 0) { g.player.day++; advanceSieges(g); if (g.status !== 'playing') return; if (g.player.day % 30 === 0) bossLink(); if (g.status !== 'playing') return; }
   }
+  if (brambleAt(g.world, nx, ny)) {                              // thorns bleed you as you push through, but never kill outright
+    if (!brambleAt(g.world, ox, oy)) toast('Thorns tear at you as you push through the brambles.');
+    if (g.player.life > 1) g.player.life--;
+  }
+  if (fogAt(g.world, nx, ny) && !fogAt(g.world, ox, oy)) toast('Fog closes in — you can barely see.');   // sight collapses (see drawMapFrame)
   const link = linkAt(g.world, nx, ny);
   if (link && !link.taken) { link.taken = true; g.player.maxLife += 2; g.player.life += 2; toast(`Mana link claimed. Maximum life is now ${g.player.maxLife}.`); }
   const mote = moteAt(g.world, nx, ny);
@@ -1378,7 +1383,8 @@ function drawMapFrame(canvas) {
     }
   }
   if (!S.walk) hl = neighborHighlight(g);   // step hints only while standing still
-  const cam = drawWorld(canvas, world, player, { heroPos, enemyPos, heroBob: bob, highlight: hl, sight: SIGHT });
+  const sight = fogAt(world, player.x, player.y) ? 2.5 : SIGHT;   // inside a fog bank you can barely see roaming mages
+  const cam = drawWorld(canvas, world, player, { heroPos, enemyPos, heroBob: bob, highlight: hl, sight });
   S._mapCam = cam;
   return cam;
 }
@@ -1441,6 +1447,8 @@ function map() {
   if (!g.world.roads) { ensureRoads(g.world); save(); }
   if (!g.world.lava) { placeLava(g.world, Math.random, g.player); save(); }   // after roads, so pools avoid them
   if (!g.world.swamp) { placeSwamp(g.world, Math.random, g.player); save(); }   // swamp mires in the Wastes
+  if (!g.world.bramble) { placeBrambles(g.world, Math.random, g.player); save(); }   // bramble thickets in the Forest
+  if (!g.world.fog) { placeFog(g.world, Math.random, g.player); save(); }   // fog banks over the Coast
   // Give pre-clue saves the new dungeon intel model: a previously-revealed dungeon counts as fully located.
   if ((g.world.dungeons || []).some(d => d.intel === undefined)) {
     for (const d of g.world.dungeons) if (d.intel === undefined) { d.intel = d.revealed ? FIND_CLUES : 0; d.locClues = d.revealed ? FIND_CLUES : 0; d.sensed = !!d.revealed; d.collected = d.collected || []; d.hint = null; }

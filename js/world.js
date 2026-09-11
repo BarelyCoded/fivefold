@@ -277,9 +277,13 @@ export function spawnBazaar(world, player, rng) {
 }
 
 // ---- terrain pools: coherent pools grown from seeds --------------------------------------------------
-// Lava fills the Mountains (Red) and is impassable; swamp fills the Wastes (Black) and is slow to cross
-// (see move()). Both share the pool geometry and the metaball renderer, and differ only in colour.
-// Roaming mages avoid both (blockedForEnemy), so a mire is slow going but a refuge from pursuit.
+// One hazard per colour, all sharing the pool geometry and the metaball renderer, differing in colour and
+// in the gameplay hook (see move() / drawMapFrame):
+//   Red / Mountains  → lava    : impassable; mages avoid it.
+//   Black / Wastes   → swamp   : slow to cross (double time & food); mages avoid it (a refuge).
+//   Green / Forest   → bramble : passable but thorny — costs life to push through; mages cross it.
+//   Blue / Coast     → fog     : passable, but your sight collapses inside it; mages cross it.
+// Lava and swamp are in blockedForEnemy (walls to mages); bramble and fog are not.
 const lkey = (x, y) => `${x},${y}`;
 function poolAt(world, prop, cacheProp, x, y) {
   const arr = world && world[prop];
@@ -289,6 +293,8 @@ function poolAt(world, prop, cacheProp, x, y) {
 }
 export function lavaAt(world, x, y) { return poolAt(world, 'lava', '_lavaSet', x, y); }
 export function swampAt(world, x, y) { return poolAt(world, 'swamp', '_swampSet', x, y); }
+export function brambleAt(world, x, y) { return poolAt(world, 'bramble', '_brambleSet', x, y); }
+export function fogAt(world, x, y) { return poolAt(world, 'fog', '_fogSet', x, y); }
 // Grow a scatter of pools (mostly small, a few large) over one biome, avoiding roads and anything already
 // on the map. Stored on the world so it saves; deterministic given the rng passed in.
 function placePools(world, rng, player, biome, prop) {
@@ -319,6 +325,8 @@ function placePools(world, rng, player, biome, prop) {
 }
 export function placeLava(world, rng, player = null) { return placePools(world, rng, player, 'R', 'lava'); }
 export function placeSwamp(world, rng, player = null) { return placePools(world, rng, player, 'B', 'swamp'); }
+export function placeBrambles(world, rng, player = null) { return placePools(world, rng, player, 'G', 'bramble'); }
+export function placeFog(world, rng, player = null) { return placePools(world, rng, player, 'U', 'fog'); }
 // Roaming AI: enemies within sight give chase and step toward the player; otherwise they wander their
 // own terrain. An enemy that steps onto the player's tile catches them — returned so the caller can
 // start the duel. Cities, mana links and landmarks are safe: enemies never step onto them.
@@ -451,7 +459,7 @@ function paintTiles(world) {
     }
     return { mask, near };
   };
-  const lavaP = buildPools(world.lava), swampP = buildPools(world.swamp);
+  const lavaP = buildPools(world.lava), swampP = buildPools(world.swamp), bramblP = buildPools(world.bramble), fogP = buildPools(world.fog);
   // Sum of a smooth radial falloff from each nearby pool-tile centre. A lone tile makes a rounded pool;
   // neighbours merge with a rounded neck; convex corners of a run round off — like liquid, not tiles.
   const POOL_RK = PX * 1.02, POOL_ISO = 0.46, POOL_CORE = 0.60, r2 = POOL_RK * POOL_RK;
@@ -517,18 +525,18 @@ function paintTiles(world) {
   for (let y = 0; y < Hp; y++) for (let x = 0; x < Wp; x++) {
     const b = owner(x, y);
     const tx = Math.floor(x / PX), ty = Math.floor(y / PX);
-    let rect, lavaRim = false, lavaCore = false, swampRim = false, swampCore = false;
+    let rect, lavaRim = false, lavaCore = false, swampRim = false, swampCore = false, bramRim = false, bramCore = false, fogA = 0;
     const idx = ty * W_ + tx, lt = TERRAIN[at(tx, ty)] && TERRAIN[at(tx, ty)].accent;
-    // Classify a pixel against a pool's metaball field: 'core' (deep), 'rim' (shore band), or null (outside).
-    // Layered noise perturbs the shore — big lobes swell and pinch the pool, mid ripples and a little fine
-    // crenellation break the perfect oval — and the core/rim split drifts so the rim varies in width.
+    // Perturbed metaball value of a pool at this pixel: big lobes swell and pinch the pool, mid ripples and
+    // a little fine crenellation break the perfect oval so no edge or corner reads as geometric.
+    const poolE = (mask) => poolField(x, y, tx, ty, mask)
+      + (vnoise(x / 27, y / 27, seed + 91) - 0.5) * 0.20
+      + (vnoise(x / 13, y / 13, seed + 53) - 0.5) * 0.11
+      + (vnoise(x / 6, y / 6, seed + 17) - 0.5) * 0.05;
+    // Classify into 'core' (deep), 'rim' (shore band) or null; the core/rim split drifts so the rim varies.
     const poolAtPx = (mask) => {
       if (!lt || !lt.length) return null;
-      const e = poolField(x, y, tx, ty, mask)
-        + (vnoise(x / 27, y / 27, seed + 91) - 0.5) * 0.20
-        + (vnoise(x / 13, y / 13, seed + 53) - 0.5) * 0.11
-        + (vnoise(x / 6, y / 6, seed + 17) - 0.5) * 0.05;
-      const split = POOL_CORE + (vnoise(x / 16, y / 16, seed + 205) - 0.5) * 0.12;
+      const e = poolE(mask), split = POOL_CORE + (vnoise(x / 16, y / 16, seed + 205) - 0.5) * 0.12;
       return e > split ? 'core' : e > POOL_ISO ? 'rim' : null;
     };
     if (lavaP.near[idx]) {
@@ -541,6 +549,16 @@ function paintTiles(world) {
       if (c === 'core') { rect = pick(lt, h(tx, ty, 6)); swampCore = true; }
       else if (c === 'rim') { rect = groundRect(b, tx, ty, x, y); swampRim = true; }
       else rect = groundRect(b, tx, ty, x, y);
+    } else if (bramblP.near[idx]) {
+      const c = poolAtPx(bramblP.mask);
+      if (c === 'core') { rect = pick(lt, h(tx, ty, 6)); bramCore = true; }
+      else if (c === 'rim') { rect = groundRect(b, tx, ty, x, y); bramRim = true; }
+      else rect = groundRect(b, tx, ty, x, y);
+    } else if (fogP.near[idx]) {
+      // fog has no crisp shore: draw the water/ground beneath and feather a pale mist over it, densest in
+      // the core and wispy at the edge, so it reads as drifting sea-mist rather than a solid pool.
+      rect = groundRect(b, tx, ty, x, y);
+      fogA = Math.max(0, Math.min(0.74, (poolE(fogP.mask) - 0.24) * 0.95));
     } else rect = groundRect(b, tx, ty, x, y);
     // mirror tiles per cell so repeats are less obvious
     const fx = (tx & 1) === 1, fy = (ty & 1) === 1;
@@ -561,6 +579,13 @@ function paintTiles(world) {
       const t = (0.3 * R + 0.59 * G + 0.11 * B) / 255;
       R = 24 + t * 40; G = 40 + t * 74; B = 32 + t * 52;
     } else if (swampRim) { R = 30; G = 38; B = 26; }   // muddy bank ringing the water
+    else if (bramCore) {
+      // a dead-briar tangle: dark, dry brown-olive thorns kept well below the vivid grass in brightness
+      // so the thicket reads as an obstacle, not more lawn — the texture supplies the tangle.
+      const t = (0.3 * R + 0.59 * G + 0.11 * B) / 255;
+      R = 32 + t * 44; G = 28 + t * 34; B = 15 + t * 16;   // dark shadowed earth; the briar sprites sit on top
+    } else if (bramRim) { R = 26; G = 22; B = 12; }   // dark thorny earth at the edge
+    if (fogA > 0) { R += (224 - R) * fogA; G += (230 - G) * fogA; B += (240 - B) * fogA; }   // pale drifting mist
     img[di] = R; img[di + 1] = G; img[di + 2] = B; img[di + 3] = 255;
   }
   ctx.putImageData(image, 0, 0);
@@ -578,6 +603,13 @@ function paintTiles(world) {
     const S = SPRITES, sc = 0.95;
     const any = (...names) => names.map(n => S[n]).filter(Boolean);
     const from = (list, t) => list.length ? pick(list, t) : null;
+    if (brambleAt(world, x, y)) {
+      // a thorny thicket: the dark ground is already painted, so pack the tile with briar sprites to make
+      // an impassable-looking tangle instead of the sparse scatter open forest gets.
+      const briar = any('bush', 'bush-2', 'shrub', 'bushSmall', 'sapling');
+      if (briar.length) for (let i = 0; i < 3; i++) { const [fx, fy] = spot(i); add(pick(briar, h(x, y, 480 + i)), fx, fy, i === 0 ? 0.62 : 0.5); }
+      continue;
+    }
     if ((b === 'G' || b === 'W') && nearCity(x, y) && h(x, y, 390) < 0.05) { const [fx, fy] = spot(9); const r = h(x, y, 391); const hamlet = from(any('hut', 'huts', 'watchtower', 'well', 'signpost'), r) || S.city.town; add(hamlet, fx, fy, hamlet === S.city.town ? 0.8 : 0.85); continue; }
     if (b === 'G') {
       const d = h(x, y, 440); const n = d < 0.55 ? 0 : d < 0.92 ? 1 : 2;
