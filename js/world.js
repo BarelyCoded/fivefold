@@ -475,7 +475,7 @@ const terrainCache = new WeakMap();
 const ENV_URL = new URL('../assets/environment.png', import.meta.url).href;
 let envImg = null, envReady = false;
 if (typeof Image !== 'undefined') { const im = new Image(); im.onload = () => { envImg = im; envReady = true; }; im.onerror = () => {}; im.src = ENV_URL; }
-const ENV_CELL = { salt: [0, 0], bramble: [1, 0], lava: [2, 0], fog: [3, 0], swamp: [2, 1] };   // [col,row] in the sheet
+const ENV_CELL = { salt: [0, 0], lava: [2, 0], fog: [3, 0], swamp: [2, 1], bramble: [0, 2] };   // [col,row] in the sheet; row 2 holds the cut-out thorn knot
 const ENV_CW = 704, ENV_CH = 768;                                                                // one cell of the sheet
 // The hazards are not stamped tile by tile (that reads as blocks). Instead each pool keeps the organic
 // metaball outline and wears the art as a texture: the outer band of the pool samples the blob's decorated
@@ -595,7 +595,9 @@ function paintTiles(world) {
     }
     return { mask, near };
   };
-  const pools = [['lava', buildPools(world.lava)], ['swamp', buildPools(world.swamp)], ['bramble', buildPools(world.bramble)], ['salt', buildPools(world.salt)], ['fog', buildPools(world.fog)]];
+  // Brambles are not a pool: the art is a single thorn tangle, so it is stamped as a sprite in the scenery
+  // pass below rather than stretched into a rim and fill.
+  const pools = [['lava', buildPools(world.lava)], ['swamp', buildPools(world.swamp)], ['salt', buildPools(world.salt)], ['fog', buildPools(world.fog)]];
   // Each hazard has its own silhouette: the field radius sets how fat a tile's pool is (thin lava channels,
   // broad swamp), and the shore noise its character — big slow lobes for a bog, fine spiky crenellation
   // for a thicket so it reads as a tangle rather than a liquid.
@@ -705,10 +707,17 @@ function paintTiles(world) {
     const any = (...names) => names.map(n => S[n]).filter(Boolean);
     const from = (list, t) => list.length ? pick(list, t) : null;
     if (brambleAt(world, x, y)) {
-      // a thicket is not a pool: a dead tree or a scrub of shrubs rises out of the tangle on most tiles
-      const r = h(x, y, 480);
-      if (r < 0.4) { const t = from(any('deadtree'), h(x, y, 481)); if (t) { const [fx, fy] = spot(2); add(t, fx, fy, 0.8); } }
-      else if (r < 0.8) { const t = from(any('shrub', 'bush-2', 'bushSmall'), h(x, y, 482)); if (t) { const [fx, fy] = spot(1); add(t, fx, fy, 0.5); } }
+      // A thicket is brush, not a pool: stamp the whole thorn tangle from the art as a sprite, a little
+      // bigger than its tile with jitter, a random flip and some size variation, so neighbouring tiles
+      // overlap into one patch of brambles. A dead tree rises out of it now and then.
+      if (envImg) {
+        const [ccol, crow] = ENV_CELL.bramble;
+        const s = PX * (0.95 + h(x, y, 483) * 0.4), sh = s * ENV_CH / ENV_CW;
+        const cx = X + PX / 2 + Math.round((h(x, y, 484) - 0.5) * 8), cy = Y + PX / 2 + Math.round((h(x, y, 485) - 0.5) * 8);
+        const flip = h(x, y, 486) < 0.5;
+        feats.push({ y: cy + sh * 0.3, draw: () => { ctx.save(); ctx.imageSmoothingEnabled = true; ctx.translate(cx, cy); if (flip) ctx.scale(-1, 1); ctx.drawImage(envImg, ccol * ENV_CW, crow * ENV_CH, ENV_CW, ENV_CH, -s / 2, -sh / 2, s, sh); ctx.restore(); } });
+      }
+      if (h(x, y, 480) < 0.3) { const t = from(any('deadtree'), h(x, y, 481)); if (t) { const [fx, fy] = spot(2); add(t, fx, fy, 0.8); } }
       continue;
     }
     if ((b === 'G' || b === 'W') && nearCity(x, y) && h(x, y, 390) < 0.05) { const [fx, fy] = spot(9); const r = h(x, y, 391); const hamlet = from(any('hut', 'huts', 'watchtower', 'well', 'signpost'), r) || S.city.town; add(hamlet, fx, fy, hamlet === S.city.town ? 0.8 : 0.85); continue; }
