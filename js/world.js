@@ -472,15 +472,18 @@ function paintTiles(world) {
   for (let y = 0; y < Hp; y++) for (let x = 0; x < Wp; x++) {
     const b = owner(x, y);
     const tx = Math.floor(x / PX), ty = Math.floor(y / PX);
-    let rect;
+    let rect, lavaT = -1;
     if (lavaAt(world, tx, ty)) {
       // A pool: the lava sprite fills the interior and rounds in from the tile edges (like the coastline),
       // so pools read as organic molten patches drawn from the real tileset rather than a square.
       let dl = 1e9;
       for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if ((dx || dy) && !lavaAt(world, tx + dx, ty + dy)) dl = Math.min(dl, Math.hypot(x - ((tx + dx) * PX + PX / 2), y - ((ty + dy) * PX + PX / 2)));
-      const molten = dl >= PX * 0.56 + (vnoise(x / 7, y / 7, seed + 91) - 0.5) * 15;
+      // a broad low-frequency wobble plus a little fine detail pushes the pool edge off the tile grid
+      const wobble = (vnoise(x / 17, y / 17, seed + 91) - 0.5) * 22 + (vnoise(x / 5, y / 5, seed + 52) - 0.5) * 8;
+      const t0 = PX * 0.5 + wobble;
       const lt = TERRAIN[at(tx, ty)] && TERRAIN[at(tx, ty)].accent;
-      rect = (molten && lt && lt.length) ? pick(lt, h(tx, ty, 6)) : tileFor(b, tx, ty, x, y);
+      if (dl >= t0 && lt && lt.length) { rect = pick(lt, h(tx, ty, 6)); lavaT = Math.max(0, Math.min(1, (dl - t0) / (PX * 0.55))); }   // 0 at the shore, 1 deep in the molten core
+      else rect = tileFor(b, tx, ty, x, y);   // charred rock just outside the pool
     } else if (b === 'U' && coast[ty * W_ + tx]) {
       let dl = 99;
       for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const t = at(tx + dx, ty + dy); if (t && t !== 'U') dl = Math.min(dl, Math.hypot(x - ((tx + dx) * PX + PX / 2), y - ((ty + dy) * PX + PX / 2))); }
@@ -493,7 +496,15 @@ function paintTiles(world) {
     const sx = rect[0] + (fx ? rect[2] - 1 - u : u), sy = rect[1] + (fy ? rect[3] - 1 - v : v);
     const sheet = sheetOf(rect); if (!sheet) continue;
     const si = (sy * sheet.w + sx) * 4, di = (y * Wp + x) * 4;
-    img[di] = sheet.data[si]; img[di + 1] = sheet.data[si + 1]; img[di + 2] = sheet.data[si + 2]; img[di + 3] = 255;
+    let R = sheet.data[si], G = sheet.data[si + 1], B = sheet.data[si + 2];
+    if (lavaT >= 0) {
+      // charred, glowing rim at the shore fading to a bright molten core, like real lava
+      const rim = (1 - lavaT) * (1 - lavaT);
+      R += (48 - R) * rim; G += (14 - G) * rim; B += (10 - B) * rim;
+      const glow = Math.max(0, lavaT - 0.4) * 1.1;
+      R = Math.min(255, R + 78 * glow); G = Math.min(255, G + 52 * glow); B = Math.min(255, B + 10 * glow);
+    }
+    img[di] = R; img[di + 1] = G; img[di + 2] = B; img[di + 3] = 255;
   }
   ctx.putImageData(image, 0, 0);
   paintRoads(ctx, world, seed);
