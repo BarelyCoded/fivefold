@@ -276,9 +276,10 @@ export function spawnBazaar(world, player, rng) {
   return null;
 }
 
-// ---- terrain pools: coherent pools grown from seeds; impassable to the player and to mages ------------
-// Lava fills the Mountains (Red); swamp fills the Wastes (Black). Both share the pool geometry and the
-// metaball renderer, and differ only in colour.
+// ---- terrain pools: coherent pools grown from seeds --------------------------------------------------
+// Lava fills the Mountains (Red) and is impassable; swamp fills the Wastes (Black) and is slow to cross
+// (see move()). Both share the pool geometry and the metaball renderer, and differ only in colour.
+// Roaming mages avoid both (blockedForEnemy), so a mire is slow going but a refuge from pursuit.
 const lkey = (x, y) => `${x},${y}`;
 function poolAt(world, prop, cacheProp, x, y) {
   const arr = world && world[prop];

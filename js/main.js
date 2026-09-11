@@ -251,18 +251,23 @@ function move(dx, dy) {
   if (probs.length) { S.modal = { title: 'Your deck is not ready', body: `<ul>${probs.map(p => `<li>${esc(p)}</li>`).join('')}</ul>`, buttons: [{ label: 'Open deck builder', action: () => { S.modal = null; go('deck'); } }, { label: 'Close', action: () => { S.modal = null; render(); } }] }; render(); return; }
   const nx = g.player.x + dx, ny = g.player.y + dy;
   if (!inBounds(g.world, nx, ny)) return;
-  if (lavaAt(g.world, nx, ny) || swampAt(g.world, nx, ny)) return;   // molten rock / mire — impassable, like a wall
+  if (lavaAt(g.world, nx, ny)) return;   // molten rock — impassable, like a wall
   const enemy = enemyAt(g.world, nx, ny);
   if (enemy) { encounter(enemy); return; }
   const cst = castleAt(g.world, nx, ny);
   if (cst) { castlePrompt(cst); return; }
   const dg = dungeonAt(g.world, nx, ny);
   if (dg && dg.revealed) { g.player.x = nx; g.player.y = ny; save(); dungeonPrompt(dg); return; }
-  g.player.x = nx; g.player.y = ny; g.player.steps++; sfx('step');
+  g.player.x = nx; g.player.y = ny; sfx('step');
   if (g.player.cloak > 0) g.player.cloak--;
-  if (g.player.food > 0) g.player.food--;
-  else if (g.player.steps % 2 === 0 && g.player.life > 1) { g.player.life--; toast('You are starving: 1 life lost. Buy food in any city.'); }
-  if (g.player.steps % STEPS_PER_DAY === 0) { g.player.day++; advanceSieges(g); if (g.status !== 'playing') return; if (g.player.day % 30 === 0) bossLink(); if (g.status !== 'playing') return; }
+  const slow = swampAt(g.world, nx, ny);                        // a mire is slow going: it costs double time and food
+  if (slow && !swampAt(g.world, ox, oy)) toast('The mire is slow going.');
+  for (let t = 0, ticks = slow ? 2 : 1; t < ticks; t++) {
+    g.player.steps++;
+    if (g.player.food > 0) g.player.food--;
+    else if (g.player.steps % 2 === 0 && g.player.life > 1) { g.player.life--; toast('You are starving: 1 life lost. Buy food in any city.'); }
+    if (g.player.steps % STEPS_PER_DAY === 0) { g.player.day++; advanceSieges(g); if (g.status !== 'playing') return; if (g.player.day % 30 === 0) bossLink(); if (g.status !== 'playing') return; }
+  }
   const link = linkAt(g.world, nx, ny);
   if (link && !link.taken) { link.taken = true; g.player.maxLife += 2; g.player.life += 2; toast(`Mana link claimed. Maximum life is now ${g.player.maxLife}.`); }
   const mote = moteAt(g.world, nx, ny);
