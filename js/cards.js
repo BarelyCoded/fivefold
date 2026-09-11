@@ -914,6 +914,7 @@ function parseEvent(w) {
   if (/^enchanted creature attacks$/.test(w)) return { event: 'enchantedAttacks' };
   if (/^you cast a spell$/.test(w)) return { event: 'youCast', kind: 'any' };
   if ((m = w.match(/^you cast (?:a|an) (\w+) spell$/))) { const k = m[1]; return { event: 'youCast', kind: ['noncreature', 'creature', 'artifact', 'enchantment', 'instant', 'sorcery'].includes(k) ? k : 'any' }; }
+  if (/^an opponent casts a spell$/.test(w)) return { event: 'anyCast', who: 'opp' };
   if (/^a player casts a spell$/.test(w)) return { event: 'anyCast' };
   if (/^~ is turned face up$/.test(w)) return null;
   return null;
