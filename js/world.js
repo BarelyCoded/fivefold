@@ -434,32 +434,36 @@ const ENV_URL = new URL('../assets/environment.png', import.meta.url).href;
 let envImg = null, envReady = false;
 if (typeof Image !== 'undefined') { const im = new Image(); im.onload = () => { envImg = im; envReady = true; }; im.onerror = () => {}; im.src = ENV_URL; }
 const ENV_CELL = { salt: [0, 0], bramble: [1, 0], lava: [2, 0], fog: [3, 0], swamp: [2, 1] };   // [col,row] in the sheet
-const ENV_CW = 704, ENV_CH = 768, ENV_SW = ENV_CW / 3, ENV_SH = ENV_CH / 3;                     // cell and nine-slice sub-tile
-// Stamp a hazard's tiles from the art sheet, nine-slice autotiled: a lone tile gets the whole blob; otherwise
-// the sub-tile is chosen so decorated borders fall on the sides with no same-hazard neighbour.
-function paintHazards(ctx, world) {
-  if (!envImg) return;
-  const kinds = [['lava', lavaAt], ['swamp', swampAt], ['salt', saltAt], ['bramble', brambleAt], ['fog', fogAt]];
-  const prevSmooth = ctx.imageSmoothingEnabled; ctx.imageSmoothingEnabled = true;
-  for (const [kind, atFn] of kinds) {
-    const keys = world[kind]; if (!keys || !keys.length) continue;
-    const [ccol, crow] = ENV_CELL[kind], ox = ccol * ENV_CW, oy = crow * ENV_CH;
-    if (kind === 'fog') { ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.85; }   // mist brightens, doesn't box
-    else { ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1; }
-    for (const key of keys) {
-      const p = key.split(','), x = +p[0], y = +p[1];
-      const n = atFn(world, x, y - 1), s = atFn(world, x, y + 1), w = atFn(world, x - 1, y), e = atFn(world, x + 1, y);
-      let sx, sy, sw, sh;
-      if (!n && !s && !w && !e) { sx = ox; sy = oy; sw = ENV_CW; sh = ENV_CH; }   // isolated: draw the whole blob
-      else {
-        const sc = (w && e) ? 1 : e ? 0 : w ? 2 : 1;   // left edge if no west neighbour, right edge if no east
-        const sr = (n && s) ? 1 : s ? 0 : n ? 2 : 1;   // top edge if no north neighbour, bottom edge if no south
-        sx = ox + sc * ENV_SW; sy = oy + sr * ENV_SH; sw = ENV_SW; sh = ENV_SH;
-      }
-      ctx.drawImage(envImg, sx, sy, sw, sh, x * PX, y * PX, PX, PX);
+const ENV_CW = 704, ENV_CH = 768;                                                                // one cell of the sheet
+// The hazards are not stamped tile by tile (that reads as blocks). Instead each pool keeps the organic
+// metaball outline and wears the art as a texture: the outer band of the pool samples the blob's decorated
+// border radially (rock rim, thorn ring, salt crust), and the interior tiles the blob's centre fill. For
+// that we keep a small working copy of each blob with its boundary radius per direction.
+const ENV_WORK_W = 112, ENV_WORK_H = 122, ENV_BINS = 64;
+// Per hazard: how deep (world px) the border band reaches into the pool, and what fraction of the blob's
+// radius that border occupies in the art, so the band maps onto the decoration and not into the fill.
+const ENV_RIM = { lava: [9, 0.30], swamp: [7, 0.28], salt: [7, 0.22], bramble: [11, 0.42], fog: [0, 0] };
+const envWork = {};
+function envWorkFor(kind) {
+  if (envWork[kind]) return envWork[kind];
+  if (!envImg || typeof document === 'undefined') return null;
+  const [ccol, crow] = ENV_CELL[kind];
+  const c = document.createElement('canvas'); c.width = ENV_WORK_W; c.height = ENV_WORK_H;
+  const g = c.getContext('2d'); g.imageSmoothingEnabled = true;
+  g.drawImage(envImg, ccol * ENV_CW, crow * ENV_CH, ENV_CW, ENV_CH, 0, 0, ENV_WORK_W, ENV_WORK_H);
+  const data = g.getImageData(0, 0, ENV_WORK_W, ENV_WORK_H).data;
+  const cx = ENV_WORK_W / 2, cy = ENV_WORK_H / 2, rb = new Float32Array(ENV_BINS);
+  // boundary radius per direction: walk out from the centre until the keyed background (alpha) begins
+  for (let b = 0; b < ENV_BINS; b++) {
+    const th = b / ENV_BINS * Math.PI * 2, dx = Math.cos(th), dy = Math.sin(th); let r = 0;
+    for (; r < ENV_WORK_W; r++) {
+      const u = Math.round(cx + dx * r), v = Math.round(cy + dy * r);
+      if (u < 0 || v < 0 || u >= ENV_WORK_W || v >= ENV_WORK_H) break;
+      if (data[(v * ENV_WORK_W + u) * 4 + 3] < 100) break;
     }
+    rb[b] = Math.max(2, r - 1);
   }
-  ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1; ctx.imageSmoothingEnabled = prevSmooth;
+  return (envWork[kind] = { data, w: ENV_WORK_W, h: ENV_WORK_H, cx, cy, rb });
 }
 // Sprite-sheet ground with organic borders: each pixel takes its biome from the nearest tile centre
 // (jittered by noise, like the painted fallback) and samples that biome's sheet tiles as a texture,
@@ -530,6 +534,84 @@ function paintTiles(world) {
     }
     return tileFor(b, tx, ty, x, y);
   };
+  // Hazard pools (lava, swamp, bramble, salt, fog) are metaball fields over their tiles: adjacent tiles
+  // blend into one rounded pool instead of a union of squares. mask marks pool tiles; near marks tiles
+  // the field can reach.
+  const buildPools = (keys) => {
+    const mask = new Uint8Array(W_ * H_), near = new Uint8Array(W_ * H_);
+    if (keys && keys.length) {
+      for (const k of keys) { const p = k.split(','), lx = +p[0], ly = +p[1]; if (lx >= 0 && ly >= 0 && lx < W_ && ly < H_) mask[ly * W_ + lx] = 1; }
+      for (let ty = 0; ty < H_; ty++) for (let tx = 0; tx < W_; tx++) {
+        let n = 0;
+        for (let dy = -1; dy <= 1 && !n; dy++) for (let dx = -1; dx <= 1 && !n; dx++) { const nx = tx + dx, ny = ty + dy; if (nx >= 0 && ny >= 0 && nx < W_ && ny < H_ && mask[ny * W_ + nx]) n = 1; }
+        near[ty * W_ + tx] = n;
+      }
+    }
+    return { mask, near };
+  };
+  const pools = [['lava', buildPools(world.lava)], ['swamp', buildPools(world.swamp)], ['bramble', buildPools(world.bramble)], ['salt', buildPools(world.salt)], ['fog', buildPools(world.fog)]];
+  // Sum of a smooth radial falloff from each nearby pool-tile centre, plus its gradient (the gradient
+  // points inward, so -grad is the outward normal used to orient the art's border around the pool).
+  const POOL_RK = PX * 1.02, POOL_ISO = 0.46, r2 = POOL_RK * POOL_RK;
+  let fF = 0, fGx = 0, fGy = 0;
+  const poolFG = (x, y, tx, ty, mask) => {
+    let f = 0, gx = 0, gy = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const nx = tx + dx, ny = ty + dy;
+      if (nx < 0 || ny < 0 || nx >= W_ || ny >= H_ || !mask[ny * W_ + nx]) continue;
+      const px = x - (nx * PX + PX / 2), py = y - (ny * PX + PX / 2), d2 = px * px + py * py;
+      if (d2 >= r2) continue; const t = 1 - d2 / r2; f += t * t; gx -= 4 * t * px / r2; gy -= 4 * t * py / r2;
+    }
+    fF = f; fGx = gx; fGy = gy;
+  };
+  // Layered noise on the shore: big lobes swell and pinch the pool, mid ripples and a little fine
+  // crenellation break the perfect oval so no edge or corner reads as geometric.
+  const shoreNoise = (x, y) => (vnoise(x / 27, y / 27, seed + 91) - 0.5) * 0.20 + (vnoise(x / 13, y / 13, seed + 53) - 0.5) * 0.11 + (vnoise(x / 6, y / 6, seed + 17) - 0.5) * 0.05;
+  const ENV_FILL_SCALE = 1.2;   // working-art px per world px when tiling a blob's centre fill
+  let ovR = 0, ovG = 0, ovB = 0, ovA = 0;
+  // Colour a pool pixel from the art: the outer band samples the blob's border radially in the pool's
+  // outward direction (so the decoration wraps the outline), the interior tiles the blob's centre fill.
+  const hazardPx = (kind, mask, x, y, tx, ty) => {
+    poolFG(x, y, tx, ty, mask);
+    const e = fF + shoreNoise(x, y);
+    if (e <= POOL_ISO) return false;
+    const wk = envWorkFor(kind); if (!wk) return false;
+    const [rimPx, band] = ENV_RIM[kind];
+    const g = Math.hypot(fGx, fGy);
+    const depth = (e - POOL_ISO) / Math.max(g, 0.012);   // first-order distance in from the shore, world px
+    let u, v;
+    if (depth < rimPx) {
+      let th = Math.atan2(-fGy, -fGx) + (vnoise(x / 45, y / 45, seed + 311) - 0.5) * 2.0;
+      const bin = ((Math.round(th / (Math.PI * 2) * ENV_BINS) % ENV_BINS) + ENV_BINS) % ENV_BINS;
+      const rr = Math.max(0, (wk.rb[bin] - 1) * (1 - (depth / rimPx) * band));
+      u = wk.cx + Math.cos(th) * rr; v = wk.cy + Math.sin(th) * rr;
+    } else {
+      const fw = wk.w * 0.6, fh = wk.h * 0.6;
+      u = wk.w * 0.2 + (((x * ENV_FILL_SCALE) % fw) + fw) % fw; v = wk.h * 0.2 + (((y * ENV_FILL_SCALE) % fh) + fh) % fh;
+    }
+    const ui = Math.min(wk.w - 1, Math.max(0, Math.round(u))), vi = Math.min(wk.h - 1, Math.max(0, Math.round(v)));
+    const i = (vi * wk.w + ui) * 4;
+    ovR = wk.data[i]; ovG = wk.data[i + 1]; ovB = wk.data[i + 2]; ovA = wk.data[i + 3] / 255;
+    return ovA > 0;
+  };
+  // Fog has no shore: a feathered mist, densest in the core and wispy at the edge, its density textured
+  // by the cloud art so it drifts rather than sits as a flat wash.
+  const fogPx = (mask, x, y, tx, ty) => {
+    poolFG(x, y, tx, ty, mask);
+    const e = fF + shoreNoise(x, y);
+    let a = Math.max(0, Math.min(0.74, (e - 0.24) * 0.95));
+    if (a <= 0) return false;
+    const wk = envWorkFor('fog');
+    if (wk) {
+      const fw = wk.w * 0.6, fh = wk.h * 0.6;
+      const u = Math.round(wk.w * 0.2 + (((x * ENV_FILL_SCALE) % fw) + fw) % fw), v = Math.round(wk.h * 0.2 + (((y * ENV_FILL_SCALE) % fh) + fh) % fh);
+      const i = (Math.min(wk.h - 1, v) * wk.w + Math.min(wk.w - 1, u)) * 4;
+      const lum = (0.3 * wk.data[i] + 0.59 * wk.data[i + 1] + 0.11 * wk.data[i + 2]) / 255;
+      a = Math.min(0.85, a * (0.45 + 0.7 * lum));
+    }
+    ovR = 226; ovG = 232; ovB = 240; ovA = a;
+    return true;
+  };
   const image = ctx.createImageData(Wp, Hp); const img = image.data;
   for (let y = 0; y < Hp; y++) for (let x = 0; x < Wp; x++) {
     const b = owner(x, y);
@@ -541,11 +623,18 @@ function paintTiles(world) {
     const sx = rect[0] + (fx ? rect[2] - 1 - u : u), sy = rect[1] + (fy ? rect[3] - 1 - v : v);
     const sheet = sheetOf(rect); if (!sheet) continue;
     const si = (sy * sheet.w + sx) * 4, di = (y * Wp + x) * 4;
-    img[di] = sheet.data[si]; img[di + 1] = sheet.data[si + 1]; img[di + 2] = sheet.data[si + 2]; img[di + 3] = 255;
+    let R = sheet.data[si], G = sheet.data[si + 1], B = sheet.data[si + 2];
+    // hazard overlay, if this pixel lies within reach of a pool
+    const idx = ty * W_ + tx; let hit = false;
+    for (let k = 0; k < pools.length && !hit; k++) {
+      const [kind, P] = pools[k]; if (!P.near[idx]) continue;
+      hit = kind === 'fog' ? fogPx(P.mask, x, y, tx, ty) : hazardPx(kind, P.mask, x, y, tx, ty);
+      if (hit) { R += (ovR - R) * ovA; G += (ovG - G) * ovA; B += (ovB - B) * ovA; }
+    }
+    img[di] = R; img[di + 1] = G; img[di + 2] = B; img[di + 3] = 255;
   }
   ctx.putImageData(image, 0, 0);
   paintRoads(ctx, world, seed);
-  paintHazards(ctx, world);   // lava / swamp / bramble / salt / fog, nine-slice autotiled from the art sheet
   // scenery, back to front
   const reserved = new Set([...world.cities.map(ct => `${ct.x},${ct.y}`), ...castleKeys(world), ...world.links.map(l => `${l.x},${l.y}`), ...(world.dungeons || []).map(d => `${d.x},${d.y}`), ...(world.landmarks || []).map(l => `${l.x},${l.y}`)]);
   const feats = [];
