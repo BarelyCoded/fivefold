@@ -267,6 +267,15 @@ tr.st-unsupported td:nth-child(7), tr.st-unsupported td:nth-child(3), tr.st-miss
 .phase.on { background: #6e5637; color: #ffe9a8; box-shadow: 0 0 8px rgba(255,220,120,.35); }
 .ph-icon { width: 16px; text-align: center; font-size: 13px; }
 .phases-step { margin-top: 6px; font-size: 10px; color: #b8a888; text-align: center; letter-spacing: .04em; }
+/* combat broken out into its steps under the Combat entry while a turn is in combat */
+.substeps { display: flex; flex-direction: column; gap: 2px; margin: 2px 0 4px 10px; padding-left: 8px; border-left: 2px solid #6e5637; }
+.substep { display: flex; align-items: center; gap: 5px; padding: 2px 5px; border-radius: 3px; font-size: 10px; color: #7d7064; }
+.substep.done { color: #a89a86; }
+.substep.done .ph-icon { color: #8fbf7a; }
+.substep.on { background: #7a5f3c; color: #fff1c4; box-shadow: 0 0 6px rgba(255,220,120,.35); }
+.substep.todo { opacity: .6; }
+.phases.theirs .substep.on { background: #56384a; color: #f4d0dc; }
+.phases.theirs .substeps { border-left-color: #6a4652; }
 .phases.theirs .phase.on { background: #4a2f3a; color: #f0c4d0; }
 
 .table { position: relative; border: 3px solid #6e5637; border-radius: 10px; box-shadow: 0 0 0 2px #2a2018, 0 10px 40px rgba(0,0,0,.6); overflow: hidden; display: flex; flex-direction: column; min-height: calc(100vh - 90px); background: #1c1a17; }

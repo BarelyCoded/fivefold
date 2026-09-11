@@ -17,6 +17,9 @@ const kwFull = k => typeof k === 'string' ? k : k.k === 'Protection' ? 'Protecti
 const KW_ABBR = k => kwFull(k).split(' ').map(w => w[0]).join('');
 const PHASES = [['untap', 'Untap', '↻'], ['upkeep', 'Upkeep', '☼'], ['draw', 'Draw', '▤'], ['main1', 'Main', '✦'], ['combat', 'Combat', '⚔'], ['main2', 'Main 2', '✦'], ['end', 'End', '◗']];
 const COMBAT_STEPS = new Set(['beginCombat', 'attackers', 'blockers', 'firstStrike', 'damage', 'endCombat']);
+// The combat phase broken out into its steps, shown under the Combat entry of the phase strip while a turn
+// is in combat so the player can see exactly where they are (and when they can still respond).
+const COMBAT_ORDER = [['beginCombat', 'Beginning of combat', '⚑'], ['attackers', 'Declare attackers', '➶'], ['blockers', 'Declare blockers', '⛨'], ['firstStrike', 'First-strike damage', '⚡'], ['damage', 'Combat damage', '✸'], ['endCombat', 'End of combat', '⚐']];
 
 export function cardHtml(def, opts = {}) {
   const art = artFor(def);
@@ -330,7 +333,9 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
   }
   function phaseStrip() {
     const cur = COMBAT_STEPS.has(duel.step) ? 'combat' : duel.step === 'cleanup' ? 'end' : duel.step;
-    return `<div class="phases ${duel.active === localIdx ? 'mine' : 'theirs'}"><div class="phases-who">${duel.active === localIdx ? 'Your turn' : esc(ai.name)}</div>${PHASES.map(([k, label, icon]) => `<div class="phase${k === cur ? ' on' : ''}"><span class="ph-icon">${icon}</span><span class="ph-label">${label}</span></div>`).join('')}<div class="phases-step">${esc(STEP_NAME[duel.step] || duel.step)}</div></div>`;
+    const inCombat = COMBAT_STEPS.has(duel.step), at = COMBAT_ORDER.findIndex(([k]) => k === duel.step);
+    const substeps = inCombat ? `<div class="substeps">${COMBAT_ORDER.map(([k, label, icon], i) => `<div class="substep ${i < at ? 'done' : i === at ? 'on' : 'todo'}"><span class="ph-icon">${i < at ? '✓' : icon}</span><span class="ph-label">${label}</span></div>`).join('')}</div>` : '';
+    return `<div class="phases ${duel.active === localIdx ? 'mine' : 'theirs'}"><div class="phases-who">${duel.active === localIdx ? 'Your turn' : esc(ai.name)}</div>${PHASES.map(([k, label, icon]) => `<div class="phase${k === cur ? ' on' : ''}"><span class="ph-icon">${icon}</span><span class="ph-label">${label}</span></div>${k === 'combat' ? substeps : ''}`).join('')}${inCombat ? '' : `<div class="phases-step">${esc(STEP_NAME[duel.step] || duel.step)}</div>`}</div>`;
   }
 
   function tutor() {

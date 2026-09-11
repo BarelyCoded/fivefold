@@ -530,7 +530,7 @@ export class Duel {
   pushTrigger(source, ab, extra = {}) {
     const item = { id: uid++, kind: 'trigger', card: source, controller: source.controller, targets: extra.targets || [], effects: ab.effects, optional: ab.optional, pay: ab.pay || null, payer: ab.payer || null, text: ab.text || '', ev: extra.ev, fixed: extra.fixed || null, thatPlayer: extra.thatPlayer ?? extra.ev?.player ?? (extra.ev?.target?.idx) };
     this.stack.push(item);
-    this.say(`${source.def.name} triggers.`);
+    this.say(`${source.def.name} triggers${this.targetText(item.targets)}.`);
   }
 
   // ---- mana --------------------------------------------------------------------
@@ -747,7 +747,7 @@ export class Duel {
     card.zone = 'stack'; removeFrom(p.hand, card); removeFrom(p.graveyard, card);
     const item = { id: uid++, kind: 'spell', card, controller: p.idx, targets, x: opts.x || 0, modes: opts.modes || null, kicked: !!opts.kicked, buyback: !!opts.buyback, flashback: fromGrave, effects: this.spellEffects(d, opts), sacrificed: opts._sacrificed || null };
     this.stack.push(item);
-    this.say(`${p.name} casts ${d.name}${opts.x ? ` (X=${opts.x})` : ''}${opts.kicked ? ' with kicker' : ''}.`);
+    this.say(`${p.name} casts ${d.name}${opts.x ? ` (X=${opts.x})` : ''}${opts.kicked ? ' with kicker' : ''}${this.targetText(targets)}.`);
     this.fx.push({ type: 'cast', id: card.id, controller: p.idx });
     for (const t of targets) if (t.type === 'perm') this.fireEvent({ type: 'targeted', card: this.card(t.id) });
     this.fireEvent({ type: 'cast', player: p.idx, card });
@@ -812,12 +812,26 @@ export class Duel {
     card.uses.n[i] = (card.uses.n[i] || 0) + 1;
     const item = { id: uid++, kind: 'ability', card, controller: p.idx, targets, x: opts.x || 0, effects: ab.effects, optional: ab.optional, text: ab.text, sacrificed, abilityIndex: i };
     this.stack.push(item);
-    this.say(`${p.name} activates ${card.def.name}.`);
+    this.say(`${p.name} activates ${card.def.name}${this.targetText(targets)}.`);
     for (const t of targets) if (t.type === 'perm') this.fireEvent({ type: 'targeted', card: this.card(t.id) });
     this.passes = 0; this.priority = p.idx; this.emit(); return true;
   }
 
   // ---- targets ----------------------------------------------------------------------
+  // " targeting X" for the log, so the opponent sees what a spell, ability or trigger was aimed at — a
+  // creature, a player, a spell on the stack, or (Raise Dead, Gravedigger) a card in a graveyard.
+  targetText(targets) {
+    const names = (targets || []).map(t => {
+      if (!t) return null;
+      if (t.type === 'player') return t.label || this.players[t.idx]?.name;
+      if (t.type === 'spell') { const it = this.stack.find(x => x.id === t.id); return (t.label || it?.card?.def?.name || 'a spell') + ' on the stack'; }
+      const c = this.card(t.id); const name = t.label || c?.def?.name;
+      if (!name) return null;
+      if (t.type === 'card' || c?.zone === 'graveyard') { const who = this.players[c?.owner ?? c?.controller]; return who ? `${name} in ${who.name}'s graveyard` : `${name} in the graveyard`; }
+      return name;
+    }).filter(Boolean);
+    return names.length ? ` targeting ${names.join(' and ')}` : '';
+  }
   legalTargets(p, e, source) {
     const out = [];
     const r = e.restrict || {};
