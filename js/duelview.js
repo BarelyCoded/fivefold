@@ -269,15 +269,18 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
 
   function stackHtml() {
     if (!duel.stack.length) return '';
-    const items = duel.stack.slice().reverse();
-    return `<div class="stack"><div class="stack-title">Stack<span>${items.length}</span></div><div class="stack-tray">${items.map((it, i) => {
+    const items = duel.stack.slice().reverse();   // top of the stack (resolves next) first
+    const kindLabel = { spell: 'casts', trigger: 'triggered', ability: 'activates' };
+    return `<div class="stack"><div class="stack-title">The Stack<span>${items.length}</span></div><div class="stack-tray">${items.map((it, i) => {
       const classes = ['stack-item'];
       if (i === 0) classes.push('top');
       if (targeting() && isLegal({ type: 'spell', id: it.id })) classes.push('targetable');
       if (it.controller === 1) classes.push('theirs');
-      const kind = it.kind === 'spell' ? '' : it.kind === 'trigger' ? 'trigger' : 'ability';
-      const html = cardHtml(it.card.def, { id: it.card.id, zone: 'stack', classes, badge: kind || undefined });
-      return html.replace('<div class="card ', `<div data-stack="${it.id}" class="card `);
+      const kind = it.kind === 'spell' ? 'spell' : it.kind === 'trigger' ? 'trigger' : 'ability';
+      const html = cardHtml(it.card.def, { id: it.card.id, zone: 'stack', classes, badge: kind }).replace('<div class="card ', `<div data-stack="${it.id}" class="card `);
+      const who = it.controller === localIdx ? 'You' : esc(duel.players[it.controller]?.name || 'Opponent');
+      const verb = kindLabel[it.kind] || 'plays';
+      return `<div class="stack-entry${i === 0 ? ' next' : ''}">${html}<span class="stack-cap"><b>${who}</b> ${verb} <span class="stack-nm">${esc(it.card.def.name)}</span>${i === 0 ? '<span class="stack-next">resolves next ▸</span>' : ''}</span></div>`;
     }).join('')}</div></div>`;
   }
 
