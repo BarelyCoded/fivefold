@@ -748,6 +748,13 @@ function roamSpoils(tpl, ante, lines) {
   };
   render();
 }
+// The nearest town to recover in after a loss — a standing (uncaptured) one if any, else the closest city.
+function nearestTown(g) {
+  const cs = g.world.cities || []; if (!cs.length) return null;
+  const p = g.player; const d = c => Math.hypot(c.x - p.x, c.y - p.y);
+  const standing = cs.filter(c => !c.captured);
+  return (standing.length ? standing : cs).slice().sort((a, b) => d(a) - d(b))[0];
+}
 function finishDuel(winner) {
   const g = S.game; const { duel, tpl, ante, roamUid, dungeon, tutorial } = S.duel; S.duel = null;
   sfx(winner === 0 ? 'win' : 'lose');
@@ -816,7 +823,17 @@ function finishDuel(winner) {
     g.losses++;
     if (ante.mine) { addCards(S.collection, ante.mine, -1); addCards(g.deck, ante.mine, -1); lines.push(`You lose ${ante.mine} as ante.`); if (deckSize(g.deck) < 40) { fillBasics(g.deck); lines.push('A basic land fills the gap so your deck stays at 40 cards.'); } }
     const lost = Math.floor(g.player.gold * 0.25); g.player.gold -= lost; if (lost) lines.push(`${lost} gold is taken from you.`);
-    g.player.life = g.player.maxLife; lines.push('You wake up some time later, restored but poorer.');
+    g.player.life = g.player.maxLife;
+    // The victorious mage moves on rather than sitting on you for a rematch; a lost bounty goes with it.
+    if (roamUid != null) {
+      g.world.enemies = g.world.enemies.filter(e => e.uid !== roamUid);
+      const q = g.quests?.find(q => q.enemyUid === roamUid);
+      if (q) { g.quests = g.quests.filter(x => x !== q); lines.push(`${q.enemyName} slips away — the bounty is lost.`); }
+    }
+    // You come to in the nearest town, well away from where you fell.
+    const town = nearestTown(g);
+    if (town) { g.player.x = town.x; g.player.y = town.y; lines.push(`Kindly travellers carry you to ${town.name}; you wake restored, but poorer.`); }
+    else lines.push('You wake up some time later, restored but poorer.');
     if (tpl.boss) { bossLink(); if (g.status !== 'playing') return; }
   }
   roamResult(tpl, winner === 0, lines);
