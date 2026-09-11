@@ -312,43 +312,6 @@ export function placeLava(world, rng, player = null) {
   terrainCache.delete(world);   // force a repaint that includes the pools
   return world.lava;
 }
-function lavaBlob(path, cx, cy, r, s) {
-  const n = 11;
-  for (let i = 0; i <= n; i++) {
-    const a = i / n * Math.PI * 2;
-    const rr = r * (0.8 + 0.4 * vnoise(Math.cos(a) * 2 + s, Math.sin(a) * 2 + s, (s | 0) % 97));
-    const px = cx + Math.cos(a) * rr, py = cy + Math.sin(a) * rr;
-    if (i === 0) path.moveTo(px, py); else path.lineTo(px, py);
-  }
-  path.closePath();
-}
-function drawLava(ctx, world, seed, frameH) {
-  const lava = world.lava; if (!lava || !lava.length) return;
-  const tiles = lava.map(k => k.split(',').map(Number));
-  const rim = new Path2D(), body = new Path2D();
-  for (const [x, y] of tiles) {
-    const cx = x * PX + PX / 2, cy = y * PX + PX / 2, s = x * 7 + y * 13;
-    lavaBlob(rim, cx, cy, PX * 0.66, s * 0.01);
-    lavaBlob(body, cx, cy, PX * 0.54, s * 0.01 + 3.3);
-  }
-  ctx.save();
-  ctx.shadowColor = 'rgba(255,110,25,.55)'; ctx.shadowBlur = 9;
-  ctx.fillStyle = '#1c0f0a'; ctx.fill(rim);          // charred rock rim + molten glow
-  ctx.shadowBlur = 0;
-  const grad = ctx.createLinearGradient(0, 0, 0, frameH);
-  grad.addColorStop(0, '#ef6b1e'); grad.addColorStop(1, '#b6300e');
-  ctx.fillStyle = grad; ctx.fill(body);
-  ctx.clip(body);                                     // hot cracks confined to the molten body
-  for (const [x, y] of tiles) {
-    const cx = x * PX + PX / 2, cy = y * PX + PX / 2;
-    for (let i = 0; i < 3; i++) {
-      const a = hash(x, y, seed + i) * Math.PI * 2, rr = hash(x, y, seed + 10 + i) * PX * 0.32;
-      ctx.fillStyle = i === 0 ? 'rgba(255,224,130,.9)' : 'rgba(255,168,60,.75)';
-      ctx.beginPath(); ctx.arc(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr, 1.4 + hash(x, y, seed + 20 + i) * 2, 0, Math.PI * 2); ctx.fill();
-    }
-  }
-  ctx.restore();
-}
 // Roaming AI: enemies within sight give chase and step toward the player; otherwise they wander their
 // own terrain. An enemy that steps onto the player's tile catches them — returned so the caller can
 // start the duel. Cities, mana links and landmarks are safe: enemies never step onto them.
@@ -510,7 +473,15 @@ function paintTiles(world) {
     const b = owner(x, y);
     const tx = Math.floor(x / PX), ty = Math.floor(y / PX);
     let rect;
-    if (b === 'U' && coast[ty * W_ + tx]) {
+    if (lavaAt(world, tx, ty)) {
+      // A pool: the lava sprite fills the interior and rounds in from the tile edges (like the coastline),
+      // so pools read as organic molten patches drawn from the real tileset rather than a square.
+      let dl = 1e9;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if ((dx || dy) && !lavaAt(world, tx + dx, ty + dy)) dl = Math.min(dl, Math.hypot(x - ((tx + dx) * PX + PX / 2), y - ((ty + dy) * PX + PX / 2)));
+      const molten = dl >= PX * 0.56 + (vnoise(x / 7, y / 7, seed + 91) - 0.5) * 15;
+      const lt = TERRAIN[at(tx, ty)] && TERRAIN[at(tx, ty)].accent;
+      rect = (molten && lt && lt.length) ? pick(lt, h(tx, ty, 6)) : tileFor(b, tx, ty, x, y);
+    } else if (b === 'U' && coast[ty * W_ + tx]) {
       let dl = 99;
       for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const t = at(tx + dx, ty + dy); if (t && t !== 'U') dl = Math.min(dl, Math.hypot(x - ((tx + dx) * PX + PX / 2), y - ((ty + dy) * PX + PX / 2))); }
       const sandy = dl < PX * 0.9 + (vnoise(x / 7, y / 7, seed + 77) - 0.5) * 16;
@@ -525,7 +496,6 @@ function paintTiles(world) {
     img[di] = sheet.data[si]; img[di + 1] = sheet.data[si + 1]; img[di + 2] = sheet.data[si + 2]; img[di + 3] = 255;
   }
   ctx.putImageData(image, 0, 0);
-  drawLava(ctx, world, seed, Hp);   // coherent molten pools over the rock, before roads and scenery
   paintRoads(ctx, world, seed);
   // scenery, back to front
   const reserved = new Set([...world.cities.map(ct => `${ct.x},${ct.y}`), ...castleKeys(world), ...world.links.map(l => `${l.x},${l.y}`), ...(world.dungeons || []).map(d => `${d.x},${d.y}`), ...(world.landmarks || []).map(l => `${l.x},${l.y}`)]);
