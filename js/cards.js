@@ -350,6 +350,9 @@ const rules = [
   [/^(?:you )?draw (\S+) cards?(?:, then discard (\S+) (?:cards?|of them))?$/, m => { const e = [{ type: 'draw', amount: amt(m[1]), sel: 'you' }]; if (m[2]) e.push({ type: 'discard', amount: amt(m[2]), sel: 'you' }); return e; }],
   // loot: a named subject draws then discards (Cephalid Looter/Broker, Merfolk Looter's target forms)
   [/^(you|target player|target opponent|each player|each opponent|that player) draws? (\S+) cards?, then discards? (\S+) (?:cards?|of them)( at random)?$/, m => { const k = m[1] === 'you' ? { sel: 'you' } : T(m[1]); if (!k) return null; return [{ type: 'draw', amount: amt(m[2]), ...k }, { type: 'discard', amount: amt(m[3]), random: !!m[4], ...k }]; }],
+  [/^(?:defending player|target opponent|each other player|each opponent) may draws? (?:up to )?(\S+|a) cards?$/, m => { const k = /defending/.test(m[0]) ? { sel: 'each', restrict: { players: 'opp' } } : /each other|each opponent/.test(m[0]) ? { sel: 'each', restrict: { players: 'opp' } } : { sel: 'opponent' }; return [{ type: 'draw', amount: amt(m[1] === 'a' ? '1' : m[1]), ...k }]; }],
+  [/^target player skips their next draw step$/, () => [{ type: 'skipDrawStep', sel: 'player' }]],
+  [/^any number of target opponents each discard their hands, then draw (\S+) cards?$/, m => [{ type: 'discard', all: true, sel: 'each', restrict: { players: 'opp' } }, { type: 'draw', amount: amt(m[1]), sel: 'each', restrict: { players: 'opp' } }]],
   // variable draw: "draw a card for each attacking creature" and "for each <perm> you control"
   [/^(?:you )?draw (?:a card|cards) for each attacking creature$/, () => [{ type: 'draw', amount: { calc: 'attackers' }, sel: 'you' }]],
   [/^(?:you )?draw (?:a card|cards) for each (.+)$/, m => { const c = countPhrase(m[1]); return c ? [{ type: 'draw', amount: c, sel: 'you' }] : null; }],
@@ -512,6 +515,7 @@ export function parseEffects(text) {
   let wm;
   if ((wm = whole.match(/^sacrifice a creature other than ~\. if you can't, ~ deals (\d+) damage to you$/))) { out.effects.push({ type: 'sacrifice', what: 'creature', other: true, sel: 'you', orElse: [{ type: 'damage', amount: Number(wm[1]), sel: 'you' }] }); return out; }
   if (/^each player discards their hand, then draws cards equal to the greatest number of cards a player discarded this way$/.test(whole)) { out.effects.push({ type: 'windfall' }); return out; }
+  if (/^each player discards any number of cards, then draws that many cards$/.test(whole)) { out.effects.push({ type: 'fluxDiscard' }); return out; }
   if ((wm = whole.match(/^draw (\S+) cards?, then put (\S+) cards? from your hand on the bottom of your library$/))) { out.effects.push({ type: 'draw', amount: amt(wm[1]), sel: 'you' }, { type: 'putBottom', amount: amt(wm[2]) }); return out; }
   if ((wm = whole.match(/^draw (\S+) cards?, then put (\S+) cards? from your hand (?:both )?on top of your library(?: or (?:both )?on the bottom of your library)?(?: in any order)?$/))) { out.effects.push({ type: 'draw', amount: amt(wm[1]), sel: 'you' }, { type: 'putBack', amount: amt(wm[2]) }); return out; }
   if ((wm = whole.match(/^look at the top (\S+) cards? of your library\. put one of them into your hand and (?:the other|the rest(?: of them)?)(?: cards?)? on the bottom of your library(?: in any order)?$/))) { out.effects.push({ type: 'peek', amount: amt(wm[1]), mode: 'handBottom', sel: 'you', restrict: {} }); return out; }
@@ -572,7 +576,7 @@ function parseAbilityCost(text) {
     else if ((m = p.match(/^exile the top (\w+) cards? of your library$/i))) cost.exileTop = amt(m[1].toLowerCase()) || 1;
     else if ((m = p.match(/^tap an untapped (plains|island|swamp|mountain|forest) you control$/i))) cost.tapLand = cap(m[1].toLowerCase());
     else if ((m = p.match(/^remove any number of (\w+) counters from ~$/i))) cost.removeCounter = { kind: m[1].toLowerCase(), n: 'all' };
-    else if ((m = p.match(/^discard (a|\w+) cards?(?: at random)?$/i))) cost.discard = amt(m[1].toLowerCase());
+    else if ((m = p.match(/^discard (a|an|\w+) (?:(nonblack|black|white|blue|red|green|colorless|land|nonland|creature|artifact|nonartifact) )?cards?(?: at random)?$/i))) { cost.discard = amt(m[1].toLowerCase()) || 1; if (m[2]) cost.discardFilter = m[2].toLowerCase(); }
     else if (/^discard ~$/i.test(p)) cost.discardSelf = true;
     else if ((m = p.match(/^pay (\d+) life$/i))) cost.life = Number(m[1]);
     else if ((m = p.match(/^remove (a|an|\w+) ([+-]1\/[+-]1|\w+) counters? from ~$/i))) cost.removeCounter = { kind: m[2].toLowerCase(), n: amt(m[1].toLowerCase()) || 1 };

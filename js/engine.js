@@ -38,7 +38,7 @@ export class Duel {
   }
   makePlayer(p, idx) {
     const library = shuffle(p.deck.map(def => this.instance(def, idx)), this.rng);
-    return { idx, name: p.name, life: p.life, poison: 0, library, hand: [], battlefield: [], graveyard: [], exile: [], landPlayed: 0, ai: !!p.ai, pool: emptyPool(), skipToEnd: false, portrait: p.portrait || null, shield: 0, cop: [], skipTurns: 0 };
+    return { idx, name: p.name, life: p.life, poison: 0, library, hand: [], battlefield: [], graveyard: [], exile: [], landPlayed: 0, ai: !!p.ai, pool: emptyPool(), skipToEnd: false, portrait: p.portrait || null, shield: 0, cop: [], skipTurns: 0, skipDraw: 0 };
   }
   instance(def, owner) {
     return { id: uid++, def, owner, controller: owner, zone: 'library', tapped: false, sick: true, damage: 0, counters: {}, temp: { p: 0, t: 0, kw: [], flags: [] }, attachedTo: null, regen: 0, flags: new Set(), controlUntilEot: null, token: false, cur: null, damaged: new Set(), attackedThisTurn: false, blockedThisTurn: false, enteredTurn: 0, uses: { turn: -1, n: {} }, chosenColor: null, shield: 0, linked: [], controlLink: null };
@@ -184,7 +184,7 @@ export class Duel {
       const p = this.players[i], mine = i === forIdx;
       return {
         idx: i, name: p.name, life: p.life, poison: p.poison, landPlayed: p.landPlayed,
-        pool: { ...p.pool }, shield: p.shield | 0, cop: [...p.cop], ai: !!p.ai, skipTurns: p.skipTurns | 0,
+        pool: { ...p.pool }, shield: p.shield | 0, cop: [...p.cop], ai: !!p.ai, skipTurns: p.skipTurns | 0, skipDraw: p.skipDraw | 0,
         battlefield: p.battlefield.map(serCard), graveyard: p.graveyard.map(serCard), exile: p.exile.map(serCard),
         hand: mine ? p.hand.map(serCard) : p.hand.map(c => ({ id: c.id, hidden: true })),
         handCount: p.hand.length, libraryCount: p.library.length,
@@ -291,7 +291,8 @@ export class Duel {
           break;
         }
         case 'draw': {
-          if (!(this.turn === 1)) this.drawCards(ap, 1);
+          if (ap.skipDraw > 0) { ap.skipDraw--; this.say(`${ap.name} skips their draw step.`); }
+          else if (!(this.turn === 1)) this.drawCards(ap, 1);
           this.fireEvent({ type: 'drawstep', player: ap.idx });
           break;
         }
@@ -1095,6 +1096,8 @@ export class Duel {
       case 'removeFromCombat': for (const s of subs) if (s.card) { removeFrom(this.attackers, s.card.id); delete this.blocks[s.card.id]; for (const k of Object.keys(this.blocks)) this.blocks[k] = this.blocks[k].filter(id => id !== s.card.id); this.say(`${s.card.def.name} is removed from combat.`); } break;
       case 'draw': for (const s of subs) if (s.player) { const k = this.amount(e.amount, ctx, s); this.drawCards(s.player, k); this.say(`${s.player.name} draws ${k}.`); } break;
       case 'discardDraw': for (const s of subs) if (s.player) { const k = s.player.hand.length; this.discardCards(s.player, s.player.hand.slice()); this.drawCards(s.player, k); this.say(`${s.player.name} discards ${k} and draws ${k}.`); } break;
+      case 'skipDrawStep': for (const sb of subs) if (sb.player) { sb.player.skipDraw = (sb.player.skipDraw || 0) + 1; this.say(`${sb.player.name} will skip their next draw step.`); } break;
+      case 'fluxDiscard': for (const pl of this.players) { const opts = pl.hand.map(c => ({ id: c.id, label: c.def.name })); let ids = []; if (pl.ai) ids = []; else ids = (yield { kind: 'choose', player: pl.idx, text: `Discard any number of cards, then draw that many`, options: opts, min: 0, max: pl.hand.length, secret: true }) || []; const cs = ids.map(id => this.card(id)).filter(c => c && pl.hand.includes(c)); this.discardCards(pl, cs); this.drawCards(pl, cs.length); this.say(`${pl.name} discards ${cs.length} and draws ${cs.length}.`); } break;
       case 'shuffleHandDraw': { const k = p.hand.length; for (const c of p.hand.slice()) this.moveTo(c, 'library'); shuffle(p.library, this.rng); this.drawCards(p, k); this.say(`${p.name} shuffles ${k} card${k === 1 ? '' : 's'} from hand into their library and draws ${k}.`); break; }
       case 'windfall': { const counts = this.players.map(pl => pl.hand.length); const max = Math.max(0, ...counts); for (const pl of this.players) { this.discardCards(pl, pl.hand.slice()); } for (const pl of this.players) this.drawCards(pl, max); this.say(`Each player discards their hand and draws ${max}.`); break; }
       case 'putBottom': { const k = Math.min(this.amount(e.amount, ctx) || 0, p.hand.length); if (k > 0) { const ids = p.ai ? p.hand.slice(0, k).map(c => c.id) : (yield { kind: 'choose', player: p.idx, text: `Put ${k} card${k > 1 ? 's' : ''} from your hand on the bottom of your library`, options: p.hand.map(c => ({ id: c.id, label: c.def.name })), min: k, max: k, secret: true }) || []; const chosen = ids.map(id => this.card(id)).filter(c => c && p.hand.includes(c)); for (const c of chosen) { removeFrom(p.hand, c); c.zone = 'library'; p.library.unshift(c); } this.say(`${p.name} puts ${chosen.length} card${chosen.length === 1 ? '' : 's'} on the bottom of their library.`); } break; }
