@@ -495,6 +495,7 @@ export class Duel {
       case 'drawstep': return ev.type === 'drawstep' && (ab.who === 'each' || ev.player === c.controller);
       case 'beginCombat': return ev.type === 'beginCombat' && ev.player === c.controller;
       case 'youCast': return ev.type === 'cast' && ev.player === c.controller && (ab.kind === 'any' || (ab.kind === 'creature' ? isCreatureDef(ev.card) : ab.kind === 'noncreature' ? !isCreatureDef(ev.card) : ev.card.def.kind === ab.kind || ev.card.def.types.map(t => t.toLowerCase()).includes(ab.kind)));
+      case 'anyCombatToPlayer': return ev.type === 'damage' && ev.combat && ev.target && ev.target.idx !== undefined && ev.source && ev.source.def && this.matchesRestrict(ev.source, ab.filter || {}, this.players[c.controller]);
       case 'anyCast': return ev.type === 'cast' && (!ab.color || ev.card.def.colors.includes(ab.color)) && (!ab.who || (ab.who === 'opp') === (ev.player !== c.controller)) && (!ab.kind || ab.kind === 'any' || (ab.kind === 'noncreature' ? !isCreatureDef(ev.card) : ab.kind === 'creature' ? isCreatureDef(ev.card) : ev.card.def.kind === ab.kind || ev.card.def.types.map(t => t.toLowerCase()).includes(ab.kind)));
       case 'exalted': return false;
     }

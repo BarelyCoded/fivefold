@@ -91,6 +91,7 @@ export function parseTarget(phrase) {
   if (p === 'you' || p === 'yourself') return { sel: 'you', restrict: r };
   if (p === '~' || p === 'it' || p === 'itself' || p === 'themselves') return { sel: 'self', restrict: r };
   if (p === 'that player' || p === "that player's") return { sel: 'thatPlayer', restrict: r };
+  if (p === 'that opponent' || p === "that opponent's") return { sel: 'thatPlayer', restrict: r };
   if (/^(?:that (?:land|creature|permanent)'s|its|the creature's) controller$/.test(p)) return { sel: 'prevController', restrict: r };
   if (/^(that creature|that permanent|it|them|that card|the creature|the other creature)$/.test(p)) return { sel: 'prev', restrict: r };
   if (p === 'target opponent or planeswalker') return { sel: 'opponent', restrict: r };
@@ -350,6 +351,7 @@ const rules = [
   [/^(?:you )?draw (\S+) cards?(?:, then discard (\S+) (?:cards?|of them))?$/, m => { const e = [{ type: 'draw', amount: amt(m[1]), sel: 'you' }]; if (m[2]) e.push({ type: 'discard', amount: amt(m[2]), sel: 'you' }); return e; }],
   // loot: a named subject draws then discards (Cephalid Looter/Broker, Merfolk Looter's target forms)
   [/^(you|target player|target opponent|each player|each opponent|that player) draws? (\S+) cards?, then discards? (\S+) (?:cards?|of them)( at random)?$/, m => { const k = m[1] === 'you' ? { sel: 'you' } : T(m[1]); if (!k) return null; return [{ type: 'draw', amount: amt(m[2]), ...k }, { type: 'discard', amount: amt(m[3]), random: !!m[4], ...k }]; }],
+  [/^its controller may draws? (\S+|a) cards?$/, m => [{ type: 'draw', amount: amt(m[1] === 'a' ? '1' : m[1]), sel: 'you' }]],
   [/^(?:defending player|target opponent|each other player|each opponent) may draws? (?:up to )?(\S+|a) cards?$/, m => { const k = /defending/.test(m[0]) ? { sel: 'each', restrict: { players: 'opp' } } : /each other|each opponent/.test(m[0]) ? { sel: 'each', restrict: { players: 'opp' } } : { sel: 'opponent' }; return [{ type: 'draw', amount: amt(m[1] === 'a' ? '1' : m[1]), ...k }]; }],
   [/^target player skips their next draw step$/, () => [{ type: 'skipDrawStep', sel: 'player' }]],
   [/^any number of target opponents each discard their hands, then draw (\S+) cards?$/, m => [{ type: 'discard', all: true, sel: 'each', restrict: { players: 'opp' } }, { type: 'draw', amount: amt(m[1]), sel: 'each', restrict: { players: 'opp' } }]],
@@ -365,7 +367,7 @@ const rules = [
   [/^you draw (\S+) cards?, then each other player draws (\S+) cards?$/, m => [{ type: 'draw', amount: amt(m[1]), sel: 'you' }, { type: 'draw', amount: amt(m[2]), sel: 'each', restrict: { players: 'opp' } }]],
   [/^discard (?:all the cards in your hand|your hand), then draw that many cards$/, () => [{ type: 'discardDraw', sel: 'you' }]],
   [/^(target player|target opponent|each player|each opponent) draws (\S+) cards?$/, m => { const k = T(m[1]); return k ? [{ type: 'draw', amount: amt(m[2]), ...k }] : null; }],
-  [/^(target player|target opponent|each player|each opponent|you|that player|defending player) discards? (\S+) cards?( at random)?$/, m => { const k = T(m[1]); return k ? [{ type: 'discard', amount: amt(m[2]), random: !!m[3], ...k }] : null; }],
+  [/^(target player|target opponent|each player|each opponent|you|that player|that opponent|defending player) discards? (\S+) cards?( at random)?$/, m => { const k = T(m[1]); return k ? [{ type: 'discard', amount: amt(m[2]), random: !!m[3], ...k }] : null; }],
   [/^discard (\S+) cards?( at random)?$/, m => [{ type: 'discard', amount: amt(m[1]), random: !!m[2], sel: 'you' }]],
   [/^(target player|target opponent|each player|each opponent|you|that player) discards? (?:their|your) hand$/, m => { const k = T(m[1]); return k ? [{ type: 'discard', all: true, ...k }] : null; }],
   [/^(that player|target player|target opponent) gets (\S+) poison counters?$/, m => { const k = T(m[1]); return k ? [{ type: 'poison', amount: amt(m[2]), ...k }] : null; }],
@@ -885,6 +887,8 @@ function parseEvent(w) {
   if (/^an opponent draws a card$/.test(w)) return { event: 'oppDraws' };
   if (/^a player taps a land for mana$/.test(w)) return { event: 'manaTap' };
   if ((m = w.match(/^a player casts a (white|blue|black|red|green) spell$/))) return { event: 'anyCast', color: COLOR_WORD[m[1]] };
+  if ((m = w.match(/^an opponent casts a (white|blue|black|red|green) spell$/))) return { event: 'anyCast', who: 'opp', color: COLOR_WORD[m[1]] };
+  if ((m = w.match(/^(?:a|an) (.+?) (?:you control )?deals combat damage to (?:a player|an opponent)$/))) { const f = /you control/.test(w) ? { control: 'you' } : {}; const sub = m[1].replace(/ you control$/, '').trim(); if (sub !== 'creature') { const c = cap(sub); f.subtypes = [c]; } return { event: 'anyCombatToPlayer', filter: f }; }
   if (/^~ deals combat damage to a player$/.test(w)) return { event: 'combatDamagePlayer' };
   if (/^~ deals damage to (?:a player|an opponent)$/.test(w)) return { event: 'damagePlayer' };
   if (/^~ deals combat damage to an opponent$/.test(w)) return { event: 'combatDamagePlayer' };
