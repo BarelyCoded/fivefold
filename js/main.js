@@ -112,6 +112,7 @@ async function ensureContent() {
   for (const d of S.dungeons.dungeons) for (const n of d.treasure) names.add(n);
   for (const n of S.dungeons.artifacts) names.add(n);
   for (const n of Object.values(S.dungeons.walls)) names.add(n);
+  for (const r of Object.values(S.dungeons.rules)) if (r.startCard) names.add(r.startCard);
   for (const e of S.content.enemies) for (const n of Object.keys(e.deck)) names.add(n);
   for (const n of TUTORIAL_CARDS) names.add(n);
   for (const n of POWER_NINE) names.add(n);   // pre-cache the ultra-rares so a dungeon vault can grant them
@@ -611,7 +612,10 @@ function dungeonFight(cell) {
   const guardian = !!cell.payload.guardian;
   const etpl = (guardian ? pool.find(e => e.tier === 2) : pool.find(e => e.tier === cell.payload.tier)) || pool[0];
   const rules = { handSize: rule.handSize, upkeepDamage: rule.upkeepDamage, oppLife: rule.oppLife };
-  if (rule.wall) { const wd = defOf(S.dungeons.walls[tpl.color]); if (wd && wd.kind !== 'unsupported') rules.oppStart = [wd]; }
+  const starters = [];
+  if (rule.wall) { const wd = defOf(S.dungeons.walls[tpl.color]); if (wd && wd.kind !== 'unsupported') starters.push(wd); }
+  if (rule.startCard) { const sc = defOf(rule.startCard); if (sc && sc.kind !== 'unsupported') starters.push(sc); }
+  if (starters.length) rules.oppStart = starters;
   startDuel(etpl, null, { dungeon: { id: dg.id, cell: { x: cell.x, y: cell.y } }, rules, name: guardian ? `Guardian of the ${tpl.name}` : `${etpl.name} of the ${tpl.name}`, lifeBonus: guardian ? 4 : 0 });
 }
 function dungeonLoot(cell) {

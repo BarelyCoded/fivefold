@@ -4,7 +4,7 @@
     "attrition": { "label": "Attrition", "text": "Your life carries from room to room. Theirs does not." },
     "gloom": { "label": "Gloom", "text": "Torches gutter here. Your opening hands are six cards.", "handSize": 6 },
     "warded": { "label": "Warded", "text": "Every room is sealed. Each guardian begins with a Wall in play.", "wall": true },
-    "miasma": { "label": "Miasma", "text": "The air is poison. You lose 1 life at the start of each of your turns.", "upkeepDamage": 1 },
+    "gravebound": { "label": "Gravebound", "text": "The barrow's dead rise with its keepers. Each guardian begins with a Scathe Zombies already in play.", "startCard": "Scathe Zombies" },
     "hoard": { "label": "Hoard", "text": "The guardians feed on what they guard. Each has 4 extra life.", "oppLife": 4 }
   },
   "walls": { "W": "Wall of Swords", "U": "Wall of Air", "B": "Wall of Bone", "R": "Wall of Stone", "G": "Wall of Wood" },
@@ -16,7 +16,7 @@
     { "id": "drowned-archive", "name": "Drowned Archive", "color": "U", "rooms": 4, "rule": "gloom",
       "intro": "The Tidewatch flooded its own library to keep its secrets. The secrets learned to swim.",
       "treasure": ["Ancestral Recall", "Time Walk", "Timetwister", "Mahamoti Djinn", "Control Magic", "Counterspell", "Air Elemental"] },
-    { "id": "barrow-of-the-keepers", "name": "Barrow of the Keepers", "color": "B", "rooms": 4, "rule": "miasma",
+    { "id": "barrow-of-the-keepers", "name": "Barrow of the Keepers", "color": "B", "rooms": 4, "rule": "gravebound",
       "intro": "Where the Keepers bury what they cannot use yet. Nothing here is finished dying.",
       "treasure": ["Sengir Vampire", "Royal Assassin", "Hypnotic Specter", "Demonic Tutor", "Mind Twist", "Dark Ritual"] },
     { "id": "ashfall-foundry", "name": "Ashfall Foundry", "color": "R", "rooms": 3, "rule": "warded",
