@@ -1,0 +1,7 @@
+{
+  "_comment": "The Premodern constructed format: legal sets (Fourth Edition through Scourge) and the banned list. Deck legality is checked against this (see js/format.js). Fill 'banned' with the community banned list; names are exact card names.",
+  "name": "Premodern",
+  "sets": ["4ed", "ice", "chr", "hml", "all", "mir", "vis", "5ed", "wth", "tmp", "sth", "exo", "usg", "ulg", "6ed", "uds", "mmq", "nem", "pcy", "inv", "pls", "7ed", "apc", "ody", "tor", "jud", "ons", "lgn", "scg"],
+  "rules": { "minDeck": 60, "maxSideboard": 15, "maxCopies": 4 },
+  "banned": []
+}
