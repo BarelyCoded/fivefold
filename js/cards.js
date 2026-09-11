@@ -328,6 +328,11 @@ const rules = [
   }],
   [/^(target .+?|it|that creature) can't (block|attack|attack or block|be blocked) this turn$/, m => tgt({ type: 'flag', flag: { block: 'cantBlock', attack: 'cantAttack', 'attack or block': 'cantAttackOrBlock', 'be blocked': 'unblockable' }[m[2]] }, m[1])],
   [/^(?:you )?draw (\S+) cards?(?:, then discard (\S+) (?:cards?|of them))?$/, m => { const e = [{ type: 'draw', amount: amt(m[1]), sel: 'you' }]; if (m[2]) e.push({ type: 'discard', amount: amt(m[2]), sel: 'you' }); return e; }],
+  // loot: a named subject draws then discards (Cephalid Looter/Broker, Merfolk Looter's target forms)
+  [/^(you|target player|target opponent|each player|each opponent|that player) draws? (\S+) cards?, then discards? (\S+) (?:cards?|of them)( at random)?$/, m => { const k = m[1] === 'you' ? { sel: 'you' } : T(m[1]); if (!k) return null; return [{ type: 'draw', amount: amt(m[2]), ...k }, { type: 'discard', amount: amt(m[3]), random: !!m[4], ...k }]; }],
+  // variable draw: "draw a card for each attacking creature" and "for each <perm> you control"
+  [/^(?:you )?draw (?:a card|cards) for each attacking creature$/, () => [{ type: 'draw', amount: { calc: 'attackers' }, sel: 'you' }]],
+  [/^discard (?:all the cards in your hand|your hand), then draw that many cards$/, () => [{ type: 'discardDraw', sel: 'you' }]],
   [/^(target player|target opponent|each player|each opponent) draws (\S+) cards?$/, m => { const k = T(m[1]); return k ? [{ type: 'draw', amount: amt(m[2]), ...k }] : null; }],
   [/^(target player|target opponent|each player|each opponent|you|that player|defending player) discards? (\S+) cards?( at random)?$/, m => { const k = T(m[1]); return k ? [{ type: 'discard', amount: amt(m[2]), random: !!m[3], ...k }] : null; }],
   [/^discard (\S+) cards?( at random)?$/, m => [{ type: 'discard', amount: amt(m[1]), random: !!m[2], sel: 'you' }]],
@@ -478,6 +483,7 @@ export function parseEffects(text) {
   if (/^each player chooses a number of lands they control equal to the number of lands controlled by the player who controls the fewest, then sacrifices the rest\. (?:each player discards cards the same way, then sacrifices creatures the same way|players discard cards and sacrifice creatures the same way)$/.test(whole)) { out.effects.push({ type: 'balance' }); return out; }
   let wm;
   if ((wm = whole.match(/^sacrifice a creature other than ~\. if you can't, ~ deals (\d+) damage to you$/))) { out.effects.push({ type: 'sacrifice', what: 'creature', other: true, sel: 'you', orElse: [{ type: 'damage', amount: Number(wm[1]), sel: 'you' }] }); return out; }
+  if ((wm = whole.match(/^draw (\S+) cards?, then put (\S+) cards? from your hand (?:both )?on top of your library(?: or (?:both )?on the bottom of your library)?(?: in any order)?$/))) { out.effects.push({ type: 'draw', amount: amt(wm[1]), sel: 'you' }, { type: 'putBack', amount: amt(wm[2]) }); return out; }
   if ((wm = whole.match(/^look at the top (\S+) cards? of your library\. put one of them into your hand and (?:the other|the rest(?: of them)?)(?: cards?)? on the bottom of your library(?: in any order)?$/))) { out.effects.push({ type: 'peek', amount: amt(wm[1]), mode: 'handBottom', sel: 'you', restrict: {} }); return out; }
   const sentences = body.split(/(?<=\.)\s+(?=[A-Z~"])/i).map(s => s.trim()).filter(Boolean);
   for (let i = 0; i < sentences.length; i++) {

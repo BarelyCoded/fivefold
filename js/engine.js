@@ -993,6 +993,7 @@ export class Duel {
       else if (v.calc === 'x') n = ctx.x + (v.base || 0);
       else if (v.calc === 'count') { const src = ctx.source; const r = v.restrict?.control === 'targetPlayer' ? { ...v.restrict, control: 'you' } : v.restrict; n = (v.base || 0) + this.permanents().filter(c => c !== (v.restrict?.other ? src : null) && this.matchesRestrict(c, r, who)).length; }
       else if (v.calc === 'graveyard') n = (v.base || 0) + who.graveyard.filter(c => matchCardWhat(c, v.what)).length;
+      else if (v.calc === 'attackers') n = (v.base || 0) + this.attackers.length;
       else if (v.calc === 'stat') {
         const c = v.of === 'sacrificed' ? ctx.item?.sacrificed : v.of === 'castSpell' ? ctx.item?.ev?.card : v.of === 'self' ? ctx.source : sub?.card || this.prevCard(ctx);
         if (c) n = v.stat === 'power' ? power(c) : v.stat === 'toughness' ? toughness(c) : c.def.cmc;
@@ -1092,6 +1093,7 @@ export class Duel {
       case 'loseTemp': for (const s of subs) if (s.card) s.card.temp.flags.push('lose:' + e.keyword); break;
       case 'removeFromCombat': for (const s of subs) if (s.card) { removeFrom(this.attackers, s.card.id); delete this.blocks[s.card.id]; for (const k of Object.keys(this.blocks)) this.blocks[k] = this.blocks[k].filter(id => id !== s.card.id); this.say(`${s.card.def.name} is removed from combat.`); } break;
       case 'draw': for (const s of subs) if (s.player) { const k = this.amount(e.amount, ctx, s); this.drawCards(s.player, k); this.say(`${s.player.name} draws ${k}.`); } break;
+      case 'discardDraw': for (const s of subs) if (s.player) { const k = s.player.hand.length; this.discardCards(s.player, s.player.hand.slice()); this.drawCards(s.player, k); this.say(`${s.player.name} discards ${k} and draws ${k}.`); } break;
       case 'discard': for (const s of subs) if (s.player) { if (e.filter === 'nonland') { const cs = s.player.hand.filter(c => !isLand(c)); this.say(`${s.player.name} reveals their hand.`); this.discardCards(s.player, cs); } else yield* this.discardChoice(s.player, e.all ? s.player.hand.length : n, e.random, p); } break;
       case 'gain': for (const s of subs) if (s.player) { const k = this.amount(e.amount, ctx, s); s.player.life += k; this.say(`${s.player.name} gains ${k} life.`); } break;
       case 'lose': for (const s of subs) if (s.player) { const k = this.amount(e.amount, ctx, s); s.player.life -= k; this.say(`${s.player.name} loses ${k} life.`); } break;
