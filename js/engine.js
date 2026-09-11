@@ -442,6 +442,8 @@ export class Duel {
       for (const c of this.permanents()) for (const ab of abilitiesOf(c)) if (ab.type === 'triggered' && this.triggerMatches(c, ab, ev)) triggers.push({ source: c, ab, ev });
       // dies triggers of the card that died (it is in the graveyard now)
       if (ev.type === 'dies' || ev.type === 'leaves') for (const ab of ev.card.def.abilities) if (ab.type === 'triggered' && ab.event === ev.type) triggers.push({ source: ev.card, ab, ev });
+      // "when you cycle this card" triggers: the card is in the graveyard now, like a dies trigger
+      if (ev.type === 'cycle') for (const ab of ev.card.def.abilities) if (ab.type === 'triggered' && ab.event === 'cycle') triggers.push({ source: ev.card, ab, ev });
       if (ev.type === 'enchantedGone') for (const ab of ev.aura.def.abilities) if (ab.type === 'triggered' && ((ab.event === 'enchantedDies' && ev.died) || ab.event === 'enchantedLeaves')) triggers.push({ source: ev.aura, ab, ev });
       if (ev.type === 'dies') { // undying / persist
         const c = ev.card;
@@ -723,6 +725,7 @@ export class Duel {
       const cy = d.keywords.find(k => k.k === 'Cycling');
       this.payMana(p, this.planPayment(p, cy.cost));
       this.moveTo(card, 'graveyard'); this.drawCards(p, 1); this.say(`${p.name} cycles ${d.name}.`);
+      if (d.abilities.some(ab => ab.type === 'triggered' && ab.event === 'cycle')) this.fireEvent({ type: 'cycle', card, controller: p.idx });
       this.passes = 0; this.priority = p.idx; this.emit(); return true;
     }
     if (d.kind === 'land') {
@@ -993,7 +996,7 @@ export class Duel {
       if (v.calc === 'hand') n = v.base + v.sign * who.hand.length;
       else if (v.calc === 'lands') n = who.battlefield.filter(l => isLand(l) && (!v.land || hasSubtype(l, v.land)) && (!v.nonbasic || !l.def.basic)).length;
       else if (v.calc === 'x') n = ctx.x + (v.base || 0);
-      else if (v.calc === 'count') { const src = ctx.source; const r = v.restrict?.control === 'targetPlayer' ? { ...v.restrict, control: 'you' } : v.restrict; n = (v.base || 0) + this.permanents().filter(c => c !== (v.restrict?.other ? src : null) && this.matchesRestrict(c, r, who)).length; }
+      else if (v.calc === 'count') { const src = ctx.source; const r = v.restrict?.control === 'targetPlayer' ? { ...v.restrict, control: 'you' } : v.restrict; n = (v.base || 0) + (v.mult || 1) * this.permanents().filter(c => c !== (v.restrict?.other ? src : null) && this.matchesRestrict(c, r, who)).length; }
       else if (v.calc === 'graveyard') n = (v.base || 0) + who.graveyard.filter(c => matchCardWhat(c, v.what)).length;
       else if (v.calc === 'attackers') n = (v.base || 0) + this.attackers.length;
       else if (v.calc === 'domain') { const T = ['Plains', 'Island', 'Swamp', 'Mountain', 'Forest']; n = (v.base || 0) + T.filter(t => who.battlefield.some(l => isLand(l) && hasSubtype(l, t))).length; }

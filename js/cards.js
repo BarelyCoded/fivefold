@@ -318,6 +318,8 @@ const rules = [
   [/^~ deals (\S+) damage to each creature and each player$/, m => [{ type: 'damage', amount: amt(m[1]), sel: 'each', restrict: { types: ['creature'], players: 'all' } }]],
   [/^~ deals (\S+)(?: plus (\d+))? damage divided (?:evenly|as you choose)[^]*$/, m => [{ type: 'damage', amount: m[2] ? { calc: 'x', base: Number(m[2]) } : amt(m[1]), sel: 'any', restrict: {}, note: 'damage not divided' }]],
   [/^~ deals damage to that player equal to the number of (.+?) they control$/, m => { const c = countOf(m[1] + ' that player controls'); return c ? [{ type: 'damage', amount: { ...c, of: 'subject' }, sel: 'thatPlayer' }] : null; }],
+  // "have it deal X damage to target creature, where X is ..." — cycling triggers like Gempalm Incinerator
+  [/^have (?:it|~) deal (\S+) damage to (target .+?), where x is (.+)$/, m => { const x = parseWhereX(m[3]); return x ? tgt({ type: 'damage', amount: x }, m[2]) : null; }],
   [/^~ fights (.+)$/, m => tgt({ type: 'fight' }, m[1])],
   [/^destroy all (.+?)(?:\. they can't be regenerated)?$/, m => { const k = T('all ' + m[1]); if (!k) return null; return [{ type: 'destroyAll', restrict: k.restrict }]; }],
   [/^destroy (target .+?)(?:\. it can't be regenerated)?$/, m => tgt({ type: 'destroy' }, m[1])],
@@ -328,6 +330,14 @@ const rules = [
   [/^return (target .+? (?:from|in) your graveyard) to your hand$/, m => tgt({ type: 'fromGraveyard', to: 'hand' }, m[1])],
   [/^return (target .+? (?:from|in) your graveyard) to the battlefield(?: under your control)?( tapped)?$/, m => tgt({ type: 'fromGraveyard', to: 'battlefield', tapped: !!m[2] }, m[1])],
   [/^return (target .+?) to the battlefield under your control$/, m => tgt({ type: 'fromGraveyard', to: 'battlefield' }, m[1])],
+  // "gets +2/+0 until end of turn for each other attacking Goblin" (Goblin Piledriver and kin)
+  [/^(target .+?|enchanted creature|~|it|that creature) gets ([+-]\d+)\/([+-]\d+) until end of turn for each (other )?(.+)$/, m => {
+    const k = T(m[1]); if (!k) return null;
+    const c = countPhrase(m[5]); if (!c) return null;
+    if (m[4]) c.restrict.other = true;
+    const mk = v => v === 0 ? 0 : { ...c, restrict: { ...c.restrict }, mult: v };
+    return [{ type: 'pump', p: mk(Number(m[2])), t: mk(Number(m[3])), ...k }];
+  }],
   [/^(target .+?|enchanted creature|~|it|that creature|[a-z][a-z /-]*?) gets? ([+-]\S+)\/([+-]\S+) until end of turn(?: and (?:gains|has) (.+?) until end of turn)?$/, m => {
     const k = T(m[1]); if (!k) return null;
     const p = m[2].toLowerCase().replace('+', ''), t = m[3].toLowerCase().replace('+', '');
@@ -869,6 +879,7 @@ function parsePay(body) {
 function parseEvent(w) {
   let m;
   if (/^~ enters(?: the battlefield)?$/.test(w)) return { event: 'etb' };
+  if (/^you cycle ~$/.test(w)) return { event: 'cycle' };
   if (/^~ (?:dies|is put into a graveyard from the battlefield)$/.test(w)) return { event: 'dies' };
   if (/^~ leaves the battlefield$/.test(w)) return { event: 'leaves' };
   if (/^~ attacks$/.test(w)) return { event: 'attacks' };

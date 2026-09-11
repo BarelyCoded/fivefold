@@ -37,6 +37,8 @@ const CASES = [
   ['Insight', d => (d.abilities||[]).some(a => a.event === 'anyCast' && a.color === 'G'), 'draw on opponent green spell'],
   ['Allied Strategies', d => hasType(d, 'draw') && d.spell.effects[0].amount?.calc === 'domain', 'domain draw'],
   ['Accumulated Knowledge', d => spellEffectTypes(d).filter(t => t === 'draw').length === 2, 'draw + graveyard-count draw'],
+  ['Goblin Piledriver', d => (d.abilities||[]).some(a => a.event === 'attacks' && (a.effects||[]).some(e => e.type === 'pump' && e.p?.calc === 'count' && e.p.mult === 2 && e.p.restrict?.other)), 'attack pump per other attacking Goblin'],
+  ['Gempalm Incinerator', d => (d.abilities||[]).some(a => a.event === 'cycle' && (a.effects||[]).some(e => e.type === 'damage' && e.amount?.calc === 'count')), 'cycling deals damage per Goblin'],
 ];
 
 let pass = 0, fail = 0;
