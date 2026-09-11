@@ -996,6 +996,8 @@ export class Duel {
       else if (v.calc === 'count') { const src = ctx.source; const r = v.restrict?.control === 'targetPlayer' ? { ...v.restrict, control: 'you' } : v.restrict; n = (v.base || 0) + this.permanents().filter(c => c !== (v.restrict?.other ? src : null) && this.matchesRestrict(c, r, who)).length; }
       else if (v.calc === 'graveyard') n = (v.base || 0) + who.graveyard.filter(c => matchCardWhat(c, v.what)).length;
       else if (v.calc === 'attackers') n = (v.base || 0) + this.attackers.length;
+      else if (v.calc === 'domain') { const T = ['Plains', 'Island', 'Swamp', 'Mountain', 'Forest']; n = (v.base || 0) + T.filter(t => who.battlefield.some(l => isLand(l) && hasSubtype(l, t))).length; }
+      else if (v.calc === 'graveyardNameAll') { const nm = ctx.source?.def?.name; n = (v.base || 0) + this.players.reduce((a, pl) => a + pl.graveyard.filter(c => c.def.name === nm).length, 0); }
       else if (v.calc === 'maxCmc') { const perms = this.permanents().filter(c => v.control !== 'you' || c.controller === who.idx); n = (v.base || 0) + (perms.length ? Math.max(...perms.map(c => c.def.cmc || 0)) : 0); }
       else if (v.calc === 'stat') {
         const c = v.of === 'sacrificed' ? ctx.item?.sacrificed : v.of === 'castSpell' ? ctx.item?.ev?.card : v.of === 'self' ? ctx.source : sub?.card || this.prevCard(ctx);
@@ -1096,6 +1098,8 @@ export class Duel {
       case 'loseTemp': for (const s of subs) if (s.card) s.card.temp.flags.push('lose:' + e.keyword); break;
       case 'removeFromCombat': for (const s of subs) if (s.card) { removeFrom(this.attackers, s.card.id); delete this.blocks[s.card.id]; for (const k of Object.keys(this.blocks)) this.blocks[k] = this.blocks[k].filter(id => id !== s.card.id); this.say(`${s.card.def.name} is removed from combat.`); } break;
       case 'draw': for (const s of subs) if (s.player) { const k = this.amount(e.amount, ctx, s); this.drawCards(s.player, k); this.say(`${s.player.name} draws ${k}.`); } break;
+      case 'drawDiscardHand': for (const sb of subs) if (sb.player) { const k = sb.player.hand.length; this.drawCards(sb.player, k); this.say(`${sb.player.name} draws ${k}.`); yield* this.discardChoice(sb.player, k, false, p); } break;
+      case 'discardDownTo': for (const sb of subs) if (sb.player) { const keep = this.amount(e.amount, ctx) || 0; const nn = Math.max(0, sb.player.hand.length - keep); if (nn > 0) yield* this.discardChoice(sb.player, nn, false, p); } break;
       case 'discardDraw': for (const s of subs) if (s.player) { const k = s.player.hand.length; this.discardCards(s.player, s.player.hand.slice()); this.drawCards(s.player, k); this.say(`${s.player.name} discards ${k} and draws ${k}.`); } break;
       case 'skipDrawStep': for (const sb of subs) if (sb.player) { sb.player.skipDraw = (sb.player.skipDraw || 0) + 1; this.say(`${sb.player.name} will skip their next draw step.`); } break;
       case 'fluxDiscard': for (const pl of this.players) { const opts = pl.hand.map(c => ({ id: c.id, label: c.def.name })); let ids = []; if (pl.ai) ids = []; else ids = (yield { kind: 'choose', player: pl.idx, text: `Discard any number of cards, then draw that many`, options: opts, min: 0, max: pl.hand.length, secret: true }) || []; const cs = ids.map(id => this.card(id)).filter(c => c && pl.hand.includes(c)); this.discardCards(pl, cs); this.drawCards(pl, cs.length); this.say(`${pl.name} discards ${cs.length} and draws ${cs.length}.`); } break;

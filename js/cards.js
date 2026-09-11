@@ -356,6 +356,9 @@ const rules = [
   [/^target player skips their next draw step$/, () => [{ type: 'skipDrawStep', sel: 'player' }]],
   [/^any number of target opponents each discard their hands, then draw (\S+) cards?$/, m => [{ type: 'discard', all: true, sel: 'each', restrict: { players: 'opp' } }, { type: 'draw', amount: amt(m[1]), sel: 'each', restrict: { players: 'opp' } }]],
   // variable draw: "draw a card for each attacking creature" and "for each <perm> you control"
+  [/^(?:you )?draw an additional card$/, () => [{ type: 'draw', amount: 1, sel: 'you' }]],
+  [/^draw a card and reveal it$/, () => [{ type: 'draw', amount: 1, sel: 'you', note: 'the reveal and discard-if-nonland are not enforced' }]],
+  [/^(target player|you) draws? cards? equal to the number of cards in (?:their|your) hand, then discards? that many cards?$/, m => { const k = m[1] === 'you' ? { sel: 'you' } : T(m[1]); return k ? [{ type: 'drawDiscardHand', ...k }] : null; }],
   [/^(?:you )?draw (?:a card|cards) for each attacking creature$/, () => [{ type: 'draw', amount: { calc: 'attackers' }, sel: 'you' }]],
   [/^(?:you )?draw (?:a card|cards) for each (.+)$/, m => { const c = countPhrase(m[1]); return c ? [{ type: 'draw', amount: c, sel: 'you' }] : null; }],
   [/^(target player|target opponent|each player|each opponent|that player) draws? (?:a card|cards) for each (.+)$/, m => { const k = T(m[1]); const c = countPhrase(m[2]); return k && c ? [{ type: 'draw', amount: c, ...k }] : null; }],
@@ -518,6 +521,10 @@ export function parseEffects(text) {
   if ((wm = whole.match(/^sacrifice a creature other than ~\. if you can't, ~ deals (\d+) damage to you$/))) { out.effects.push({ type: 'sacrifice', what: 'creature', other: true, sel: 'you', orElse: [{ type: 'damage', amount: Number(wm[1]), sel: 'you' }] }); return out; }
   if (/^each player discards their hand, then draws cards equal to the greatest number of cards a player discarded this way$/.test(whole)) { out.effects.push({ type: 'windfall' }); return out; }
   if (/^each player discards any number of cards, then draws that many cards$/.test(whole)) { out.effects.push({ type: 'fluxDiscard' }); return out; }
+  if ((wm = whole.match(/^domain — (target player|you) draws? a card for each basic land type among lands (?:they|you) controls?$/))) { const k = wm[1] === 'you' ? { sel: 'you' } : T(wm[1]); if (k) { out.effects.push({ type: 'draw', amount: { calc: 'domain', of: k.sel === 'you' ? 'you' : 'subject' }, ...k }); return out; } }
+  if (/^draw four cards, then choose x cards in your hand and discard the rest$/.test(whole)) { out.effects.push({ type: 'draw', amount: 4, sel: 'you' }, { type: 'discardDownTo', amount: 'X', sel: 'you' }); return out; }
+  if (/^draw a card, then draw cards equal to the number of cards named ~ in all graveyards$/.test(whole)) { out.effects.push({ type: 'draw', amount: 1, sel: 'you' }, { type: 'draw', amount: { calc: 'graveyardNameAll' }, sel: 'you' }); return out; }
+
   if ((wm = whole.match(/^draw (\S+) cards?, then put (\S+) cards? from your hand on the bottom of your library$/))) { out.effects.push({ type: 'draw', amount: amt(wm[1]), sel: 'you' }, { type: 'putBottom', amount: amt(wm[2]) }); return out; }
   if ((wm = whole.match(/^draw (\S+) cards?, then put (\S+) cards? from your hand (?:both )?on top of your library(?: or (?:both )?on the bottom of your library)?(?: in any order)?$/))) { out.effects.push({ type: 'draw', amount: amt(wm[1]), sel: 'you' }, { type: 'putBack', amount: amt(wm[2]) }); return out; }
   if ((wm = whole.match(/^look at the top (\S+) cards? of your library\. put one of them into your hand and (?:the other|the rest(?: of them)?)(?: cards?)? on the bottom of your library(?: in any order)?$/))) { out.effects.push({ type: 'peek', amount: amt(wm[1]), mode: 'handBottom', sel: 'you', restrict: {} }); return out; }
@@ -775,6 +782,7 @@ function parseScope(text) {
 function parseAbilityLine(line, ctx) {
   let m;
   let t = line.trim().replace(/\s*this effect doesn't remove ~\.?$/i, '').replace(/\.$/, '');
+  t = t.replace(/^as (~|this [a-z]+) enters(?: the battlefield)?, /i, 'When ~ enters, ');
   // activated: "cost: effect"
   if ((m = t.match(/^((?:(?:\{[^}]+\})+|[^:{}]+?)(?:,\s*(?:(?:\{[^}]+\})+|[^:{}]+?))*):\s+(.+)$/)) && /\{|sacrifice|discard|pay|remove|tap/i.test(m[1])) {
     const cost = parseAbilityCost(m[1]);

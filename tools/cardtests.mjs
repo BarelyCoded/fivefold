@@ -26,6 +26,17 @@ const CASES = [
   ['Tolarian Winds', d => hasType(d, 'discardDraw'), 'discard hand, draw that many'],
   ['Dream Cache', d => hasType(d, 'draw') && hasType(d, 'putBack'), 'draw three, put two back'],
   ['Curiosity', d => (d.abilities||[]).some(a => a.type === 'triggered' && (a.effects||[]).some(e => e.type === 'draw')), 'aura: draw on combat damage'],
+  ['Airborne Aid', d => hasType(d, 'draw') && d.spell.effects[0].amount?.calc === 'count', 'draw per Bird'],
+  ['Rush of Knowledge', d => hasType(d, 'draw') && d.spell.effects[0].amount?.calc === 'maxCmc', 'draw = greatest mana value'],
+  ['Windfall', d => hasType(d, 'windfall'), 'windfall wheel'],
+  ['Urza\'s Guilt', d => hasType(d, 'draw') && hasType(d, 'discard') && hasType(d, 'lose'), 'each draws/discards/loses'],
+  ['Whirlpool Rider', d => (d.abilities||[]).some(a => (a.effects||[]).some(e => e.type === 'shuffleHandDraw')), 'shuffle hand, draw that many'],
+  ['Trade Routes', d => (d.abilities||[]).some(a => a.cost?.discard && (a.effects||[]).some(e => e.type === 'draw')), 'discard-cost draw'],
+  ['Fatigue', d => hasType(d, 'skipDrawStep'), 'skip a draw step'],
+  ['Coastal Piracy', d => (d.abilities||[]).some(a => a.event === 'anyCombatToPlayer'), 'draw on any creature combat damage'],
+  ['Insight', d => (d.abilities||[]).some(a => a.event === 'anyCast' && a.color === 'G'), 'draw on opponent green spell'],
+  ['Allied Strategies', d => hasType(d, 'draw') && d.spell.effects[0].amount?.calc === 'domain', 'domain draw'],
+  ['Accumulated Knowledge', d => spellEffectTypes(d).filter(t => t === 'draw').length === 2, 'draw + graveyard-count draw'],
 ];
 
 let pass = 0, fail = 0;
