@@ -8,7 +8,7 @@ import { atlasReady, atlasState, blit, blitAt, pick, sheetPixels, TERRAIN, ACCEN
 export const W = 56, H = 38;
 export const PX = 38;          // internal pixels per tile (one sprite-sheet tile)
 export const TILE = PX * 2;    // displayed pixels per tile
-export const VIEW = { w: 28, h: 18 };
+export const VIEW = { w: 24, h: 15 };   // tiles shown at once; fewer = camera zoomed in closer on the player
 
 export const PAL = {
   W: { name: 'Plains', ground: ['#b9a56a', '#c9b678', '#a99459', '#d3c084'], grass: '#7e9a3c', grassL: '#a6c455', rock: '#8f8779', rockL: '#b5ad9e', wood: '#5a4530', leaf: '#6b8f3a', leafL: '#8fb452' },
