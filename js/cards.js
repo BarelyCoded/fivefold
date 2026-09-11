@@ -207,6 +207,26 @@ function parseWhereX(text) {
   return null;
 }
 const countOf = phrase => { const k = parseTarget(phrase.replace(/^the number of /, '')); return k && k.sel === 'each' && !k.restrict.players ? { calc: 'count', restrict: k.restrict } : null; };
+// Build a count-calc from a permanent-descriptor phrase, including bare subtypes (Wizard, Bird, Island, Sliver)
+// that parseTarget won't take. Returns null for hand/graveyard/compound phrases so more specific rules win.
+const PERM_TYPE_WORDS = ['creature', 'land', 'artifact', 'enchantment', 'permanent', 'planeswalker', 'wall'];
+function countPhrase(subject) {
+  let str = subject.trim().toLowerCase().replace(/^(?:each |all |every |a |an |another )/, '').replace(/ (?:on the battlefield|in play)$/, '').trim();
+  if (/ in (?:their|your|a|all|its|the) | and |greatest|number of|that /.test(str)) return null;
+  const r = {};
+  if (/ you control$/.test(str)) { r.control = 'you'; str = str.replace(/ you control$/, ''); }
+  else if (/ (?:target opponent|an opponent|your opponents?|defending player) controls?$/.test(str)) { r.control = 'opp'; str = str.replace(/ (?:target opponent|an opponent|your opponents?|defending player) controls?$/, ''); }
+  else if (/ (?:you|they|that player) controls?$/.test(str)) { r.control = 'you'; str = str.replace(/ (?:you|they|that player) controls?$/, ''); }
+  for (const w of str.split(/\s+/).filter(Boolean)) {
+    if (['tapped', 'untapped', 'attacking', 'blocking'].includes(w)) r.state = w;
+    else if (COLOR_WORD[w]) (r.colors = r.colors || []).push(COLOR_WORD[w]);
+    else if (PERM_TYPE_WORDS.includes(w.replace(/s$/, ''))) (r.types = r.types || []).push(w.replace(/s$/, ''));
+    else if (/^[a-z][a-z'-]+$/.test(w)) (r.subtypes = r.subtypes || []).push(cap(w));
+    else return null;
+  }
+  if (!Object.keys(r).length) return null;
+  return { calc: 'count', restrict: r, of: r.control === 'you' ? 'you' : undefined };
+}
 const rules = [
   // Counts of permanents: An-Havva Inn, Typhoon, Primal Order, Goblin Lyre.
   [/^you gain x(?: plus (\d+))? life, where x is the number of (.+)$/, m => { const c = countOf(m[2]); return c ? [{ type: 'gain', amount: { ...c, base: Number(m[1] || 0) }, sel: 'you' }] : null; }],
@@ -332,6 +352,14 @@ const rules = [
   [/^(you|target player|target opponent|each player|each opponent|that player) draws? (\S+) cards?, then discards? (\S+) (?:cards?|of them)( at random)?$/, m => { const k = m[1] === 'you' ? { sel: 'you' } : T(m[1]); if (!k) return null; return [{ type: 'draw', amount: amt(m[2]), ...k }, { type: 'discard', amount: amt(m[3]), random: !!m[4], ...k }]; }],
   // variable draw: "draw a card for each attacking creature" and "for each <perm> you control"
   [/^(?:you )?draw (?:a card|cards) for each attacking creature$/, () => [{ type: 'draw', amount: { calc: 'attackers' }, sel: 'you' }]],
+  [/^(?:you )?draw (?:a card|cards) for each (.+)$/, m => { const c = countPhrase(m[1]); return c ? [{ type: 'draw', amount: c, sel: 'you' }] : null; }],
+  [/^(target player|target opponent|each player|each opponent|that player) draws? (?:a card|cards) for each (.+)$/, m => { const k = T(m[1]); const c = countPhrase(m[2]); return k && c ? [{ type: 'draw', amount: c, ...k }] : null; }],
+  [/^(?:you )?draw cards equal to the number of (.+)$/, m => { const c = countPhrase(m[1]); return c ? [{ type: 'draw', amount: c, sel: 'you' }] : null; }],
+  [/^(?:you )?draw cards equal to the greatest mana value among permanents you control$/, () => [{ type: 'draw', amount: { calc: 'maxCmc', control: 'you' }, sel: 'you' }]],
+  [/^shuffle the cards from your hand into your library, then draw that many cards$/, () => [{ type: 'shuffleHandDraw' }]],
+  [/^put (\S+) cards? from your hand on the bottom of your library$/, m => [{ type: 'putBottom', amount: amt(m[1]) }]],
+  [/^each player draws (\S+) cards?, then discards (\S+) cards?(?:, then loses (\d+) life)?$/, m => { const e = [{ type: 'draw', amount: amt(m[1]), sel: 'each', restrict: { players: 'all' } }, { type: 'discard', amount: amt(m[2]), sel: 'each', restrict: { players: 'all' } }]; if (m[3]) e.push({ type: 'lose', amount: Number(m[3]), sel: 'each', restrict: { players: 'all' } }); return e; }],
+  [/^you draw (\S+) cards?, then each other player draws (\S+) cards?$/, m => [{ type: 'draw', amount: amt(m[1]), sel: 'you' }, { type: 'draw', amount: amt(m[2]), sel: 'each', restrict: { players: 'opp' } }]],
   [/^discard (?:all the cards in your hand|your hand), then draw that many cards$/, () => [{ type: 'discardDraw', sel: 'you' }]],
   [/^(target player|target opponent|each player|each opponent) draws (\S+) cards?$/, m => { const k = T(m[1]); return k ? [{ type: 'draw', amount: amt(m[2]), ...k }] : null; }],
   [/^(target player|target opponent|each player|each opponent|you|that player|defending player) discards? (\S+) cards?( at random)?$/, m => { const k = T(m[1]); return k ? [{ type: 'discard', amount: amt(m[2]), random: !!m[3], ...k }] : null; }],
@@ -483,6 +511,8 @@ export function parseEffects(text) {
   if (/^each player chooses a number of lands they control equal to the number of lands controlled by the player who controls the fewest, then sacrifices the rest\. (?:each player discards cards the same way, then sacrifices creatures the same way|players discard cards and sacrifice creatures the same way)$/.test(whole)) { out.effects.push({ type: 'balance' }); return out; }
   let wm;
   if ((wm = whole.match(/^sacrifice a creature other than ~\. if you can't, ~ deals (\d+) damage to you$/))) { out.effects.push({ type: 'sacrifice', what: 'creature', other: true, sel: 'you', orElse: [{ type: 'damage', amount: Number(wm[1]), sel: 'you' }] }); return out; }
+  if (/^each player discards their hand, then draws cards equal to the greatest number of cards a player discarded this way$/.test(whole)) { out.effects.push({ type: 'windfall' }); return out; }
+  if ((wm = whole.match(/^draw (\S+) cards?, then put (\S+) cards? from your hand on the bottom of your library$/))) { out.effects.push({ type: 'draw', amount: amt(wm[1]), sel: 'you' }, { type: 'putBottom', amount: amt(wm[2]) }); return out; }
   if ((wm = whole.match(/^draw (\S+) cards?, then put (\S+) cards? from your hand (?:both )?on top of your library(?: or (?:both )?on the bottom of your library)?(?: in any order)?$/))) { out.effects.push({ type: 'draw', amount: amt(wm[1]), sel: 'you' }, { type: 'putBack', amount: amt(wm[2]) }); return out; }
   if ((wm = whole.match(/^look at the top (\S+) cards? of your library\. put one of them into your hand and (?:the other|the rest(?: of them)?)(?: cards?)? on the bottom of your library(?: in any order)?$/))) { out.effects.push({ type: 'peek', amount: amt(wm[1]), mode: 'handBottom', sel: 'you', restrict: {} }); return out; }
   const sentences = body.split(/(?<=\.)\s+(?=[A-Z~"])/i).map(s => s.trim()).filter(Boolean);
