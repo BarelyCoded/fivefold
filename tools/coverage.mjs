@@ -15,10 +15,10 @@ fs.mkdirSync(setDir, { recursive: true });
 globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
 const { compile } = await import('../js/cards.js');
 
-const ERA = ['lea', 'leb', '2ed', 'arn', 'atq', '3ed', 'leg', 'drk', 'fem', '4ed', 'ice', 'chr', 'hml', 'all'];
+import { ERA, resolveSets } from './sets.mjs';
 const args = process.argv.slice(2).filter(a => !a.startsWith('--'));
 const flags = new Set(process.argv.slice(2).filter(a => a.startsWith('--')));
-const sets = args.length && args[0] !== 'era' ? args : ERA;
+const sets = resolveSets(args.filter(a => a !== 'era'), ERA);
 
 async function fetchSet(code) {
   const file = path.join(setDir, code + '.json');
