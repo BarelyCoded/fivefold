@@ -1281,9 +1281,15 @@ function brewRenameDeck(id) {
   const name = (prompt('Rename deck:', d.name) || '').trim(); if (!name) return;
   d.name = name; saveDecks(); brew();
 }
-async function brewPlayDeck(id) { brewLoadDeck(id); await startBrewDuel(); }
+async function brewPlayDeck(id) { brewLoadDeck(id); await startBrewDuel(S.brewOpp || 'random'); }
+function brewLoadPreset(name) {
+  const d = S.aiDecks?.find(x => x.name === name); if (!d) return;
+  S.brew = { deck: clone(d.deck), side: clone(d.side) }; saveBrew();
+  S.activeDeck = null; toast(`Loaded “${d.name}”.`); brew();
+}
+async function brewPlayPreset(name) { brewLoadPreset(name); await startBrewDuel(S.brewOpp || 'random'); }
 function brew() {
-  if (S.pool === undefined || !S.fmt) { app.innerHTML = '<section class="screen"><div class="box"><h2>Premodern deck builder</h2><p class="small">Loading the card pool…</p></div></section>'; Promise.all([ensurePool(), ensureFmt()]).then(() => { if (S.screen === 'brew') brew(); }); return; }
+  if (S.pool === undefined || !S.fmt || S.aiDecks === undefined) { app.innerHTML = '<section class="screen"><div class="box"><h2>Premodern deck builder</h2><p class="small">Loading the card pool…</p></div></section>'; Promise.all([ensurePool(), ensureFmt(), ensureAiDecks()]).then(() => { if (S.screen === 'brew') brew(); }); return; }
   if (!S.pool) { app.innerHTML = `<section class="screen"><div class="box"><h2>Premodern deck builder</h2><p class="small">The card pool has not been built yet. Run <code>node tools/build-catalog.mjs</code>.</p><button class="btn" data-go="title">Back</button></div></section>`; return; }
   const q = (S.brewQ || '').toLowerCase(), cols = S.brewCols || [], cmc = S.brewCmc, type = S.brewType || '', showBad = !!S.brewBad, target = S.brewTarget || 'deck';
   // filter the flat pool
@@ -1318,11 +1324,13 @@ function brew() {
   const issues = [...leg.errors.map(e => `<li class="err">${esc(e)}</li>`), ...leg.warnings.map(w => `<li class="warn">${esc(w)}</li>`)].join('');
   app.innerHTML = `<section class="screen brewscreen">
     <div class="bw-head"><h2>Premodern deck builder</h2><div class="bw-status">${status} · <b>${main}</b> main, <b>${side}</b> side ${issues ? `<button class="btn tiny ghost" id="bw-issues">${leg.errors.length + leg.warnings.length} note${leg.errors.length + leg.warnings.length > 1 ? 's' : ''}</button>` : ''}</div>
-      <div class="bw-actions"><button class="btn small${S.brewDecks ? ' on' : ''}" id="bw-decks">My decks${S.decks?.length ? ` (${S.decks.length})` : ''}</button><button class="btn small" id="bw-import">Import</button><button class="btn small" id="bw-export">Export</button><button class="btn small" id="bw-playtest">Playtest</button><button class="btn small ghost" id="bw-clear">Clear</button><button class="btn small ghost" data-go="title">Done</button></div></div>
+      <div class="bw-actions"><button class="btn small${S.brewDecks ? ' on' : ''}" id="bw-decks">My decks${S.decks?.length ? ` (${S.decks.length})` : ''}</button><button class="btn small" id="bw-import">Import</button><button class="btn small" id="bw-export">Export</button><label class="bw-opp">vs <select id="bw-opp">${[['random', "AI's choice"], ...(S.aiDecks || []).map(d => [d.name, d.name]), ['mirror', 'Mirror (my deck)']].map(([v, l]) => `<option value="${esc(v)}"${(S.brewOpp || 'random') === v ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label><button class="btn small" id="bw-playtest">Playtest</button><button class="btn small ghost" id="bw-clear">Clear</button><button class="btn small ghost" data-go="title">Done</button></div></div>
     ${issues && S.brewShowIssues ? `<ul class="bw-issues">${issues}</ul>` : ''}
     ${S.brewDecks ? `<div class="bw-decksbox">
       <div class="bw-decks-save"><input id="bw-deckname" placeholder="Deck name…" value="${esc(S.newDeckName || '')}"><button class="btn small" id="bw-deck-save">Save current deck</button></div>
       ${(S.decks && S.decks.length) ? `<ul class="bw-decklist">${S.decks.slice().sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0)).map(d => { const dc = brewCount(d.deck), sc = brewCount(d.side); return `<li class="bw-deckrow${S.activeDeck === d.id ? ' active' : ''}"><span class="bw-deck-nm" data-deckload="${d.id}" title="Load into the builder">${esc(d.name)}</span><span class="small bw-deck-ct">${dc} main${sc ? ` · ${sc} side` : ''}</span><span class="bw-deck-btns"><button class="btn tiny" data-deckplay="${d.id}">Play</button><button class="btn tiny ghost" data-deckload="${d.id}">Load</button><button class="btn tiny ghost" data-deckrename="${d.id}">Rename</button><button class="btn tiny ghost" data-deckdel="${d.id}">Delete</button></span></li>`; }).join('')}</ul>` : '<p class="small">No saved decks yet. Build a deck, name it, and save it here — then pick it before a play session.</p>'}
+      ${(S.aiDecks && S.aiDecks.length) ? `<div class="bw-preset-h">Preset decks <span class="small">— prebuilt archetypes; also the pool the AI draws from in a playtest</span></div>
+      <ul class="bw-decklist">${S.aiDecks.map(d => { const dc = brewCount(d.deck), sc = brewCount(d.side); return `<li class="bw-deckrow"><span class="bw-deck-nm" data-presetload="${esc(d.name)}" title="Load into the builder">${esc(d.name)}</span><span class="small bw-deck-ct">${dc} main${sc ? ` · ${sc} side` : ''}</span><span class="bw-deck-btns"><button class="btn tiny" data-presetplay="${esc(d.name)}">Play</button><button class="btn tiny ghost" data-presetload="${esc(d.name)}">Load</button></span></li>`; }).join('')}</ul>` : ''}
     </div>` : ''}
     ${S.brewImport ? `<div class="bw-importbox"><textarea id="bw-imp" rows="6" placeholder="Paste a decklist: one card per line, e.g. &#10;4 Lightning Bolt&#10;24 Mountain&#10;&#10;Sideboard&#10;3 Pyroblast"></textarea><div><button class="btn small" id="bw-imp-go">Load into deck</button><button class="btn small ghost" id="bw-imp-cancel">Cancel</button></div></div>` : ''}
     <div class="bw-cols">
@@ -1342,21 +1350,40 @@ function brew() {
       </div>
     </div></section>`;
 }
-// A goldfish/mirror duel to test a constructed deck: your deck against a copy of itself, 20 life, no ante.
-async function startBrewDuel() {
-  await ensurePool();
-  const deck = S.brew.deck;
+// Prebuilt opponent decks (Premodern archetypes) the AI can pilot in a playtest, loaded from content/.
+async function ensureAiDecks() {
+  if (S.aiDecks !== undefined) return S.aiDecks;
+  try { S.aiDecks = (await (await fetch('content/ai-decks.json')).json()).decks || []; } catch { S.aiDecks = []; }
+  return S.aiDecks;
+}
+// Keep only the cards the rules engine can play (basics always count); returns { supported, unsup }.
+function playableSubset(deck) {
   const supported = {}, unsup = [];
-  for (const [n, c] of Object.entries(deck)) { const e = S.poolIndex?.get(n); if (e && !e.supported && !BASIC_LANDS.has(n)) unsup.push(n); else supported[n] = c; }
-  if (brewCount(supported) < 40) { toast('Add at least 40 playable cards to playtest.'); return; }
+  for (const [n, c] of Object.entries(deck || {})) { const e = S.poolIndex?.get(n); if (e && !e.supported && !BASIC_LANDS.has(n)) unsup.push(n); else supported[n] = c; }
+  return { supported, unsup };
+}
+function deckColor(deck) { const p = {}; for (const [n, c] of Object.entries(deck || {})) { const e = S.poolIndex?.get(n); if (e && 'WUBRG'.includes(e.col)) p[e.col] = (p[e.col] || 0) + c; } return Object.entries(p).sort((a, b) => b[1] - a[1])[0]?.[0] || 'G'; }
+// A playtest duel: your deck against the chosen opponent (a mirror copy of your deck, or a prebuilt archetype).
+// oppChoice: 'mirror' (default), 'random' (a random prebuilt deck), or a prebuilt deck's name.
+async function startBrewDuel(oppChoice) {
+  await Promise.all([ensurePool(), ensureAiDecks()]);
+  const mine = playableSubset(S.brew.deck);
+  if (brewCount(mine.supported) < 40) { toast('Add at least 40 playable cards to playtest.'); return; }
+  let oppName = 'Sparring Partner', oppDeckMap = S.brew.deck, mirror = true;
+  if (oppChoice && oppChoice !== 'mirror' && S.aiDecks?.length) {
+    const preset = oppChoice === 'random' ? S.aiDecks[Math.floor(Math.random() * S.aiDecks.length)] : S.aiDecks.find(x => x.name === oppChoice);
+    if (preset) { oppName = preset.name; oppDeckMap = preset.deck; mirror = false; }
+  }
+  const opp = playableSubset(oppDeckMap);
   setBusy('Fetching card data…');
-  try { await fetchCards(Object.keys(supported), (d, t) => setBusy(`Fetching cards… ${d}/${t}`), { skipArt: true }); forgetDefs(); } catch (e) { setBusy('Could not load cards: ' + e.message); return; }
-  const exp = () => expandDeck(supported).filter(d => d && d.kind !== 'unsupported');
-  const color = (() => { const p = {}; for (const [n, c] of Object.entries(supported)) { const e = S.poolIndex?.get(n); if (e && 'WUBRG'.includes(e.col)) p[e.col] = (p[e.col] || 0) + c; } return Object.entries(p).sort((a, b) => b[1] - a[1])[0]?.[0] || 'G'; })();
-  const tpl = { name: 'Sparring Partner', color, tier: 1, boss: false, deck: supported };
-  const d = new Duel({ player: { name: S.game?.name || 'You', deck: exp(), life: 20 }, ai: { name: 'Sparring Partner', deck: exp(), life: 20, ai: true }, hooks: aiHooks, rules: {} });
+  const need = [...new Set([...Object.keys(mine.supported), ...Object.keys(opp.supported)])];
+  try { await fetchCards(need, (d, t) => setBusy(`Fetching cards… ${d}/${t}`), { skipArt: true }); forgetDefs(); } catch (e) { setBusy('Could not load cards: ' + e.message); return; }
+  const expOf = m => expandDeck(m).filter(d => d && d.kind !== 'unsupported');
+  const tpl = { name: oppName, color: deckColor(oppDeckMap), tier: 1, boss: false, deck: opp.supported };
+  const d = new Duel({ player: { name: S.game?.name || 'You', deck: expOf(mine.supported), life: 20 }, ai: { name: oppName, deck: expOf(opp.supported), life: 20, ai: true }, hooks: aiHooks, rules: {} });
   S.duel = { duel: d, tpl, ante: null, roamUid: null, dungeon: null, tutorial: true, brew: true };
-  if (unsup.length) toast(`${unsup.length} unsupported card${unsup.length > 1 ? 's' : ''} left out of the playtest.`);
+  if (!mirror) toast(`Opponent: ${oppName}.`);
+  if (mine.unsup.length) toast(`${mine.unsup.length} of your unsupported card${mine.unsup.length > 1 ? 's' : ''} left out.`);
   setBusy(null); go('duel');
 }
 function deck() {
@@ -1843,15 +1870,18 @@ function brewExport() {
 }
 document.addEventListener('input', ev => { if (ev.target.id === 'bw-q') { S.brewQ = ev.target.value; brew(); const el = document.getElementById('bw-q'); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } } });
 document.addEventListener('input', ev => { if (ev.target.id === 'bw-deckname') S.newDeckName = ev.target.value; });
+document.addEventListener('change', ev => { if (ev.target.id === 'bw-opp') S.brewOpp = ev.target.value; });
 document.addEventListener('keydown', ev => { if (ev.target.id === 'bw-deckname' && ev.key === 'Enter') { ev.preventDefault(); brewSaveDeck(ev.target.value); } });
 document.addEventListener('click', ev => {
-  const el = ev.target.closest('[data-brewadd],[data-brewsb],[data-brewadd-deck],[data-brewsub-deck],[data-brewadd-side],[data-brewsub-side],[data-brewcol],[data-brewcmc],[data-brewtype],[data-brewbad],[data-brewclear],[data-deckload],[data-deckplay],[data-deckrename],[data-deckdel],#bw-issues,#bw-import,#bw-export,#bw-playtest,#bw-clear,#bw-imp-go,#bw-imp-cancel,#bw-decks,#bw-deck-save');
+  const el = ev.target.closest('[data-brewadd],[data-brewsb],[data-brewadd-deck],[data-brewsub-deck],[data-brewadd-side],[data-brewsub-side],[data-brewcol],[data-brewcmc],[data-brewtype],[data-brewbad],[data-brewclear],[data-deckload],[data-deckplay],[data-deckrename],[data-deckdel],[data-presetload],[data-presetplay],#bw-issues,#bw-import,#bw-export,#bw-playtest,#bw-clear,#bw-imp-go,#bw-imp-cancel,#bw-decks,#bw-deck-save');
   if (!el) return;
   const ds = el.dataset;
   if (ds.deckload) return brewLoadDeck(ds.deckload);
   if (ds.deckplay) return void brewPlayDeck(ds.deckplay).catch(e => setBusy('Playtest failed: ' + e.message));
   if (ds.deckrename) return brewRenameDeck(ds.deckrename);
   if (ds.deckdel) return brewDeleteDeck(ds.deckdel);
+  if (ds.presetload) return brewLoadPreset(ds.presetload);
+  if (ds.presetplay) return void brewPlayPreset(ds.presetplay).catch(e => setBusy('Playtest failed: ' + e.message));
   if (ds.brewadd) return brewAdd(ds.brewadd, 'deck', 1);
   if (ds.brewsb) return brewAdd(ds.brewsb, 'side', 1);
   if (ds.brewaddDeck) return brewAdd(ds.brewaddDeck, 'deck', 1);
@@ -1870,7 +1900,7 @@ document.addEventListener('click', ev => {
     case 'bw-imp-go': return brewImport(document.getElementById('bw-imp')?.value || '');
     case 'bw-export': return brewExport();
     case 'bw-clear': if (confirm('Clear the whole deck and sideboard?')) { S.brew = { deck: {}, side: {} }; saveBrew(); brew(); } return;
-    case 'bw-playtest': return void startBrewDuel().catch(e => setBusy('Playtest failed: ' + e.message));
+    case 'bw-playtest': return void startBrewDuel(S.brewOpp || 'random').catch(e => setBusy('Playtest failed: ' + e.message));
     case 'bw-decks': S.brewDecks = !S.brewDecks; return brew();
     case 'bw-deck-save': return brewSaveDeck(document.getElementById('bw-deckname')?.value || S.newDeckName);
   }

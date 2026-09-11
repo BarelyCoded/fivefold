@@ -18,7 +18,8 @@ export function parseList(text) {
     // A deck title sits alone between two separator rules ("----\nMono Brown\n----"): skip it.
     let prev = null; for (let j = i - 1; j >= 0; j--) { if (lines[j]) { prev = lines[j]; break; } }
     let next = null; for (let j = i + 1; j < lines.length; j++) { if (lines[j]) { next = lines[j]; break; } }
-    if (prev && next && isRule(prev) && isRule(next) && !/\d/.test(line)) continue;
+    const hasCount = /^\d+\s*x?\s+\S/i.test(line) || /[,;\t]\s*\d+\s*$/.test(line);   // a real card line carries a count
+    if (prev && next && isRule(prev) && isRule(next) && !hasCount) continue;
     let count = 1, name = line;
     let m;
     if ((m = line.match(/^(\d+)\s*x?\s+(.+)$/i))) { count = Number(m[1]); name = m[2]; }
