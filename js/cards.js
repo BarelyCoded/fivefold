@@ -373,6 +373,7 @@ const rules = [
   [/^put (?:up to )?(\S+) ([+-]\d+\/[+-]\d+|[a-z]+) counters? on (.+)$/, m => tgt({ type: 'counters', kind: m[2], amount: amt(m[1]) }, m[3])],
   [/^remove (a|an|\S+) ([+-]\d+\/[+-]\d+|[a-z]+) counters? from (~|it|that creature|target .+)$/, m => tgt({ type: 'counters', kind: m[2], amount: -(amt(m[1]) || 1) }, m[3])],
   [/^(?:you )?draw a card at the beginning of the next turn's upkeep$/, () => [{ type: 'delayedDraw' }]],
+  [/^(?:you |target player |its controller )?(?:may )?draws? (?:up to )?(\S+) cards? at the beginning of the next turn's upkeep$/, m => [/its controller/.test(m[0]) ? { type: 'counterBonusDraw', amount: amt(m[1]) } : { type: 'delayedDraw', amount: amt(m[1]), sel: /target player/.test(m[0]) ? 'target' : 'you' }]],
   [/^cast ~ only (?:during combat|before|after|during)[^]*$/, () => []],
   [/^remove ~ from your deck before playing if you're not playing for ante$/, () => []],
   [/^tap ~ and sacrifice (?:a|an) (creature|land|artifact|permanent)$/, m => [{ type: 'tap', sel: 'self' }, { type: 'sacrifice', what: m[1], sel: 'you' }]],
@@ -387,6 +388,7 @@ const rules = [
   [/^add one mana of any color$/, () => [{ type: 'addMana', any: 1 }]],
   [/^scry (\d+)$/, m => [{ type: 'scry', amount: Number(m[1]) }]],
   [/^take an extra turn after this one$/, () => [{ type: 'extraTurn' }]],
+  [/^(?:you |target player )?skips? (?:your |their )?next turn$/, m => [{ type: 'skipTurn', sel: /target player|their/.test(m[0]) ? 'target' : 'you' }]],
   [/^(?:create|put) (\S+) (\d+)\/(\d+) (.*?)(?:creature )?tokens?(?: with (.+?))?(?: onto the battlefield)?(?: tapped)?$/, m => {
     const desc = m[4].trim().split(/\s+/).filter(Boolean);
     const colors = desc.filter(w => COLOR_WORD[w]).map(w => COLOR_WORD[w]);
@@ -472,10 +474,11 @@ export function parseEffects(text) {
   let body = text.trim().toLowerCase();
   if (/^you may /.test(body)) { out.optional = true; body = body.replace(/^you may /, ''); }
   body = body.replace(/^if you do, /, '');
-  const whole = body.replace(/\.$/, '');
+  const whole = body.replace(/\s+/g, ' ').replace(/\.$/, '').trim();   // collapse newlines so multi-sentence whole-text rules match
   if (/^each player chooses a number of lands they control equal to the number of lands controlled by the player who controls the fewest, then sacrifices the rest\. (?:each player discards cards the same way, then sacrifices creatures the same way|players discard cards and sacrifice creatures the same way)$/.test(whole)) { out.effects.push({ type: 'balance' }); return out; }
   let wm;
   if ((wm = whole.match(/^sacrifice a creature other than ~\. if you can't, ~ deals (\d+) damage to you$/))) { out.effects.push({ type: 'sacrifice', what: 'creature', other: true, sel: 'you', orElse: [{ type: 'damage', amount: Number(wm[1]), sel: 'you' }] }); return out; }
+  if ((wm = whole.match(/^look at the top (\S+) cards? of your library\. put one of them into your hand and (?:the other|the rest(?: of them)?)(?: cards?)? on the bottom of your library(?: in any order)?$/))) { out.effects.push({ type: 'peek', amount: amt(wm[1]), mode: 'handBottom', sel: 'you', restrict: {} }); return out; }
   const sentences = body.split(/(?<=\.)\s+(?=[A-Z~"])/i).map(s => s.trim()).filter(Boolean);
   for (let i = 0; i < sentences.length; i++) {
     let s = sentences[i];
@@ -990,6 +993,8 @@ export function compile(c) {
   if (es) def.entersSacrifice = { land: es.land, untapped: es.untapped };
 
   if (def.kind === 'instant' || def.kind === 'sorcery') {
+    // fold a "its controller may draw N cards next upkeep" rider (Arcane Denial) into the counter effect
+    for (let i = spellEffects.length - 1; i >= 0; i--) if (spellEffects[i].type === 'counterBonusDraw') { const c = spellEffects.find(e => e.type === 'counter'); if (c) c.drawController = spellEffects[i].amount; spellEffects.splice(i, 1); }
     if (!spellEffects.length && !modes.length) return unsupported('No recognisable effect');
     def.spell = { effects: spellEffects, modes: modes.length ? modes : null, modal, additionalCost, alternativeCost, kickedEffects };
     if (def.cost.x && !JSON.stringify(spellEffects).includes('"X"') && !modes.length) def.notes.push('X has no effect');

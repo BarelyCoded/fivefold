@@ -38,7 +38,7 @@ export class Duel {
   }
   makePlayer(p, idx) {
     const library = shuffle(p.deck.map(def => this.instance(def, idx)), this.rng);
-    return { idx, name: p.name, life: p.life, poison: 0, library, hand: [], battlefield: [], graveyard: [], exile: [], landPlayed: 0, ai: !!p.ai, pool: emptyPool(), skipToEnd: false, portrait: p.portrait || null, shield: 0, cop: [] };
+    return { idx, name: p.name, life: p.life, poison: 0, library, hand: [], battlefield: [], graveyard: [], exile: [], landPlayed: 0, ai: !!p.ai, pool: emptyPool(), skipToEnd: false, portrait: p.portrait || null, shield: 0, cop: [], skipTurns: 0 };
   }
   instance(def, owner) {
     return { id: uid++, def, owner, controller: owner, zone: 'library', tapped: false, sick: true, damage: 0, counters: {}, temp: { p: 0, t: 0, kw: [], flags: [] }, attachedTo: null, regen: 0, flags: new Set(), controlUntilEot: null, token: false, cur: null, damaged: new Set(), attackedThisTurn: false, blockedThisTurn: false, enteredTurn: 0, uses: { turn: -1, n: {} }, chosenColor: null, shield: 0, linked: [], controlLink: null };
@@ -184,7 +184,7 @@ export class Duel {
       const p = this.players[i], mine = i === forIdx;
       return {
         idx: i, name: p.name, life: p.life, poison: p.poison, landPlayed: p.landPlayed,
-        pool: { ...p.pool }, shield: p.shield | 0, cop: [...p.cop], ai: !!p.ai,
+        pool: { ...p.pool }, shield: p.shield | 0, cop: [...p.cop], ai: !!p.ai, skipTurns: p.skipTurns | 0,
         battlefield: p.battlefield.map(serCard), graveyard: p.graveyard.map(serCard), exile: p.exile.map(serCard),
         hand: mine ? p.hand.map(serCard) : p.hand.map(c => ({ id: c.id, hidden: true })),
         handCount: p.hand.length, libraryCount: p.library.length,
@@ -284,7 +284,7 @@ export class Duel {
         }
         case 'upkeep': {
           this.say(`Turn ${this.turn}: ${ap.name}.`);
-          for (const d of this.delayed.splice(0)) if (d.type === 'draw') { this.drawCards(this.players[d.player], 1); this.say(`${this.players[d.player].name} draws a card.`); }
+          for (const d of this.delayed.splice(0)) if (d.type === 'draw') { const k = d.amount || 1; this.drawCards(this.players[d.player], k); this.say(`${this.players[d.player].name} draws ${k > 1 ? k + ' cards' : 'a card'}.`); }
           if (this.rules.upkeepDamage && ap.idx === 0 && this.turn > 1) { ap.life -= this.rules.upkeepDamage; this.say(`The miasma drains ${this.rules.upkeepDamage} life from ${ap.name}.`); }
           this.fireEvent({ type: 'upkeep', player: ap.idx });
           yield* this.upkeepCosts(ap);
@@ -389,6 +389,9 @@ export class Duel {
   newTurn() {
     if (this.extraTurns > 0) { this.extraTurns--; this.say(`${this.activePlayer.name} takes an extra turn.`); }
     else this.active = 1 - this.active;
+    // a player who must skip their turn passes it straight on (Meditate, Time Ebb-style effects)
+    let guard = 0;
+    while (this.players[this.active].skipTurns > 0 && guard++ < 4) { this.players[this.active].skipTurns--; this.say(`${this.activePlayer.name} skips their turn.`); this.active = 1 - this.active; }
     this.turn++;
     this.stepIndex = 0;
     this.fog = false;
@@ -1123,6 +1126,7 @@ export class Duel {
         if (e.toTop) s.item._toTop = true;
         const ctrl = this.players[s.item.controller];
         if (e.unlessPay) { const pay = this.amount(e.unlessPay, ctx); const cost = { pips: [], generic: pay, x: false }; if (this.canPay(ctrl, cost)) { const yes = yield { kind: 'yesno', player: ctrl.idx, text: `Pay {${pay}} to stop ${s.item.card.def.name} from being countered?`, value: 'pay' }; if (yes) { this.payMana(ctrl, this.planPayment(ctrl, cost)); this.say(`${ctrl.name} pays ${pay}.`); continue; } } }
+        if (e.drawController) this.delayed.push({ player: s.item.controller, type: 'draw', amount: e.drawController });
         this.counterItem(s.item);
       } break;
       case 'tutor': yield* this.tutor(p, e); break;
@@ -1164,6 +1168,7 @@ export class Duel {
       }
       case 'peek': for (const s of subs) if (s.player) yield* this.peek(p, s.player, n, e.mode, e.mayShuffle); break;
       case 'extraTurn': this.extraTurns++; break;
+      case 'skipTurn': { const pls = e.sel === 'each' ? this.players : e.sel === 'opponent' ? [this.opponentOf(p)] : subs.filter(s => s.player).map(s => s.player); (pls.length ? pls : [p]).forEach(pl => { pl.skipTurns = (pl.skipTurns || 0) + 1; }); this.say(`${(pls[0] || p).name} will skip a turn.`); break; }
       case 'token': { const cnt = this.amount(e.count ?? e.amount ?? 1, ctx) || 1; for (let i = 0; i < cnt; i++) this.createToken(p, e); break; }
       case 'exileGraveyard': { const pls = e.who === 'you' ? [p] : e.who === 'each' ? this.players : subs.filter(s => s.player).map(s => s.player); for (const pl of pls) for (const c of pl.graveyard.slice()) this.moveTo(c, 'exile'); break; }
       case 'poison': for (const s of subs) if (s.player) s.player.poison += this.amount(e.amount, ctx, s); break;
@@ -1178,7 +1183,7 @@ export class Duel {
         }
         break;
       }
-      case 'delayedDraw': this.delayed.push({ player: p.idx, type: 'draw' }); break;
+      case 'delayedDraw': this.delayed.push({ player: p.idx, type: 'draw', amount: e.amount || 1 }); break;
       case 'delayed': { const tid = this.prevCard(ctx)?.id; this.delayed.push({ kind: 'scheduled', when: e.when, effects: e.effects, source: src.id, targetId: tid, controller: p.idx, turn: this.turn, cond: e.cond || null }); break; }
       case 'unlessPay': {
         const who = e.payer === 'thatPlayer' && ctx.thatPlayer !== undefined ? this.players[ctx.thatPlayer] : p;
@@ -1250,6 +1255,14 @@ export class Duel {
       for (const c of order.slice().reverse()) owner.library.push(c);
       this.moveTo(keep, 'hand');
       this.say(`${p.name} takes one card and puts ${rest.length} back on top.`);
+    } else if (mode === 'handBottom') {
+      const pick = yield { kind: 'choose', player: p.idx, text: `Put one card from the top ${top.length} of ${whose} library into your hand; the rest go to the bottom`, options: opts, min: 1, max: 1, secret: true };
+      const keep = this.card((pick || [])[0]) || top[0];
+      const rest = top.filter(c => c !== keep);
+      for (const c of rest) removeFrom(owner.library, c);
+      for (const c of rest) owner.library.unshift(c);
+      this.moveTo(keep, 'hand');
+      this.say(`${p.name} takes one card and puts ${rest.length} on the bottom.`);
     } else if (mode === 'pick') {
       const ids = yield { kind: 'choose', player: p.idx, text: `Choose one card to put into your hand; the rest are exiled`, options: opts, min: 1, max: 1, secret: true };
       const keep = this.card((ids || [])[0]) || top[0];
@@ -1667,20 +1680,35 @@ function auraRestrict(what) {
   else r.types = ['permanent'];
   return r;
 }
+const WHAT_COLORS = { white: 'W', blue: 'U', black: 'B', red: 'R', green: 'G' };
+const WHAT_TYPES = new Set(['creature', 'instant', 'sorcery', 'artifact', 'enchantment', 'land', 'planeswalker', 'tribal']);
+// One constraint phrase like "blue instant", "basic land" or "Goblin": every word must hold (colour AND type
+// AND subtype), so tutors and graveyard filters honour colour and compound type restrictions.
+function matchWhatPhrase(c, a) {
+  if (a === 'basic land') return c.def.basic && isLand(c);
+  const types = c.def.types.map(t => t.toLowerCase());
+  const colors = c.def.colors || [];
+  for (const word of a.split(/\s+/).filter(Boolean)) {
+    if (word === 'basic') { if (!c.def.basic) return false; continue; }
+    if (WHAT_COLORS[word]) { if (!colors.includes(WHAT_COLORS[word])) return false; continue; }
+    if (word === 'colorless' || word === 'colourless') { if (colors.length) return false; continue; }
+    if (word === 'multicolored' || word === 'multicoloured') { if (colors.length < 2) return false; continue; }
+    if (word === 'nonland') { if (isLand(c)) return false; continue; }
+    if (word === 'noncreature') { if (isCreatureDef(c)) return false; continue; }
+    if (word === 'nonbasic') { if (c.def.basic) return false; continue; }
+    if (word === 'creature') { if (!isCreatureDef(c)) return false; continue; }
+    if (word === 'land') { if (!isLand(c)) return false; continue; }
+    if (WHAT_TYPES.has(word)) { if (!types.includes(word)) return false; continue; }
+    const cap = word.charAt(0).toUpperCase() + word.slice(1);   // otherwise a subtype (Goblin, Island, …)
+    if (!c.def.subtypes.includes(cap)) return false;
+  }
+  return true;
+}
 function matchCardWhat(c, what) {
-  const w = (what || 'card').toLowerCase().replace(/ cards?$/, '');
+  const w = (what || 'card').toLowerCase().replace(/ cards?$/, '').trim();
   if (w === 'card' || w === 'any' || w === '') return true;
-  const alts = w.split('|').map(s => s.trim());
-  return alts.some(a => {
-    if (a === 'basic land') return c.def.basic && isLand(c);
-    if (a === 'land') return isLand(c);
-    if (a === 'creature') return isCreatureDef(c);
-    if (a === 'artifact' || a === 'enchantment' || a === 'instant' || a === 'sorcery') return c.def.types.map(t => t.toLowerCase()).includes(a);
-    if (a === 'instant or sorcery') return c.def.kind === 'instant' || c.def.kind === 'sorcery';
-    const cap1 = a.charAt(0).toUpperCase() + a.slice(1);
-    if (['Plains', 'Island', 'Swamp', 'Mountain', 'Forest'].includes(cap1)) return c.def.subtypes.includes(cap1);
-    return c.def.subtypes.includes(cap1);
-  });
+  // top-level alternatives split on "|" or " or " ("artifact or enchantment", "instant or sorcery")
+  return w.split(/\s*\|\s*|\s+or\s+/).map(s => s.trim()).filter(Boolean).some(a => matchWhatPhrase(c, a));
 }
 export function describeTarget(e) {
   const r = e.restrict || {};
