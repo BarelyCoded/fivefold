@@ -83,6 +83,8 @@ export function makeRiddle(rng, defs, only = null) {
   const uniqBy = (arr, f) => { const seen = new Set(), out = []; for (const x of arr) { const k = f(x); if (!seen.has(k)) { seen.add(k); out.push(x); } } return out; };
   const creatures = pool.filter(d => d.kind === 'creature');
   const withKw = pool.filter(d => d.kwNames && d.kwNames.length);
+  const CNAME = { W: 'White', U: 'Blue', B: 'Black', R: 'Red', G: 'Green' };
+  const colorCat = d => !d.colors || d.colors.length === 0 ? 'Colorless' : d.colors.length > 1 ? 'Multicolored' : CNAME[d.colors[0]];
 
   // Each generator returns { q, answer, options, card } or null when it can't build a fair question.
   // The multi-card ones are hard: they need the player to actually know several cards, not read one value.
@@ -114,11 +116,11 @@ export function makeRiddle(rng, defs, only = null) {
       return { q: `Which of these cards has ${kw.toLowerCase()}?`, answer: target.name, options: shuf([target.name, ...others.map(d => d.name)]), card: target.name };
     },
     whichType: () => {
-      const kinds = ['instant', 'sorcery', 'enchantment', 'artifact', 'creature'];
+      const kinds = ['instant', 'sorcery', 'enchantment', 'artifact', 'creature', 'land'];
       const kind = kinds[Math.floor(rng() * kinds.length)];
       const target = sample(pool.filter(d => d.kind === kind), 1)[0]; if (!target) return null;
       const others = sample(pool.filter(d => d.kind !== kind), 3); if (others.length < 3) return null;
-      const word = { instant: 'an instant', sorcery: 'a sorcery', enchantment: 'an enchantment', artifact: 'an artifact', creature: 'a creature' }[kind];
+      const word = { instant: 'an instant', sorcery: 'a sorcery', enchantment: 'an enchantment', artifact: 'an artifact', creature: 'a creature', land: 'a land' }[kind];
       return { q: `Which of these cards is ${word}?`, answer: target.name, options: shuf([target.name, ...others.map(d => d.name)]), card: target.name };
     },
     typeLine: () => {
@@ -150,16 +152,84 @@ export function makeRiddle(rng, defs, only = null) {
       const nums = [...new Set([d.cmc, d.cmc + 1, Math.max(0, d.cmc - 1), d.cmc + 2, Math.max(0, d.cmc - 2)])].slice(0, 4);
       return { q: `What is the mana value of ${d.name}?`, answer: String(d.cmc), options: shuf(nums.map(String)), card: d.name };
     },
+    // --- more comparisons: mirror the power/toughness/cost questions the other way round ---
+    leastPower: () => {
+      const c = uniqBy(creatures, d => d.power); if (c.length < 4) return null;
+      const four = sample(c, 4); const ans = four.reduce((a, b) => (b.power < a.power ? b : a));
+      return { q: 'Which of these creatures has the least power?', answer: ans.name, options: four.map(d => d.name), card: ans.name };
+    },
+    mostToughness: () => {
+      const c = uniqBy(creatures, d => d.toughness); if (c.length < 4) return null;
+      const four = sample(c, 4); const ans = four.reduce((a, b) => (b.toughness > a.toughness ? b : a));
+      return { q: 'Which of these creatures has the greatest toughness?', answer: ans.name, options: four.map(d => d.name), card: ans.name };
+    },
+    biggestBody: () => {
+      const sum = d => (d.power || 0) + (d.toughness || 0);
+      const c = uniqBy(creatures.filter(d => d.power != null && d.toughness != null), sum); if (c.length < 4) return null;
+      const four = sample(c, 4); const ans = four.reduce((a, b) => (sum(b) > sum(a) ? b : a));
+      return { q: 'Which of these creatures is the biggest, counting power plus toughness?', answer: ans.name, options: four.map(d => d.name), card: ans.name };
+    },
+    dearestCreature: () => {
+      const c = uniqBy(creatures.filter(d => d.cmc > 0), d => d.cmc); if (c.length < 4) return null;
+      const four = sample(c, 4); const ans = four.reduce((a, b) => (b.cmc > a.cmc ? b : a));
+      return { q: 'Which of these creatures costs the most to cast?', answer: ans.name, options: four.map(d => d.name), card: ans.name };
+    },
+    // --- colours ---
+    whichColor: () => {
+      const colored = pool.filter(d => d.colors && d.colors.length); if (!colored.length) return null;
+      const target = colored[Math.floor(rng() * colored.length)];
+      const col = target.colors[Math.floor(rng() * target.colors.length)];
+      const others = sample(pool.filter(d => d !== target && !(d.colors || []).includes(col)), 3); if (others.length < 3) return null;
+      return { q: `Which of these cards is ${CNAME[col].toLowerCase()}?`, answer: target.name, options: shuf([target.name, ...others.map(d => d.name)]), card: target.name };
+    },
+    colorOf: () => {
+      const d = pool[Math.floor(rng() * pool.length)]; const cat = colorCat(d);
+      const distract = sample(['White', 'Blue', 'Black', 'Red', 'Green', 'Colorless', 'Multicolored'].filter(x => x !== cat), 3);
+      if (distract.length < 3) return null;
+      return { q: `What colour is ${d.name}?`, answer: cat, options: shuf([cat, ...distract]), card: d.name };
+    },
+    multicolored: () => {
+      const m = sample(pool.filter(d => (d.colors || []).length > 1), 1)[0]; if (!m) return null;
+      const others = sample(pool.filter(d => (d.colors || []).length <= 1), 3); if (others.length < 3) return null;
+      return { q: 'Which of these cards is multicoloured?', answer: m.name, options: shuf([m.name, ...others.map(d => d.name)]), card: m.name };
+    },
+    colorless: () => {
+      const cl = sample(pool.filter(d => (d.colors || []).length === 0 && d.kind !== 'land'), 1)[0]; if (!cl) return null;
+      const others = sample(pool.filter(d => (d.colors || []).length > 0), 3); if (others.length < 3) return null;
+      return { q: 'Which of these cards is colourless?', answer: cl.name, options: shuf([cl.name, ...others.map(d => d.name)]), card: cl.name };
+    },
+    // --- subtypes, keywords the other way, and lands ---
+    whichSubtype: () => {
+      const withSub = creatures.filter(d => d.subtypes && d.subtypes.length); if (!withSub.length) return null;
+      const target = withSub[Math.floor(rng() * withSub.length)];
+      const sub = target.subtypes[Math.floor(rng() * target.subtypes.length)];
+      const others = sample(pool.filter(d => d !== target && !(d.subtypes || []).includes(sub)), 3); if (others.length < 3) return null;
+      return { q: `Which of these is a ${sub}?`, answer: target.name, options: shuf([target.name, ...others.map(d => d.name)]), card: target.name };
+    },
+    lacksKeyword: () => {
+      if (!withKw.length) return null;
+      const byKw = {}; for (const d of withKw) for (const kw of d.kwNames) (byKw[kw] ||= []).push(d);
+      const kws = Object.keys(byKw).filter(kw => byKw[kw].length >= 3); if (!kws.length) return null;
+      const kw = kws[Math.floor(rng() * kws.length)];
+      const haves = sample(byKw[kw], 3);
+      const target = sample(pool.filter(d => !(d.kwNames || []).includes(kw)), 1)[0];
+      if (!target || haves.length < 3) return null;
+      return { q: `Which of these does not have ${kw.toLowerCase()}?`, answer: target.name, options: shuf([target.name, ...haves.map(d => d.name)]), card: target.name };
+    },
+    producesColor: () => {
+      const lands = pool.filter(d => d.kind === 'land' && (d.produces || []).some(x => CNAME[x])); if (lands.length < 1) return null;
+      const target = lands[Math.floor(rng() * lands.length)];
+      const cols = target.produces.filter(x => CNAME[x]); const col = cols[Math.floor(rng() * cols.length)];
+      const others = sample(pool.filter(d => d !== target && !(d.produces || []).includes(col)), 3); if (others.length < 3) return null;
+      return { q: `Which of these can make ${CNAME[col].toLowerCase()} mana?`, answer: target.name, options: shuf([target.name, ...others.map(d => d.name)]), card: target.name };
+    },
   };
-  // Map the old 'only' filter (cost/color/pt) onto the new kinds, but lean on the harder ones.
-  const HARD = ['mostPower', 'leastToughness', 'mostCmc', 'leastCmc', 'whichKeyword', 'whichType', 'typeLine'];
-  const EASY = ['cost', 'pt', 'cmc'];
-  let order = only
-    ? [...HARD, ...EASY.filter(k => only.includes(k) || (only.includes('color') && false))]
-    : [...HARD, ...EASY];
-  // Try hard questions first (shuffled), then fall back to exact-recall, then anything.
-  order = [...shuf(HARD.filter(k => order.includes(k))), ...shuf(EASY.filter(k => order.includes(k)))];
-  for (const k of order) { const r = gens[k] && gens[k](); if (r && r.options.length >= 3) { r.options = [...new Set(r.options)]; return r; } }
+  // Pick a question type at random from all of them, so the riddles don't fall into a rut; try the next
+  // if one can't build a fair question from this pool. (The old cost/pt-only hint is no longer used.)
+  for (const k of shuf(Object.keys(gens))) {
+    const r = gens[k]();
+    if (r && r.options && [...new Set(r.options)].length >= 3) { r.options = [...new Set(r.options)].slice(0, 4); return r; }
+  }
   return null;
 }
 
