@@ -428,6 +428,39 @@ function dither(img, W_, x0, y0, w, h, cols, seed, scale = 6) {
 
 // ---- terrain painter -------------------------------------------------------------
 const terrainCache = new WeakMap();
+// Environment hazard art: a 4x2 sheet of decorated blobs, each a 3x3 nine-slice set. Loaded lazily; when it
+// arrives, envReady flips and cached terrains repaint (see the cache checks in drawWorld/drawMinimap).
+const ENV_URL = new URL('../assets/environment.png', import.meta.url).href;
+let envImg = null, envReady = false;
+if (typeof Image !== 'undefined') { const im = new Image(); im.onload = () => { envImg = im; envReady = true; }; im.onerror = () => {}; im.src = ENV_URL; }
+const ENV_CELL = { salt: [0, 0], bramble: [1, 0], lava: [2, 0], fog: [3, 0], swamp: [2, 1] };   // [col,row] in the sheet
+const ENV_CW = 704, ENV_CH = 768, ENV_SW = ENV_CW / 3, ENV_SH = ENV_CH / 3;                     // cell and nine-slice sub-tile
+// Stamp a hazard's tiles from the art sheet, nine-slice autotiled: a lone tile gets the whole blob; otherwise
+// the sub-tile is chosen so decorated borders fall on the sides with no same-hazard neighbour.
+function paintHazards(ctx, world) {
+  if (!envImg) return;
+  const kinds = [['lava', lavaAt], ['swamp', swampAt], ['salt', saltAt], ['bramble', brambleAt], ['fog', fogAt]];
+  const prevSmooth = ctx.imageSmoothingEnabled; ctx.imageSmoothingEnabled = true;
+  for (const [kind, atFn] of kinds) {
+    const keys = world[kind]; if (!keys || !keys.length) continue;
+    const [ccol, crow] = ENV_CELL[kind], ox = ccol * ENV_CW, oy = crow * ENV_CH;
+    if (kind === 'fog') { ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.85; }   // mist brightens, doesn't box
+    else { ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1; }
+    for (const key of keys) {
+      const p = key.split(','), x = +p[0], y = +p[1];
+      const n = atFn(world, x, y - 1), s = atFn(world, x, y + 1), w = atFn(world, x - 1, y), e = atFn(world, x + 1, y);
+      let sx, sy, sw, sh;
+      if (!n && !s && !w && !e) { sx = ox; sy = oy; sw = ENV_CW; sh = ENV_CH; }   // isolated: draw the whole blob
+      else {
+        const sc = (w && e) ? 1 : e ? 0 : w ? 2 : 1;   // left edge if no west neighbour, right edge if no east
+        const sr = (n && s) ? 1 : s ? 0 : n ? 2 : 1;   // top edge if no north neighbour, bottom edge if no south
+        sx = ox + sc * ENV_SW; sy = oy + sr * ENV_SH; sw = ENV_SW; sh = ENV_SH;
+      }
+      ctx.drawImage(envImg, sx, sy, sw, sh, x * PX, y * PX, PX, PX);
+    }
+  }
+  ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1; ctx.imageSmoothingEnabled = prevSmooth;
+}
 // Sprite-sheet ground with organic borders: each pixel takes its biome from the nearest tile centre
 // (jittered by noise, like the painted fallback) and samples that biome's sheet tiles as a texture,
 // so regions meet along wobbly edges instead of a checkerboard. Sand beaches ring the water, roads
@@ -449,34 +482,6 @@ function paintTiles(world) {
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const t = at(tx + dx, ty + dy); if (t && t !== b) { same = false; if (b === 'U') land = true; } }
     uniform[ty * W_ + tx] = same ? 1 : 0; coast[ty * W_ + tx] = land ? 1 : 0;
   }
-  // Terrain pools are drawn as a metaball field over their tiles: adjacent tiles blend into one rounded
-  // pool instead of a union of squares. mask marks pool tiles; near marks tiles the field can reach.
-  const buildPools = (keys) => {
-    const mask = new Uint8Array(W_ * H_), near = new Uint8Array(W_ * H_);
-    if (keys && keys.length) {
-      for (const k of keys) { const p = k.split(','), lx = +p[0], ly = +p[1]; if (lx >= 0 && ly >= 0 && lx < W_ && ly < H_) mask[ly * W_ + lx] = 1; }
-      for (let ty = 0; ty < H_; ty++) for (let tx = 0; tx < W_; tx++) {
-        let n = 0;
-        for (let dy = -1; dy <= 1 && !n; dy++) for (let dx = -1; dx <= 1 && !n; dx++) { const nx = tx + dx, ny = ty + dy; if (nx >= 0 && ny >= 0 && nx < W_ && ny < H_ && mask[ny * W_ + nx]) n = 1; }
-        near[ty * W_ + tx] = n;
-      }
-    }
-    return { mask, near };
-  };
-  const lavaP = buildPools(world.lava), swampP = buildPools(world.swamp), bramblP = buildPools(world.bramble), fogP = buildPools(world.fog), saltP = buildPools(world.salt);
-  // Sum of a smooth radial falloff from each nearby pool-tile centre. A lone tile makes a rounded pool;
-  // neighbours merge with a rounded neck; convex corners of a run round off — like liquid, not tiles.
-  const POOL_RK = PX * 1.02, POOL_ISO = 0.46, POOL_CORE = 0.60, r2 = POOL_RK * POOL_RK;
-  const poolField = (x, y, tx, ty, mask) => {
-    let f = 0;
-    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-      const nx = tx + dx, ny = ty + dy;
-      if (nx < 0 || ny < 0 || nx >= W_ || ny >= H_ || !mask[ny * W_ + nx]) continue;
-      const cx = nx * PX + PX / 2, cy = ny * PX + PX / 2, d2 = (x - cx) * (x - cx) + (y - cy) * (y - cy);
-      if (d2 >= r2) continue; const t = 1 - d2 / r2; f += t * t;
-    }
-    return f;
-  };
   const owner = (x, y) => {
     const tx = Math.floor(x / PX), ty = Math.floor(y / PX);
     const b = at(tx, ty);
@@ -529,86 +534,18 @@ function paintTiles(world) {
   for (let y = 0; y < Hp; y++) for (let x = 0; x < Wp; x++) {
     const b = owner(x, y);
     const tx = Math.floor(x / PX), ty = Math.floor(y / PX);
-    let rect, lavaRim = false, lavaCore = false, swampRim = false, swampCore = false, bramRim = false, bramCore = false, saltRim = false, saltCore = false, fogA = 0;
-    const idx = ty * W_ + tx, lt = TERRAIN[at(tx, ty)] && TERRAIN[at(tx, ty)].accent;
-    // Perturbed metaball value of a pool at this pixel: big lobes swell and pinch the pool, mid ripples and
-    // a little fine crenellation break the perfect oval so no edge or corner reads as geometric.
-    const poolE = (mask) => poolField(x, y, tx, ty, mask)
-      + (vnoise(x / 27, y / 27, seed + 91) - 0.5) * 0.20
-      + (vnoise(x / 13, y / 13, seed + 53) - 0.5) * 0.11
-      + (vnoise(x / 6, y / 6, seed + 17) - 0.5) * 0.05;
-    // Classify into 'core' (deep), 'rim' (shore band) or null; the core/rim split drifts so the rim varies.
-    const poolAtPx = (mask) => {
-      if (!lt || !lt.length) return null;
-      const e = poolE(mask), split = POOL_CORE + (vnoise(x / 16, y / 16, seed + 205) - 0.5) * 0.12;
-      return e > split ? 'core' : e > POOL_ISO ? 'rim' : null;
-    };
-    if (lavaP.near[idx]) {
-      const c = poolAtPx(lavaP.mask);
-      if (c === 'core') { rect = pick(lt, h(tx, ty, 6)); lavaCore = true; }
-      else if (c === 'rim') { rect = groundRect(b, tx, ty, x, y); lavaRim = true; }
-      else rect = groundRect(b, tx, ty, x, y);
-    } else if (swampP.near[idx]) {
-      const c = poolAtPx(swampP.mask);
-      if (c === 'core') { rect = pick(lt, h(tx, ty, 6)); swampCore = true; }
-      else if (c === 'rim') { rect = groundRect(b, tx, ty, x, y); swampRim = true; }
-      else rect = groundRect(b, tx, ty, x, y);
-    } else if (bramblP.near[idx]) {
-      const c = poolAtPx(bramblP.mask);
-      if (c === 'core') { rect = pick(lt, h(tx, ty, 6)); bramCore = true; }
-      else if (c === 'rim') { rect = groundRect(b, tx, ty, x, y); bramRim = true; }
-      else rect = groundRect(b, tx, ty, x, y);
-    } else if (saltP.near[idx]) {
-      // salt pans have no accent texture of their own, so bleach the plains ground into a bright cracked flat
-      const st = TERRAIN.W && TERRAIN.W.base, e = poolE(saltP.mask), split = POOL_CORE + (vnoise(x / 16, y / 16, seed + 205) - 0.5) * 0.12;
-      const c = st && st.length ? (e > split ? 'core' : e > POOL_ISO ? 'rim' : null) : null;
-      if (c === 'core') { rect = pick(st, h(tx, ty, 6)); saltCore = true; }
-      else if (c === 'rim') { rect = groundRect(b, tx, ty, x, y); saltRim = true; }
-      else rect = groundRect(b, tx, ty, x, y);
-    } else if (fogP.near[idx]) {
-      // fog has no crisp shore: draw the water/ground beneath and feather a pale mist over it, densest in
-      // the core and wispy at the edge, so it reads as drifting sea-mist rather than a solid pool.
-      rect = groundRect(b, tx, ty, x, y);
-      fogA = Math.max(0, Math.min(0.74, (poolE(fogP.mask) - 0.24) * 0.95));
-    } else rect = groundRect(b, tx, ty, x, y);
+    const rect = groundRect(b, tx, ty, x, y);
     // mirror tiles per cell so repeats are less obvious
     const fx = (tx & 1) === 1, fy = (ty & 1) === 1;
     const u = Math.floor((x % PX) * rect[2] / PX), v = Math.floor((y % PX) * rect[3] / PX);
     const sx = rect[0] + (fx ? rect[2] - 1 - u : u), sy = rect[1] + (fy ? rect[3] - 1 - v : v);
     const sheet = sheetOf(rect); if (!sheet) continue;
     const si = (sy * sheet.w + sx) * 4, di = (y * Wp + x) * 4;
-    let R = sheet.data[si], G = sheet.data[si + 1], B = sheet.data[si + 2];
-    if (lavaCore) {
-      // pull the neon lava sprite toward a muted ember: desaturate a touch and darken, so it sits in
-      // the same low-contrast register as the rest of the tileset instead of glaring off the rock.
-      const lum = 0.3 * R + 0.59 * G + 0.11 * B;
-      R = (R + (lum - R) * 0.28) * 0.82; G = (G + (lum - G) * 0.28) * 0.82; B = (B + (lum - B) * 0.28) * 0.82;
-    } else if (lavaRim) { R = 46; G = 20; B = 15; }   // crisp charred crust ringing the molten core
-    else if (swampCore) {
-      // reuse the molten texture but remap its brightness onto murky swamp water: deep green in the
-      // hollows, a mossy green-teal sheen on the high points.
-      const t = (0.3 * R + 0.59 * G + 0.11 * B) / 255;
-      R = 24 + t * 40; G = 40 + t * 74; B = 32 + t * 52;
-    } else if (swampRim) { R = 30; G = 38; B = 26; }   // muddy bank ringing the water
-    else if (bramCore) {
-      // a dead-briar tangle: dark, dry brown-olive thorns kept well below the vivid grass in brightness
-      // so the thicket reads as an obstacle, not more lawn — the texture supplies the tangle.
-      const t = (0.3 * R + 0.59 * G + 0.11 * B) / 255;
-      R = 78 + t * 62; G = 46 + t * 40; B = 28 + t * 22;   // dead-briar red-brown, tan highlights — clearly not grass
-      const th = vnoise(x / 2.6, y / 2.6, seed + 833);      // stipple a tangle of near-black thorns over it
-      if (th < 0.2) { R *= 0.5; G *= 0.45; B *= 0.42; } else if (th > 0.9) { R = Math.min(255, R + 26); G = Math.min(255, G + 20); B = Math.min(255, B + 10); }
-    } else if (bramRim) { R = 40; G = 26; B = 15; }   // dark thorny earth at the edge
-    else if (saltCore) {
-      // bleach the plains into a glaring salt pan: bright, near-white and slightly cool so it reads as
-      // exposed flats rather than warm sand.
-      const t = (0.3 * R + 0.59 * G + 0.11 * B) / 255;
-      R = 182 + t * 56; G = 184 + t * 54; B = 180 + t * 50;
-    } else if (saltRim) { R = 150; G = 140; B = 112; }   // cracked tan crust at the edge
-    if (fogA > 0) { R += (224 - R) * fogA; G += (230 - G) * fogA; B += (240 - B) * fogA; }   // pale drifting mist
-    img[di] = R; img[di + 1] = G; img[di + 2] = B; img[di + 3] = 255;
+    img[di] = sheet.data[si]; img[di + 1] = sheet.data[si + 1]; img[di + 2] = sheet.data[si + 2]; img[di + 3] = 255;
   }
   ctx.putImageData(image, 0, 0);
   paintRoads(ctx, world, seed);
+  paintHazards(ctx, world);   // lava / swamp / bramble / salt / fog, nine-slice autotiled from the art sheet
   // scenery, back to front
   const reserved = new Set([...world.cities.map(ct => `${ct.x},${ct.y}`), ...castleKeys(world), ...world.links.map(l => `${l.x},${l.y}`), ...(world.dungeons || []).map(d => `${d.x},${d.y}`), ...(world.landmarks || []).map(l => `${l.x},${l.y}`)]);
   const feats = [];
@@ -654,7 +591,7 @@ function paintTiles(world) {
   }
   feats.sort((a, b) => a.y - b.y);
   for (const f of feats) f.draw();
-  c.atlas = true;
+  c.atlas = true; c.env = envReady;
   return c;
 }
 // Scale so a sprite is `frac` of a tile tall and never wider than a tile.
@@ -1006,7 +943,7 @@ export function present(canvas, frame, fw, fh, labels = [], opts = {}) {
 // Whole-world overview for the side panel: the painted terrain scaled down, with markers.
 export function drawMinimap(canvas, world, player, cam) {
   let terrain = terrainCache.get(world);
-  if (!terrain || !!terrain.atlas !== atlasReady()) { terrain = paintTerrain(world); terrainCache.set(world, terrain); }
+  if (!terrain || !!terrain.atlas !== atlasReady() || !!terrain.env !== envReady) { terrain = paintTerrain(world); terrainCache.set(world, terrain); }
   const k = Math.max(1, Math.floor(240 / world.w));
   canvas.width = world.w * k; canvas.height = world.h * k;
   const ctx = canvas.getContext('2d'); ctx.imageSmoothingEnabled = true;
@@ -1027,7 +964,7 @@ export function drawMinimap(canvas, world, player, cam) {
 let frame = null, labels = [];
 export function drawWorld(canvas, world, player, opts = {}) {
   let terrain = terrainCache.get(world);
-  if (!terrain || !!terrain.atlas !== atlasReady()) { terrain = paintTerrain(world); terrainCache.set(world, terrain); }
+  if (!terrain || !!terrain.atlas !== atlasReady() || !!terrain.env !== envReady) { terrain = paintTerrain(world); terrainCache.set(world, terrain); }
   labels = [];
   const fw = VIEW.w * PX, fh = VIEW.h * PX;
   // The camera follows the hero's live (possibly fractional, mid-step) position, clamped to the world and
