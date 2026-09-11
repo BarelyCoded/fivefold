@@ -430,6 +430,30 @@ function paintTiles(world) {
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const t = at(tx + dx, ty + dy); if (t && t !== b) { same = false; if (b === 'U') land = true; } }
     uniform[ty * W_ + tx] = same ? 1 : 0; coast[ty * W_ + tx] = land ? 1 : 0;
   }
+  // Lava is drawn as a metaball field over the lava tiles: adjacent tiles blend into one rounded pool
+  // instead of a union of squares. lavaMask marks lava tiles; lavaNear marks tiles the field can reach.
+  const lavaMask = new Uint8Array(W_ * H_), lavaNear = new Uint8Array(W_ * H_);
+  if (world.lava && world.lava.length) {
+    for (const k of world.lava) { const p = k.split(','), lx = +p[0], ly = +p[1]; if (lx >= 0 && ly >= 0 && lx < W_ && ly < H_) lavaMask[ly * W_ + lx] = 1; }
+    for (let ty = 0; ty < H_; ty++) for (let tx = 0; tx < W_; tx++) {
+      let near = 0;
+      for (let dy = -1; dy <= 1 && !near; dy++) for (let dx = -1; dx <= 1 && !near; dx++) { const nx = tx + dx, ny = ty + dy; if (nx >= 0 && ny >= 0 && nx < W_ && ny < H_ && lavaMask[ny * W_ + nx]) near = 1; }
+      lavaNear[ty * W_ + tx] = near;
+    }
+  }
+  // Sum of a smooth radial falloff from each nearby lava-tile centre. A lone tile makes a rounded pool;
+  // neighbours merge with a rounded neck; convex corners of a run round off — like liquid, not tiles.
+  const LAVA_RK = PX * 1.02, LAVA_ISO = 0.46, LAVA_CORE = 0.60, r2 = LAVA_RK * LAVA_RK;
+  const lavaField = (x, y, tx, ty) => {
+    let f = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const nx = tx + dx, ny = ty + dy;
+      if (nx < 0 || ny < 0 || nx >= W_ || ny >= H_ || !lavaMask[ny * W_ + nx]) continue;
+      const cx = nx * PX + PX / 2, cy = ny * PX + PX / 2, d2 = (x - cx) * (x - cx) + (y - cy) * (y - cy);
+      if (d2 >= r2) continue; const t = 1 - d2 / r2; f += t * t;
+    }
+    return f;
+  };
   const owner = (x, y) => {
     const tx = Math.floor(x / PX), ty = Math.floor(y / PX);
     const b = at(tx, ty);
@@ -468,28 +492,30 @@ function paintTiles(world) {
     }
     return r.base;
   };
+  // Normal ground for a pixel (a beach-blended coast cell, or the cell's own terrain).
+  const groundRect = (b, tx, ty, x, y) => {
+    if (b === 'U' && coast[ty * W_ + tx]) {
+      let dl = 99;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const t = at(tx + dx, ty + dy); if (t && t !== 'U') dl = Math.min(dl, Math.hypot(x - ((tx + dx) * PX + PX / 2), y - ((ty + dy) * PX + PX / 2))); }
+      const sandy = dl < PX * 0.9 + (vnoise(x / 7, y / 7, seed + 77) - 0.5) * 16;
+      return sandy ? pick(TERRAIN.sand, h(tx, ty, 7)) : tileFor(b, tx, ty, x, y);
+    }
+    return tileFor(b, tx, ty, x, y);
+  };
   const image = ctx.createImageData(Wp, Hp); const img = image.data;
   for (let y = 0; y < Hp; y++) for (let x = 0; x < Wp; x++) {
     const b = owner(x, y);
     const tx = Math.floor(x / PX), ty = Math.floor(y / PX);
-    let rect, lavaT = -1;
-    if (lavaAt(world, tx, ty)) {
-      // A pool: the lava sprite fills the interior and rounds in from the tile edges (like the coastline),
-      // so pools read as organic molten patches drawn from the real tileset rather than a square.
-      let dl = 1e9;
-      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if ((dx || dy) && !lavaAt(world, tx + dx, ty + dy)) dl = Math.min(dl, Math.hypot(x - ((tx + dx) * PX + PX / 2), y - ((ty + dy) * PX + PX / 2)));
-      // a broad low-frequency wobble plus a little fine detail pushes the pool edge off the tile grid
-      const wobble = (vnoise(x / 17, y / 17, seed + 91) - 0.5) * 22 + (vnoise(x / 5, y / 5, seed + 52) - 0.5) * 8;
-      const t0 = PX * 0.5 + wobble;
+    let rect, lavaRim = false;
+    if (lavaNear[ty * W_ + tx]) {
+      // Metaball pool: bright molten core, a thin crisp charred rim, rounded outer edge that merges
+      // neighbouring tiles. A faint wobble keeps the shore organic without going jagged.
       const lt = TERRAIN[at(tx, ty)] && TERRAIN[at(tx, ty)].accent;
-      if (dl >= t0 && lt && lt.length) { rect = pick(lt, h(tx, ty, 6)); lavaT = Math.max(0, Math.min(1, (dl - t0) / (PX * 0.55))); }   // 0 at the shore, 1 deep in the molten core
-      else rect = tileFor(b, tx, ty, x, y);   // charred rock just outside the pool
-    } else if (b === 'U' && coast[ty * W_ + tx]) {
-      let dl = 99;
-      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const t = at(tx + dx, ty + dy); if (t && t !== 'U') dl = Math.min(dl, Math.hypot(x - ((tx + dx) * PX + PX / 2), y - ((ty + dy) * PX + PX / 2))); }
-      const sandy = dl < PX * 0.9 + (vnoise(x / 7, y / 7, seed + 77) - 0.5) * 16;
-      rect = sandy ? pick(TERRAIN.sand, h(tx, ty, 7)) : tileFor(b, tx, ty, x, y);
-    } else rect = tileFor(b, tx, ty, x, y);
+      const f = lavaField(x, y, tx, ty) + (vnoise(x / 22, y / 22, seed + 91) - 0.5) * 0.07;
+      if (f > LAVA_CORE && lt && lt.length) rect = pick(lt, h(tx, ty, 6));                        // molten core
+      else if (f > LAVA_ISO && lt && lt.length) { rect = groundRect(b, tx, ty, x, y); lavaRim = true; }  // crisp charred rim
+      else rect = groundRect(b, tx, ty, x, y);                                                    // rock outside the pool
+    } else rect = groundRect(b, tx, ty, x, y);
     // mirror tiles per cell so repeats are less obvious
     const fx = (tx & 1) === 1, fy = (ty & 1) === 1;
     const u = Math.floor((x % PX) * rect[2] / PX), v = Math.floor((y % PX) * rect[3] / PX);
@@ -497,13 +523,7 @@ function paintTiles(world) {
     const sheet = sheetOf(rect); if (!sheet) continue;
     const si = (sy * sheet.w + sx) * 4, di = (y * Wp + x) * 4;
     let R = sheet.data[si], G = sheet.data[si + 1], B = sheet.data[si + 2];
-    if (lavaT >= 0) {
-      // charred, glowing rim at the shore fading to a bright molten core, like real lava
-      const rim = (1 - lavaT) * (1 - lavaT);
-      R += (48 - R) * rim; G += (14 - G) * rim; B += (10 - B) * rim;
-      const glow = Math.max(0, lavaT - 0.4) * 1.1;
-      R = Math.min(255, R + 78 * glow); G = Math.min(255, G + 52 * glow); B = Math.min(255, B + 10 * glow);
-    }
+    if (lavaRim) { R = 52; G = 18; B = 12; }   // crisp charred crust ringing the molten core
     img[di] = R; img[di + 1] = G; img[di + 2] = B; img[di + 3] = 255;
   }
   ctx.putImageData(image, 0, 0);
