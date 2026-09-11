@@ -511,9 +511,16 @@ function paintTiles(world) {
       // Metaball pool: a muted molten core, a thin crisp charred rim, rounded outer edge that merges
       // neighbouring tiles. A faint wobble keeps the shore organic without going jagged.
       const lt = TERRAIN[at(tx, ty)] && TERRAIN[at(tx, ty)].accent;
-      const f = lavaField(x, y, tx, ty) + (vnoise(x / 22, y / 22, seed + 91) - 0.5) * 0.07;
-      if (f > LAVA_CORE && lt && lt.length) { rect = pick(lt, h(tx, ty, 6)); lavaCore = true; }   // molten core
-      else if (f > LAVA_ISO && lt && lt.length) { rect = groundRect(b, tx, ty, x, y); lavaRim = true; }  // crisp charred rim
+      // Layered noise perturbs the shore: big lobes swell and pinch the pool, mid ripples and a little
+      // fine crenellation break the perfect oval so no edge or corner reads as geometric.
+      const e = lavaField(x, y, tx, ty)
+        + (vnoise(x / 27, y / 27, seed + 91) - 0.5) * 0.20
+        + (vnoise(x / 13, y / 13, seed + 53) - 0.5) * 0.11
+        + (vnoise(x / 6, y / 6, seed + 17) - 0.5) * 0.05;
+      // the core/rim split drifts on its own noise, so the charred rim is wider in some stretches than others
+      const split = LAVA_CORE + (vnoise(x / 16, y / 16, seed + 205) - 0.5) * 0.12;
+      if (e > split && lt && lt.length) { rect = pick(lt, h(tx, ty, 6)); lavaCore = true; }        // molten core
+      else if (e > LAVA_ISO && lt && lt.length) { rect = groundRect(b, tx, ty, x, y); lavaRim = true; }  // crisp charred rim
       else rect = groundRect(b, tx, ty, x, y);                                                    // rock outside the pool
     } else rect = groundRect(b, tx, ty, x, y);
     // mirror tiles per cell so repeats are less obvious
