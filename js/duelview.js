@@ -58,6 +58,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
   function hasAnyPlay() {
     for (const c of me.hand) if (duel.canCast(me, c)) return true;
     for (const c of me.battlefield) { const abs = abilitiesOf(c); for (let i = 0; i < abs.length; i++) if (abs[i].type === 'activated' && duel.canActivate(me, c, i)) return true; }
+    for (const c of me.graveyard) { const abs = c.def.abilities; for (let i = 0; i < abs.length; i++) if (abs[i].type === 'activated' && abs[i].zone === 'graveyard' && duel.canActivate(me, c, i)) return true; }
     return false;
   }
   // Your creatures in combat that are about to take lethal damage and still have a usable ability to save
@@ -508,6 +509,12 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     if (info.pitch && !('pitch' in opts) && !duel.canPay(me, card.def.cost)) {
       const cands = me.hand.filter(c => c !== card && c.def.colors.includes(info.pitch));
       if (cands.length) { ui.menu = { title: `Exile a ${info.pitch} card instead of paying?`, items: [...cands.map(c => ({ label: c.def.name, action: () => { opts.pitch = c.id; ui.menu = null; next(w); } })), { label: 'Pay mana instead', action: () => { opts.pitch = undefined; ui.menu = null; next(w); } }] }; render(); return; }
+    }
+    // Fireblast: sacrifice lands instead of paying. Offered whenever enough of the named land is in play.
+    if (info.sacLands && !('sacLands' in opts)) {
+      const lands = me.battlefield.filter(c => isLand(c) && c.def.subtypes.includes(info.sacLands.land));
+      if (lands.length >= info.sacLands.n) { const canPayMana = duel.canPay(me, card.def.cost); ui.menu = { title: `Sacrifice ${info.sacLands.n} ${info.sacLands.land}s instead of paying?`, items: [{ label: `Sacrifice ${info.sacLands.n} ${info.sacLands.land}s`, primary: !canPayMana, action: () => { opts.sacLands = true; ui.menu = null; next(w); } }, ...(canPayMana ? [{ label: 'Pay mana instead', primary: true, action: () => { opts.sacLands = false; ui.menu = null; next(w); } }] : [])] }; render(); return; }
+      opts.sacLands = false;
     }
     if (info.x && !('x' in opts)) { let maxX = 0; for (let x = 20; x >= 0; x--) if (duel.canPay(me, card.def.cost, x)) { maxX = x; break; } w.maxX = maxX; w.stage = 'x'; render(); return; }
     if (info.additional && !w.extraDone) {

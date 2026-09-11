@@ -173,7 +173,7 @@ export function parseTarget(phrase) {
     else if (w === 'other') r.other = true;
     else if (w === 'another') r.other = true;
     else if (w === 'attacking' || w === 'blocking') r.state = w;
-    else if (/^[a-z]+$/.test(w)) (r.subtypes ||= []).push(cap(w === 'plains' ? w : w)); // Wall, Goblin, Aura ...
+    else if (/^[a-z]+(?:-[a-z]+)?$/.test(w)) (r.subtypes ||= []).push(capSub(w)); // Wall, Goblin, Aura, Assembly-Worker ...
     else return null;
   }
   if (r.players && !types.length) return { sel: 'each', restrict: r };
@@ -194,6 +194,8 @@ export function needsTarget(e) {
 // Each rule: [regex, handler(match) => effect[] | null]
 const T = (p) => parseTarget(p);
 const tgt = (e, p) => { const k = T(p); if (!k) return null; return [{ ...e, ...k }]; };
+// Subtype capitalisation that survives hyphens: "assembly-worker" -> "Assembly-Worker" (matches the type line).
+const capSub = w => w.split('-').map(cap).join('-');
 // "where X is <something>": a calc object the engine evaluates at resolution.
 function parseWhereX(text) {
   let m;
@@ -222,7 +224,7 @@ function countPhrase(subject) {
     if (['tapped', 'untapped', 'attacking', 'blocking'].includes(w)) r.state = w;
     else if (COLOR_WORD[w]) (r.colors = r.colors || []).push(COLOR_WORD[w]);
     else if (PERM_TYPE_WORDS.includes(w.replace(/s$/, ''))) (r.types = r.types || []).push(w.replace(/s$/, ''));
-    else if (/^[a-z][a-z'-]+$/.test(w)) (r.subtypes = r.subtypes || []).push(cap(w));
+    else if (/^[a-z][a-z'-]+$/.test(w)) (r.subtypes = r.subtypes || []).push(capSub(w));
     else return null;
   }
   if (!Object.keys(r).length) return null;
@@ -287,6 +289,8 @@ const rules = [
   [/^add x mana of any one color, where x is (.+)$/, m => { const x = parseWhereX(m[1]); return x ? [{ type: 'addMana', any: x }] : null; }],
   [/^add x mana in any combination of \{b\} and\/or \{r\}, where x is (.+)$/, m => { const x = parseWhereX(m[1]); return x ? [{ type: 'addMana', any: x, note: 'all of the mana is one colour' }] : null; }],
   [/^(?:create|put) x (\d+)\/(\d+) (.*?) creature tokens?(?: onto the battlefield)?, where x is (.+)$/, m => { const x = parseWhereX(m[4]); if (!x) return null; const desc = m[3].split(/\s+/); return [{ type: 'token', count: x, p: Number(m[1]), t: Number(m[2]), colors: desc.filter(w => COLOR_WORD[w]).map(w => COLOR_WORD[w]), types: ['creature'], subtypes: desc.filter(w => !COLOR_WORD[w]).map(cap), keywords: [] }]; }],
+  // X tokens where X was paid for (Decree of Justice's cycling trigger, X spells)
+  [/^(?:create|put) x (\d+)\/(\d+) (.*?) creature tokens?(?: onto the battlefield)?$/, m => { const desc = m[3].split(/\s+/); return [{ type: 'token', count: 'X', p: Number(m[1]), t: Number(m[2]), colors: desc.filter(w => COLOR_WORD[w]).map(w => COLOR_WORD[w]), types: ['creature'], subtypes: desc.filter(w => !COLOR_WORD[w]).map(cap), keywords: [] }]; }],
   [/^counter (?:it|that spell)(?: unless that player pays \{(\w+)\}(?:, where x is its mana value)?)?$/, m => [{ type: 'counter', sel: 'castSpell', unlessPay: m[1] ? (m[1] === 'x' ? { calc: 'stat', stat: 'cmc', of: 'castSpell' } : Number(m[1])) : null }]],
   [/^if this ability has been activated (\S+) or more times this turn, sacrifice ~ at the beginning of the next end step$/, m => [{ type: 'overuse', n: amt(m[1]) }]],
   [/^gain control of (target creature) for as long as you control ~ and ~ remains tapped$/, m => tgt({ type: 'controlLinked' }, m[1])],
@@ -308,6 +312,26 @@ const rules = [
   [/^(target .+?) gets ([+-]\d+)\/([+-]\d+) for as long as ~ remains tapped$/, m => tgt({ type: 'pump', p: Number(m[2]), t: Number(m[3]), whileTapped: true }, m[1])],
   [/^(?:it|that creature) doesn't untap during its controller's untap step for as long as ~ remains tapped$/, () => [{ type: 'freeze', sel: 'prev', note: 'the creature skips one untap step instead of staying tapped while Ice Floe is' }]],
   [/^you gain that much life$/, () => [{ type: 'gainEqualPrev' }]],
+  // Jackal Pup: "Whenever ~ is dealt damage, it deals that much damage to you."
+  [/^(?:it|~) deals that much damage to (you|.+)$/, m => m[1] === 'you' ? [{ type: 'damage', amount: 'LAST', sel: 'you' }] : tgt({ type: 'damage', amount: 'LAST' }, m[1])],
+  // Vendetta / Reanimate: life loss keyed to the creature just destroyed or the card just returned.
+  [/^you lose life equal to that creature's (power|toughness)$/, m => [{ type: 'lose', amount: { calc: 'stat', stat: m[1], of: 'prev' }, sel: 'you' }]],
+  [/^you lose life equal to (?:that|the) card's mana value$/, () => [{ type: 'lose', amount: { calc: 'stat', stat: 'cmc', of: 'prev' }, sel: 'you' }]],
+  // Price of Progress: damage to each player scaled by their nonbasic lands.
+  [/^~ deals damage to each player equal to twice the number of nonbasic lands (?:that player|they) controls?$/, () => [{ type: 'damage', amount: { calc: 'lands', nonbasic: true, of: 'subject', mult: 2 }, sel: 'each', restrict: { players: 'all' } }]],
+  // Graveyard recursion: Squee, Ashen Ghoul, Nether Shadow, Krovikan Horror, Death Spark.
+  [/^return ~ from your graveyard to (your hand|the battlefield)$/, m => [{ type: 'selfFromGraveyard', to: m[1] === 'your hand' ? 'hand' : 'battlefield' }]],
+  // Goblin Lackey: put a matching permanent card from your hand onto the battlefield.
+  [/^put (?:a|an) (.+?) card from your hand onto the battlefield$/, m => [{ type: 'putFromHand', filter: parseCardFilter(m[1]) }]],
+  // Mesmeric Fiend's leave trigger.
+  [/^return the exiled card to its owner's hand$/, () => [{ type: 'returnLinkedExile' }]],
+  // Gaea's Blessing (approximated: the whole graveyard is shuffled back rather than three chosen cards).
+  [/^target player shuffles up to three target cards from their graveyard into their library$/, () => [{ type: 'shuffleGraveyard', sel: 'player', restrict: { players: 'all' }, note: 'shuffles the whole graveyard rather than three chosen cards' }]],
+  [/^shuffle your graveyard into your library$/, () => [{ type: 'shuffleGraveyard', sel: 'you' }]],
+  // Powder Keg: "Destroy each artifact and creature with mana value equal to the number of fuse counters on ~."
+  [/^destroy each (.+?) with mana value equal to the number of (\w+) counters on ~$/, m => { const k = T('each ' + m[1]); if (!k) return null; return [{ type: 'destroyAll', restrict: k.restrict, cmcEq: { calc: 'counters', kind: m[2] } }]; }],
+  // Karn, Silver Golem: animate a noncreature artifact with P/T equal to its mana value.
+  [/^(target .+?) becomes an artifact creature with power and toughness each equal to its mana value until end of turn$/, m => tgt({ type: 'animateTarget' }, m[1])],
   [/^(?:~|it|that creature) deals (\S+) damage to (.+?)(?: and (\S+) damage to (.+))?$/, m => {
     const a = tgt({ type: 'damage', amount: amt(m[1]) }, m[2]); if (!a) return null;
     if (m[3]) { const b = tgt({ type: 'damage', amount: amt(m[3]) }, m[4]); if (!b) return null; a.push(...b); }
@@ -338,11 +362,13 @@ const rules = [
     const mk = v => v === 0 ? 0 : { ...c, restrict: { ...c.restrict }, mult: v };
     return [{ type: 'pump', p: mk(Number(m[2])), t: mk(Number(m[3])), ...k }];
   }],
-  [/^(target .+?|enchanted creature|~|it|that creature|[a-z][a-z /-]*?) gets? ([+-]\S+)\/([+-]\S+) until end of turn(?: and (?:gains|has) (.+?) until end of turn)?$/, m => {
+  // "gets +2/+2 until end of turn and gains trample until end of turn" or the shorter "gets +2/+2 and gains trample until end of turn"
+  [/^(target .+?|enchanted creature|~|it|that creature|[a-z][a-z /-]*?) gets? ([+-]\S+)\/([+-]\S+)(?: and (?:gains|has) (.+?))? until end of turn(?: and (?:gains|has) (.+?) until end of turn)?$/, m => {
     const k = T(m[1]); if (!k) return null;
     const p = m[2].toLowerCase().replace('+', ''), t = m[3].toLowerCase().replace('+', '');
     const e = [{ type: 'pump', p: p === 'x' ? 'X' : p === '-x' ? '-X' : Number(p), t: t === 'x' ? 'X' : t === '-x' ? '-X' : Number(t), ...k }];
-    if (m[4]) { const kws = m[4].split(/,? and |, /).map(s => cap(s.trim())); for (const kw of kws) { if (!KEYWORDS.has(kw)) return null; e.push({ type: 'grant', keyword: kw, ...k }); } }
+    const kwText = m[4] || m[5];
+    if (kwText) { const kws = kwText.split(/,? and |, /).map(s => cap(s.trim())); for (const kw of kws) { if (!KEYWORDS.has(kw)) return null; e.push({ type: 'grant', keyword: kw, ...k }); } }
     return e;
   }],
   [/^(target .+?|enchanted creature|~|it|that creature|[a-z][a-z /-]*?) (?:gains?|has|have) (.+?) until end of turn$/, m => {
@@ -478,12 +504,16 @@ const rules = [
   [/^(target .+?) can't be regenerated this turn$/, () => []],
   [/^~ can't be countered$/, () => []],
   // Manlands: "~ becomes a 2/2 Assembly-Worker artifact creature until end of turn" (Mishra's Factory, etc.)
-  [/^~ becomes a (\d+)\/(\d+)(.*?) creature until end of turn(?:\. it's still a land)?$/, m => {
+  // Also "2/1 blue Faerie creature with flying until end of turn" (Faerie Conclave, Treetop Village) and the
+  // permanent "3/3 Elemental artifact creature that's still a land" (Stalking Stones).
+  [/^~ becomes a (\d+)\/(\d+)(.*?) creature(?: with (.+?))? (until end of turn|that's still a land)(?:\. it's still a land)?$/, m => {
     const words = (m[3] || '').trim().split(/\s+/).filter(Boolean);
     const SUPER = ['artifact', 'enchantment', 'land'];
     const types = ['creature', ...words.filter(w => SUPER.includes(w))];
-    const subtypes = words.filter(w => !SUPER.includes(w));
-    return [{ type: 'animateSelf', p: Number(m[1]), t: Number(m[2]), types, subtypes }];
+    const subtypes = words.filter(w => !SUPER.includes(w) && !COLOR_WORD[w]).map(cap);
+    const keywords = m[4] ? m[4].split(/,? and |, /).map(s => cap(s.trim())) : [];
+    if (keywords.some(kw => !KEYWORDS.has(kw))) return null;
+    return [{ type: 'animateSelf', p: Number(m[1]), t: Number(m[2]), types, subtypes, keywords, permanent: m[5] !== 'until end of turn' }];
   }],
   [/^it's still a land$/, () => []],   // reminder text: manlands remain lands in the engine anyway
 ];
@@ -510,6 +540,11 @@ function parseSentence(s) {
     const inner = parseSentence(um[1]);
     if (inner) return [{ type: 'unlessPay', life: Number(um[3]), effects: inner, payer: um[2] === 'you' ? 'you' : 'thatPlayer' }];
   }
+  // Masticore: "sacrifice ~ unless you discard a card"
+  if ((um = t.match(/^(.+?) unless you discard a card$/))) {
+    const inner = parseSentence(um[1]);
+    if (inner) return [{ type: 'unlessDiscard', effects: inner }];
+  }
   for (const splitter of [/, then /, /\. then /, / and (?=you |target |~ |each |all |put |untap |tap |draw |discard |destroy |exile |return |gain |lose |that |deals |it deals )/]) {
     if (splitter.test(t)) {
       const parts = t.split(splitter).map(parseClause);
@@ -534,6 +569,10 @@ export function parseEffects(text) {
   if ((wm = whole.match(/^domain — (target player|you) draws? a card for each basic land type among lands (?:they|you) controls?$/))) { const k = wm[1] === 'you' ? { sel: 'you' } : T(wm[1]); if (k) { out.effects.push({ type: 'draw', amount: { calc: 'domain', of: k.sel === 'you' ? 'you' : 'subject' }, ...k }); return out; } }
   if (/^draw four cards, then choose x cards in your hand and discard the rest$/.test(whole)) { out.effects.push({ type: 'draw', amount: 4, sel: 'you' }, { type: 'discardDownTo', amount: 'X', sel: 'you' }); return out; }
   if (/^draw a card, then draw cards equal to the number of cards named ~ in all graveyards$/.test(whole)) { out.effects.push({ type: 'draw', amount: 1, sel: 'you' }, { type: 'draw', amount: { calc: 'graveyardNameAll' }, sel: 'you' }); return out; }
+  // Hand disruption: Duress / Unmask ("... that player discards that card") and Mesmeric Fiend ("exile that card").
+  if ((wm = whole.match(/^(target opponent|target player) reveals their hand(?:,? and|\.) you choose (?:a|an) (.+?) card from it\. (exile that card|(?:that player|they) discards? that card)$/))) { const k = T(wm[1]); if (k) { out.effects.push({ type: 'handPick', action: wm[3].startsWith('exile') ? 'exile' : 'discard', filter: parseCardFilter(wm[2]), ...k }); return out; } }
+  // Goblin Ringleader: reveal the top N, take the matching ones, bottom the rest.
+  if ((wm = whole.match(/^reveal the top (\S+) cards? of your library\. put all (.+?) cards revealed this way into your hand and the rest on the bottom of your library(?: in any order)?$/))) { out.effects.push({ type: 'revealTake', amount: amt(wm[1]), filter: parseCardFilter(wm[2]) }); return out; }
 
   if ((wm = whole.match(/^draw (\S+) cards?, then put (\S+) cards? from your hand on the bottom of your library$/))) { out.effects.push({ type: 'draw', amount: amt(wm[1]), sel: 'you' }, { type: 'putBottom', amount: amt(wm[2]) }); return out; }
   if ((wm = whole.match(/^draw (\S+) cards?, then put (\S+) cards? from your hand (?:both )?on top of your library(?: or (?:both )?on the bottom of your library)?(?: in any order)?$/))) { out.effects.push({ type: 'draw', amount: amt(wm[1]), sel: 'you' }, { type: 'putBack', amount: amt(wm[2]) }); return out; }
@@ -592,6 +631,7 @@ function parseAbilityCost(text) {
       if (m[4]) cost.sacToken = true;
     }
     else if (/^exile ~$/i.test(p)) cost.exileSelf = true;
+    else if ((m = p.match(/^put a ([+-]\d+\/[+-]\d+|\w+) counter on ~$/i))) cost.addCounter = { kind: m[1].toLowerCase(), n: 1 };   // Wall of Roots
     else if ((m = p.match(/^exile the top (\w+) cards? of your library$/i))) cost.exileTop = amt(m[1].toLowerCase()) || 1;
     else if ((m = p.match(/^tap an untapped (plains|island|swamp|mountain|forest) you control$/i))) cost.tapLand = cap(m[1].toLowerCase());
     else if ((m = p.match(/^remove any number of (\w+) counters from ~$/i))) cost.removeCounter = { kind: m[1].toLowerCase(), n: 'all' };
@@ -600,6 +640,7 @@ function parseAbilityCost(text) {
     else if ((m = p.match(/^pay (\d+) life$/i))) cost.life = Number(m[1]);
     else if ((m = p.match(/^remove (a|an|\w+) ([+-]1\/[+-]1|\w+) counters? from ~$/i))) cost.removeCounter = { kind: m[2].toLowerCase(), n: amt(m[1].toLowerCase()) || 1 };
     else if (/^exile ~ from your graveyard$/i.test(p)) cost.exileSelfFromGraveyard = true;
+    else if ((m = p.match(/^exile (a|an|\w+) cards? from your graveyard$/i))) cost.exileFromGraveyard = amt(m[1].toLowerCase()) || 1;   // Grim Lavamancer
     else if (/^tap an untapped creature you control$/i.test(p)) cost.tapCreature = true;
     else return null;
   }
@@ -650,6 +691,10 @@ function parseKeywordLine(line, def) {
 function parseStatic(t) {
   let m;
   t = t.replace(/\s*this effect can't reduce the mana in that cost to less than one mana\.?$/, '');
+  // Threshold statics lead with the condition: "Threshold — As long as seven or more cards are in your graveyard, ~ gets +1/+1 and has flying."
+  if ((m = t.match(/^(?:threshold — )?as long as (?:there are )?seven or more cards (?:are )?in your graveyard, (.+)$/))) { const inner = parseStatic(m[1]); if (!inner) return null; for (const o of inner) o.condition = { ...(o.condition || {}), threshold: true }; return inner; }
+  // "~ gets +1/+1 and can't block" (Putrid Imp): a P/T change riding with a combat restriction.
+  if ((m = t.match(/^(.+?) and can't (block|attack|attack or block)$/))) { const inner = parseStatic(m[1]); if (!inner) return null; return [...inner, { type: 'static', kind: { block: 'cantBlock', attack: 'cantAttack', 'attack or block': 'cantAttackOrBlock' }[m[2]], scope: inner[0].scope }]; }
   if ((m = t.match(/^as long as ~ is untapped, (.+)$/))) { const inner = parseStatic(m[1]); if (!inner) return null; for (const o of inner) o.condition = { selfUntapped: true }; return inner; }
   if ((m = t.match(/^(.+?)\. otherwise, it gets ([+-]\d+)\/([+-]\d+)$/))) { const inner = parseStatic(m[1]); if (!inner || !inner.every(o => o.condition)) return null; return [...inner, { type: 'static', kind: 'pt', p: Number(m[2]), t: Number(m[3]), scope: inner[0].scope, condition: { ...inner[0].condition, negate: true } }]; }
   if ((m = t.match(/^players can't untap more than (one|two) (creature|land|artifact)s? during their untap steps$/))) return [{ type: 'static', kind: 'untapLimit', what: m[2], n: NUM[m[1]], scope: { who: 'self' } }];
@@ -664,7 +709,15 @@ function parseStatic(t) {
   if ((m = t.match(/^(?:(.+?) )?spells?( you cast)? costs? \{(\d+)\} (more|less) to cast$/))) {
     const kinds = !m[1] ? null : m[1].split(/ and | or /).map(w => w.trim());
     const f = {};
-    if (kinds) { const cols = kinds.filter(k => COLOR_WORD[k]).map(k => COLOR_WORD[k]); const ks = kinds.filter(k => !COLOR_WORD[k]); if (cols.length) f.colors = cols; if (ks.length) f.kinds = ks; if (ks.some(k => !['creature', 'noncreature', 'artifact', 'enchantment', 'instant', 'sorcery'].includes(k))) return null; }
+    if (kinds) {
+      const cols = kinds.filter(k => COLOR_WORD[k]).map(k => COLOR_WORD[k]); const ks = kinds.filter(k => !COLOR_WORD[k]);
+      if (cols.length) f.colors = cols;
+      const KINDS = ['creature', 'noncreature', 'artifact', 'enchantment', 'instant', 'sorcery'];
+      const plain = ks.filter(k => KINDS.includes(k)), subs = ks.filter(k => !KINDS.includes(k));
+      if (plain.length) f.kinds = plain;
+      if (subs.some(k => !/^[a-z]+(?:-[a-z]+)?$/.test(k))) return null;
+      if (subs.length) f.subtypes = subs.map(capSub);   // "Goblin spells you cast cost {1} less" (Goblin Warchief)
+    }
     return [{ type: 'static', kind: 'costMod', delta: (m[4] === 'more' ? 1 : -1) * Number(m[3]), filter: f, who: m[2] ? 'you' : 'all', scope: { who: 'self' } }];
   }
   if (/^you may play any number of lands on each of your turns$/.test(t)) return [{ type: 'static', kind: 'extraLands', any: true, who: 'you', scope: { who: 'self' } }];
@@ -793,24 +846,46 @@ function parseAbilityLine(line, ctx) {
   let m;
   let t = line.trim().replace(/\s*this effect doesn't remove ~\.?$/i, '').replace(/\.$/, '');
   t = t.replace(/^as (~|this [a-z]+) enters(?: the battlefield)?, /i, 'When ~ enters, ');
+  // "Threshold — {R}, {T}, Sacrifice ~: ..." — the ability word is decoration; the condition rides at the end.
+  const thresholdWord = /^threshold — /i.test(t); if (thresholdWord) t = t.replace(/^threshold — /i, '');
   // activated: "cost: effect"
-  if ((m = t.match(/^((?:(?:\{[^}]+\})+|[^:{}]+?)(?:,\s*(?:(?:\{[^}]+\})+|[^:{}]+?))*):\s+(.+)$/)) && /\{|sacrifice|discard|pay|remove|tap/i.test(m[1])) {
+  if ((m = t.match(/^((?:(?:\{[^}]+\})+|[^:{}]+?)(?:,\s*(?:(?:\{[^}]+\})+|[^:{}]+?))*):\s+(.+)$/)) && /\{|sacrifice|discard|pay|remove|tap|put a/i.test(m[1])) {
     const cost = parseAbilityCost(m[1]);
     if (!cost) return null;
     let body = m[2];
-    let timing = 'instant', limit = 0;   // limit: activations allowed per turn (0 = unlimited)
-    body = body.replace(/\s*activate (?:this ability )?only (as a sorcery|once each turn|during your turn and only once each turn|during your upkeep and only once each turn|during your turn|during combat|if [^.]+|any time you could cast a sorcery)\.?$/i, (s, w) => { if (/sorcery$/.test(w) || /cast a sorcery/.test(w)) timing = 'sorcery'; else if (/^during your upkeep/.test(w)) { timing = 'upkeep'; limit = 1; } else if (/^during your turn and/.test(w)) { timing = 'yourTurn'; limit = 1; } else if (/once each turn/.test(w)) limit = 1; return ''; });
+    let timing = 'instant', limit = 0, condition = null;   // limit: activations allowed per turn (0 = unlimited)
+    body = body.replace(/\s*activate (?:this ability )?only (as a sorcery|once each turn|during your turn and only once each turn|during your upkeep and only once each turn|during your upkeep and only if [^.]+|during your upkeep|during your turn|during combat|if [^.]+|any time you could cast a sorcery)\.?$/i, (s, w) => {
+      let cm;
+      if (/sorcery$/.test(w) || /cast a sorcery/.test(w)) timing = 'sorcery';
+      else if ((cm = w.match(/^during your upkeep and only if (.+)$/))) { timing = 'upkeep'; condition = parseCondText(cm[1]); }
+      else if (/^during your upkeep/.test(w)) { timing = 'upkeep'; if (/once each turn/.test(w)) limit = 1; }
+      else if (/^during your turn and/.test(w)) { timing = 'yourTurn'; limit = 1; }
+      else if (/once each turn/.test(w)) limit = 1;
+      else if ((cm = w.match(/^if (.+)$/))) condition = parseCondText(cm[1]);
+      return '';
+    });
+    if (thresholdWord && !condition) condition = { threshold: true };
+    // Gemstone Mine: a mana ability that sacrifices its source once its counters run out.
+    let sacWhenEmpty = null;
+    body = body.replace(/\.?\s*if there are no (\w+) counters on ~, sacrifice it\.?$/i, (s, k) => { sacWhenEmpty = k.toLowerCase(); return ''; });
+    // Undiscovered Paradise: the land bounces itself during your next untap step after being tapped for mana.
+    let bounceOnUntap = false;
+    body = body.replace(/\.?\s*during your next untap step, as you untap your permanents, return ~ to its owner's hand\.?$/i, () => { bounceOnUntap = true; return ''; });
+    const manaExtra = { ...(limit ? { limit } : {}), ...(sacWhenEmpty ? { sacWhenEmpty } : {}), ...(bounceOnUntap ? { bounceOnUntap: true } : {}) };
+    // Metalworker: "{T}: Reveal any number of artifact cards in your hand. Add {C}{C} for each card revealed this way."
+    let mw;
+    if ((mw = body.match(/^reveal any number of (\w+) cards in your hand\. add ((?:\{c\})+) for each card revealed this way\.?$/))) return { type: 'mana', cost, produces: ['C'], amount: { calc: 'handKind', what: mw[1], mult: mw[2].match(/\{c\}/g).length }, ...manaExtra };
     body = body.replace(/\s*this ability can't cause the total number of [^.]*\.?/i, ' ').trim();
     body = body.replace(/\s*activate (?:this ability )?no more than (once|twice|\w+) (?:times? )?each turn\.?$/i, (s, w) => { limit = w === 'once' ? 1 : w === 'twice' ? 2 : (NUM[w] ?? Number(w) ?? 1) || 1; return ''; });
     body = body.replace(/\s*activate only during your upkeep\.?$/i, () => { timing = 'upkeep'; return ''; });
     // mana ability
     let mm;
-    if ((mm = body.match(/^add ((?:\{[wubrgc]\})+)\.?$/))) return { type: 'mana', cost, produces: [...new Set([...mm[1].matchAll(/\{(\w)\}/g)].map(x => x[1].toUpperCase()))] , amount: [...mm[1].matchAll(/\{(\w)\}/g)].length };
+    if ((mm = body.match(/^add ((?:\{[wubrgc]\})+)\.?$/))) return { type: 'mana', cost, produces: [...new Set([...mm[1].matchAll(/\{(\w)\}/g)].map(x => x[1].toUpperCase()))] , amount: [...mm[1].matchAll(/\{(\w)\}/g)].length, ...manaExtra };
     if ((mm = body.match(/^add (\{[wubrgc]\})(?: or (\{[wubrgc]\}))+\.?$/))) return { type: 'mana', cost, produces: [...body.matchAll(/\{(\w)\}/g)].map(x => x[1].toUpperCase()), amount: 1 };
     if ((mm = body.match(/^add ((?:\{[wubrgc]\})(?: or \{[wubrgc]\})*)\. put a (\w+) counter on ~\.?$/))) return { type: 'mana', cost, produces: [...mm[1].matchAll(/\{(\w)\}/g)].map(x => x[1].toUpperCase()), amount: 1, counter: mm[2] };
     if ((mm = body.match(/^add (\{[wubrgc]\}) for each (\w+) counter removed this way\.?$/)) && cost.removeCounter?.n === 'all') return { type: 'mana', cost, produces: [mm[1][1].toUpperCase()], amount: 1 };
     if ((mm = body.match(/^add (\S+) mana of any one color\.?$/))) return { type: 'mana', cost, produces: COLORS.slice(), amount: amt(mm[1]), sameColor: true };
-    if (/^add one mana of any color\.?$/.test(body)) return { type: 'mana', cost, produces: COLORS.slice(), amount: 1 };
+    if (/^add one mana of any color\.?$/.test(body)) return { type: 'mana', cost, produces: COLORS.slice(), amount: 1, ...manaExtra };
     if (/^add one mana of the chosen color\.?$/.test(body)) return { type: 'mana', cost, produces: COLORS.slice(), amount: 1 };
     if (/^add \{c\}\{c\}\.?$/.test(body)) return { type: 'mana', cost, produces: ['C'], amount: 2 };
     if ((mm = body.match(/^add (\{[wubrgc]\}), then add an additional \1 for each (\w+) counter removed this way\.?$/)) && cost.removeCounter?.n === 'all') return { type: 'mana', cost, produces: [mm[1][1].toUpperCase()], amount: 1, plus: 'counters' };
@@ -818,7 +893,8 @@ function parseAbilityLine(line, ctx) {
     if (/^add one mana of any color that a land an opponent controls could produce\.?$/.test(body)) return { type: 'mana', cost, produces: COLORS.slice(), amount: 1, notes: ['Approximated: adds any color, whatever lands the opponent controls'] };
     const eff = parseEffects(body);
     if (!eff.effects.length) return null;
-    return { type: 'activated', cost, effects: eff.effects, optional: eff.optional, timing, limit, once: limit === 1, notes: eff.notes, text: line };
+    const zone = eff.effects.some(e => e.type === 'selfFromGraveyard') ? 'graveyard' : undefined;   // Ashen Ghoul activates from the graveyard
+    return { type: 'activated', cost, effects: eff.effects, optional: eff.optional, timing, limit, once: limit === 1, condition, zone, notes: eff.notes, text: line };
   }
   // triggered
   if ((m = t.match(/^(when|whenever) (.+?), (.+)$/))) {
@@ -850,10 +926,16 @@ function parseAbilityLine(line, ctx) {
     else if (/^the upkeep of enchanted (?:creature|land|permanent|artifact|enchantment)'s controller$/.test(w)) ev = { event: 'upkeep', who: 'enchantedController' };
     else if (/^the chosen player's upkeep$/.test(w)) ev = { event: 'upkeep', who: 'opp' };
     else return null;
-    const pay = parsePay(m[2]);
+    // Graveyard-recursion triggers (Nether Shadow, Krovikan Horror, Death Spark): the card triggers from the
+    // graveyard when enough creature cards lie above it. Rewrite the effect so it reads as a graveyard return.
+    let rest = m[2], condition = null, cm;
+    if ((cm = rest.match(/^if ~ is in your graveyard with (a|an|\w+ or more) creature cards? (directly )?above it, (.+)$/))) {
+      const n = /or more/.test(cm[1]) ? (NUM[cm[1].split(' ')[0]] ?? Number(cm[1].split(' ')[0]) ?? 1) : 1;
+      condition = { gyAbove: n, directly: !!cm[2] };
+      rest = cm[3].replace(/\breturn ~ to your hand\b/, 'return ~ from your graveyard to your hand').replace(/\bput ~ onto the battlefield\b/, 'return ~ from your graveyard to the battlefield');
+    }
+    const pay = parsePay(rest);
     let body = pay.body;
-    let condition = null;
-    let cm;
     if ((cm = body.match(/^if ~ is untapped, (.+)$/))) { condition = { selfUntapped: true }; body = cm[1]; }
     if ((cm = body.match(/^if ~ is tapped, (.+)$/))) { condition = { selfTapped: true }; body = cm[1]; }
     if ((cm = body.match(/^if ~ didn't attack this turn, (.+)$/))) { condition = { didntAttack: true }; body = cm[1]; }
@@ -862,13 +944,34 @@ function parseAbilityLine(line, ctx) {
     if ((cm = body.match(/^that player (draws an additional card|draws a card)$/))) return { type: 'triggered', ...ev, condition, effects: [{ type: 'draw', amount: 1, sel: 'thatPlayer' }], text: line };
     const eff = parseEffects(body);
     if (!eff.effects.length) return null;
-    return { type: 'triggered', ...ev, condition, effects: eff.effects, optional: eff.optional, pay: pay.cost, payer: pay.payer, notes: eff.notes, text: line };
+    const zone = eff.effects.some(e => e.type === 'selfFromGraveyard') ? 'graveyard' : undefined;   // Squee & co. trigger while in the graveyard
+    return { type: 'triggered', ...ev, condition, zone, effects: eff.effects, optional: eff.optional, pay: pay.cost, payer: pay.payer, notes: eff.notes, text: line };
   }
   const st = parseStatic(t);
   if (st) return st.length === 1 ? st[0] : { type: 'multi', list: st };
   return null;
 }
 
+// "Activate only if <condition>" / "and only if <condition>" clauses on activated abilities.
+function parseCondText(s) {
+  let m;
+  s = s.trim().replace(/\.$/, '');
+  if (/^seven or more cards are in your graveyard$/.test(s)) return { threshold: true };
+  if ((m = s.match(/^(\w+) or more creature cards are above ~(?: in your graveyard)?$/))) return { gyAbove: NUM[m[1]] ?? Number(m[1]) ?? 1 };
+  return null;
+}
+// Card filters for hand/library picks: "noncreature, nonland" / "nonland" / "goblin permanent" / "artifact".
+function parseCardFilter(text) {
+  const f = {};
+  for (const w of text.toLowerCase().split(/[\s,]+/).filter(Boolean)) {
+    let m;
+    if ((m = w.match(/^non-?(creature|land|artifact|enchantment|instant|sorcery)$/))) (f.not ||= []).push(m[1]);
+    else if (['creature', 'land', 'artifact', 'enchantment', 'instant', 'sorcery', 'permanent'].includes(w)) (f.types ||= []).push(w);
+    else if (COLOR_WORD[w]) (f.colors ||= []).push(COLOR_WORD[w]);
+    else if (/^[a-z]+(?:-[a-z]+)?$/.test(w)) (f.subtypes ||= []).push(capSub(w));
+  }
+  return f;
+}
 // "you may pay {1}. If you do, <effect>" on a trigger: the payment is optional and gates the effect.
 function parsePay(body) {
   const m = body.match(/^(you|that player|the player) may pay ((?:\{[^}]+\})+)\. if (?:you do|they do|the player does|that player does), (.+)$/);
@@ -880,6 +983,8 @@ function parseEvent(w) {
   let m;
   if (/^~ enters(?: the battlefield)?$/.test(w)) return { event: 'etb' };
   if (/^you cycle ~$/.test(w)) return { event: 'cycle' };
+  if (/^you play another land$/.test(w)) return { event: 'youPlayLand', other: true };   // City of Traitors: not its own arrival
+  if (/^~ is put into your graveyard from your library$/.test(w)) return { event: 'milled' };   // Gaea's Blessing
   if (/^~ (?:dies|is put into a graveyard from the battlefield)$/.test(w)) return { event: 'dies' };
   if (/^~ leaves the battlefield$/.test(w)) return { event: 'leaves' };
   if (/^~ attacks$/.test(w)) return { event: 'attacks' };
@@ -982,6 +1087,15 @@ export function compile(c) {
     def.status = 'full'; def.chaosOrb = true;
     return def;
   }
+  // Animate Dead: a reanimation Aura. The generic aura machinery only enchants permanents, so it's hand-built:
+  // when it enters, pick a creature card in any graveyard, return it under your control and attach the Aura;
+  // the creature gets -1/-0 while enchanted and is sacrificed when the Aura leaves.
+  if (c.name === 'Animate Dead') {
+    def.abilities.push({ type: 'triggered', event: 'etb', effects: [{ type: 'animateDead', sel: 'card', restrict: { zone: 'graveyard', who: 'any', what: 'creature' } }], optional: false, text: 'When Animate Dead enters, return target creature card from a graveyard to the battlefield under your control and attach Animate Dead to it. When Animate Dead leaves the battlefield, sacrifice that creature.' });
+    def.abilities.push({ type: 'static', kind: 'pt', p: -1, t: 0, scope: { who: 'enchanted' } });
+    def.status = 'approx'; def.animateDead = true; def.notes.push('Approximated: the creature is chosen as Animate Dead enters rather than as it is cast');
+    return def;
+  }
 
   if (def.kind === 'planeswalker') return unsupported('Planeswalkers are not supported');
   if (def.kind === 'unsupported') return unsupported(`${c.type_line} is not supported`);
@@ -995,7 +1109,9 @@ export function compile(c) {
   }
   for (const [t, col] of Object.entries(BASIC)) if (def.subtypes.map(s => s.toLowerCase()).includes(t)) def.produces.push(col);
 
-  const lines = normalizeOracle(c.oracle_text || '', c.name, def.legendary);
+  // A kicker rider can share a line with the main effect ("Destroy target artifact. If this spell was kicked,
+  // draw two cards."): split it off so the line-level kicker handler below sees it.
+  const lines = normalizeOracle(c.oracle_text || '', c.name, def.legendary).flatMap(l => l.split(/(?<=\.)\s+(?=if (?:~|this spell) was kicked,)/i));
   if (/enters? (?:the battlefield )?as a copy of/i.test(c.oracle_text || '')) return unsupported('Copy effects are not supported');
   const spellEffects = [];
   const modes = [];
@@ -1019,12 +1135,18 @@ export function compile(c) {
       continue;
     }
     if ((m = lower.match(/^you may (?:pay (\d+) life and )?(?:exile|remove) (?:a|an) (white|blue|black|red|green) card from your hand rather than pay (?:this spell's|~'s) mana cost\.?$/))) { alternativeCost = { pitch: COLOR_WORD[m[2]], life: m[1] ? Number(m[1]) : 0 }; continue; }
+    // Fireblast: "You may sacrifice two Mountains rather than pay this spell's mana cost."
+    if ((m = lower.match(/^you may sacrifice (\w+) (plains|islands|swamps|mountains|forests) rather than pay (?:this spell's|~'s) mana cost\.?$/))) { alternativeCost = { ...(alternativeCost || {}), sacLands: { land: cap(m[2].replace(/s$/, '')), n: amt(m[1]) || 1 } }; continue; }
     if ((m = lower.match(/^if (?:~|this spell) was kicked, (.+)$/))) { const eff = parseEffects(m[1]); if (eff.effects.length) kickedEffects = eff.effects; else def.notes.push('Kicker effect ignored'); continue; }
     if ((m = lower.match(/^if ~ was kicked, it enters(?: the battlefield)? with (\S+) ([+-]1\/[+-]1) counters? on it$/))) { kickedEffects = [{ type: 'counters', kind: m[2], amount: amt(m[1]), sel: 'self' }]; continue; }
     if (parseKeywordLine(line, def)) continue;
     if (def.unsupportedReason) break;
     // Instant / sorcery text is spell effects; permanents have abilities.
     if (def.kind === 'instant' || def.kind === 'sorcery') {
+      // "When you cycle ~, ..." / "When ~ is put into your graveyard from your library, ..." on a spell are
+      // triggered abilities of the card, not part of the spell's effect.
+      // (Death Spark's upkeep recursion is the same: an ability the card has while in the graveyard.)
+      if (/^(?:when (?:you cycle ~|~ is put into your graveyard from your library), |at the beginning of (?:your upkeep|the end step), if ~ is in your graveyard\b)/.test(lower)) { const ab = parseAbilityLine(lower); if (ab && ab.type === 'triggered') { def.abilities.push(ab); continue; } }
       const eff = parseEffects(lower);
       spellEffects.push(...eff.effects);
       if (eff.optional && eff.effects.length) def.spellOptional = true;

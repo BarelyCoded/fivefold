@@ -145,6 +145,8 @@ function mainPhaseAction(duel, p) {
   if (cands.length) return { type: 'cast', card: cands[0].c, opts: cands[0].opts };
   // sorcery-speed abilities: equip, tutor-ish, token makers
   for (const c of p.battlefield) abilitiesOf(c).forEach((ab, i) => { if (cands.length) return; if (ab.type !== 'activated') return; if (!['token', 'tutor', 'draw', 'counters'].includes(ab.effects[0]?.type)) return; if (ab.cost.sacSelf || ab.cost.sacrifice) return; if (!duel.canActivate(p, c, i)) return; const o = abilityOpts(duel, p, c, i); if (o) cands.push({ act: { type: 'activate', card: c, index: i, opts: o } }); });
+  // Graveyard recursion you can activate (Ashen Ghoul): always worth it.
+  for (const c of p.graveyard) c.def.abilities.forEach((ab, i) => { if (cands.length) return; if (ab.type === 'activated' && ab.zone === 'graveyard' && duel.canActivate(p, c, i)) cands.push({ act: { type: 'activate', card: c, index: i, opts: { targets: [] } } }); });
   if (cands.length) return cands[0].act;
   // cycling dead cards
   for (const c of p.hand) if (c.def.keywords.some(k => k.k === 'Cycling') && c.def.kind === 'land' && p.battlefield.filter(isLand).length >= 6 && duel.canCast(p, c, { cycling: true })) return { type: 'cast', card: c, opts: { cycling: true } };
