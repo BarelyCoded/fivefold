@@ -351,6 +351,22 @@ const rules = [
   // Cunning Wish: fetch a card from the sideboard, then the spell exiles itself.
   [/^(?:choose an? (instant|sorcery|creature|artifact|enchantment|land) card you own from outside the game, reveal that card, and put it into your hand|reveal an? (instant|sorcery|creature|artifact|enchantment|land) card you own from outside the game and put it into your hand)$/, m => [{ type: 'wish', what: m[1] || m[2] }]],
   [/^exile ~$/, () => [{ type: 'exileSelfSpell' }]],
+  [/^destroy ~$/, () => [{ type: 'destroy', sel: 'self' }]],   // Volrath's Dungeon's escape hatch
+  // Chain of Vapor: the bounce works; the chain (sacrifice a land to copy the spell) is not offered.
+  [/^then that permanent's controller may sacrifice a land of their choice$/, () => []],
+  [/^if the player does, they may copy ~ and may choose a new target for that copy$/, () => [{ type: 'noop', note: 'the chain (sacrifice a land to copy the spell) is not offered' }]],
+  // Smokestack: each player sacrifices per soot counter.
+  [/^that player sacrifices a permanent of their choice for each (\w+) counter on ~$/, m => [{ type: 'sacrificeMany', sel: 'thatPlayer', what: 'permanent', amount: { calc: 'counters', kind: m[1] } }]],
+  // Teferi's Response (approximated: counters a spell an opponent controls; the land-targeting condition and abilities are not handled).
+  [/^counter target spell or ability an opponent controls that targets a land you control$/, () => [{ type: 'counter', sel: 'spell', restrict: { spellKind: 'spell' }, unlessPay: null, note: 'counters a spell (not an ability); the "targets a land you control" condition is not enforced' }]],
+  [/^if a permanent's ability is countered this way, destroy that permanent$/, () => []],
+  // Volrath's Dungeon.
+  [/^(target player) puts a card from their hand on top of their library$/, m => tgt({ type: 'handToTop' }, m[1])],
+  // Engineered Plague / Evacuation / Hibernation / Flaring Pain / Gerrard's Wisdom.
+  [/^choose a creature type$/, () => [{ type: 'chooseType' }]],
+  [/^return all (.+?) to their owners' hands$/, m => { const k = T('all ' + m[1]); return k ? [{ type: 'bounceAllPerms', restrict: k.restrict }] : null; }],
+  [/^damage can't be prevented this turn$/, () => [{ type: 'noPrevent' }]],
+  [/^you gain (\d+) life for each card in your hand$/, m => [{ type: 'gain', amount: { calc: 'hand', base: 0, sign: 1, mult: Number(m[1]) }, sel: 'you' }]],
   [/^(?:~|it|that creature) deals (\S+) damage to (.+?)(?: and (\S+) damage to (.+))?$/, m => {
     const a = tgt({ type: 'damage', amount: amt(m[1]) }, m[2]); if (!a) return null;
     if (m[3]) { const b = tgt({ type: 'damage', amount: amt(m[3]) }, m[4]); if (!b) return null; a.push(...b); }
@@ -362,7 +378,7 @@ const rules = [
   [/^~ deals (\S+)(?: plus (\d+))? damage divided (?:evenly|as you choose)[^]*$/, m => [{ type: 'damage', amount: m[2] ? { calc: 'x', base: Number(m[2]) } : amt(m[1]), sel: 'any', restrict: {}, note: 'damage not divided' }]],
   [/^~ deals damage to that player equal to the number of (.+?) they control$/, m => { const c = countOf(m[1] + ' that player controls'); return c ? [{ type: 'damage', amount: { ...c, of: 'subject' }, sel: 'thatPlayer' }] : null; }],
   // "have it deal X damage to target creature, where X is ..." — cycling triggers like Gempalm Incinerator
-  [/^have (?:it|~) deal (\S+) damage to (target .+?), where x is (.+)$/, m => { const x = parseWhereX(m[3]); return x ? tgt({ type: 'damage', amount: x }, m[2]) : null; }],
+  [/^have (?:it|~) deal (\S+) damage to (.+?)(?:, where x is (.+))?$/, m => { const amount = m[3] ? parseWhereX(m[3]) : amt(m[1]); return amount != null && !Number.isNaN(amount) ? tgt({ type: 'damage', amount }, m[2]) : null; }],   // also Slice and Dice's "each creature"
   [/^~ fights (.+)$/, m => tgt({ type: 'fight' }, m[1])],
   [/^destroy all (.+?)(?:\. they can't be regenerated)?$/, m => { const k = T('all ' + m[1]); if (!k) return null; return [{ type: 'destroyAll', restrict: k.restrict }]; }],
   [/^destroy (target .+?)(?:\. it can't be regenerated)?$/, m => tgt({ type: 'destroy' }, m[1])],
@@ -596,6 +612,8 @@ export function parseEffects(text) {
   if (/^search your library for three cards and reveal them\. target opponent chooses one\. put that card into your hand and the rest into your graveyard(?:\. then shuffle)?$/.test(whole)) { out.effects.push({ type: 'intuition', sel: 'opponent' }); return out; }
   // Fact or Fiction.
   if (/^reveal the top five cards of your library\. an opponent separates those cards into two piles\. put one pile into your hand and the other into your graveyard$/.test(whole)) { out.effects.push({ type: 'fof' }); return out; }
+  // Stronghold Gambit: everyone reveals a card; creature cards hit the table.
+  if ((wm = whole.match(/^each player chooses a card in their hand\. then each player reveals (?:the|their) chosen card\. the owner of each creature card revealed this way( with the lowest mana value)? puts it onto the battlefield$/))) { out.effects.push({ type: 'gambit', lowest: !!wm[1] }); return out; }
   // Cursed Scroll.
   if ((wm = whole.match(/^choose a card name(?:, then|\.) reveal a card at random from your hand\. if that card has the chosen name, ~ deals (\d+) damage to any target$/))) { out.effects.push({ type: 'cursedScroll', amount: Number(wm[1]), sel: 'any', restrict: {} }); return out; }
   // Goblin Ringleader: reveal the top N, take the matching ones, bottom the rest.
@@ -690,6 +708,7 @@ function parseKeywordLine(line, def) {
       else def.notes.push(`${p} ignored`);
     }
     else if ((m = p.match(/^Rampage (\d+)$/))) found.push({ k: 'Rampage', n: Number(m[1]) });
+    else if (/^Morph (\{.+\}|\S.*)$/.test(p)) def.notes.push('Morph ignored: the creature is cast face up only');   // Dwarven Blastminer & co. keep their other abilities
     else if (UNSUPPORTED_KW.has(p) || UNSUPPORTED_KW.has(p.split(' ')[0])) { def.unsupportedReason = `${p} is not supported`; }
     else if ((m = p.match(/^Protection from (.+)$/))) {
       const from = m[1].toLowerCase();
@@ -727,6 +746,14 @@ function parseStatic(t) {
   if ((m = t.match(/^(.+?) and can't (block|attack|attack or block)$/))) { const inner = parseStatic(m[1]); if (!inner) return null; return [...inner, { type: 'static', kind: { block: 'cantBlock', attack: 'cantAttack', 'attack or block': 'cantAttackOrBlock' }[m[2]], scope: inner[0].scope }]; }
   // Crumbling Sanctuary: damage to a player exiles that many cards from their library instead.
   if (/^if damage would be dealt to a player, that player exiles that many cards from the top of their library instead$/.test(t)) return [{ type: 'static', kind: 'damageToLibrary', scope: { who: 'self' } }];
+  // Phantom Nishoba: damage is prevented and costs a +1/+1 counter instead.
+  if (/^if damage would be dealt to ~, prevent that damage\. remove a \+1\/\+1 counter from ~$/.test(t)) return [{ type: 'static', kind: 'phantom', scope: { who: 'self' } }];
+  if (/^if a player would gain life, that player gains no life instead$/.test(t)) return [{ type: 'static', kind: 'noLifeGain', scope: { who: 'self' } }];   // Sulfuric Vortex
+  if (/^players can cast spells and activate abilities only during their own turns$/.test(t)) return [{ type: 'static', kind: 'ownTurnOnly', scope: { who: 'self' } }];   // City of Solitude
+  if (/^creatures with power greater than the number of cards in your hand can't attack$/.test(t)) return [{ type: 'static', kind: 'bridge', scope: { who: 'self' } }];   // Ensnaring Bridge
+  if (/^all creatures lose all abilities and (?:are|have base power and toughness) 1\/1$/.test(t)) return [{ type: 'static', kind: 'humility', scope: { who: 'all', types: ['creature'] } }];   // Humility
+  if (/^activated abilities of artifacts can't be activated$/.test(t)) return [{ type: 'static', kind: 'nullRod', scope: { who: 'self' } }];   // Null Rod
+  if ((m = t.match(/^if you control a creature,? (?:and )?damage that would reduce your life total to less than (\d+) reduces it to \1 instead$/))) return [{ type: 'static', kind: 'lifeFloor', n: Number(m[1]), scope: { who: 'self' }, condition: { controlsCreature: true } }];   // Worship
   if ((m = t.match(/^as long as ~ is untapped, (.+)$/))) { const inner = parseStatic(m[1]); if (!inner) return null; for (const o of inner) o.condition = { selfUntapped: true }; return inner; }
   if ((m = t.match(/^(.+?)\. otherwise, it gets ([+-]\d+)\/([+-]\d+)$/))) { const inner = parseStatic(m[1]); if (!inner || !inner.every(o => o.condition)) return null; return [...inner, { type: 'static', kind: 'pt', p: Number(m[2]), t: Number(m[3]), scope: inner[0].scope, condition: { ...inner[0].condition, negate: true } }]; }
   if ((m = t.match(/^players can't untap more than (one|two) (creature|land|artifact)s? during their untap steps$/))) return [{ type: 'static', kind: 'untapLimit', what: m[2], n: NUM[m[1]], scope: { who: 'self' } }];
@@ -738,7 +765,9 @@ function parseStatic(t) {
   if ((m = t.match(/^enchanted creature loses (flying|first strike|trample)$/))) return [{ type: 'static', kind: 'loseKeyword', keyword: cap(m[1]), scope: { who: 'enchanted' } }];
   if ((m = t.match(/^creatures with (plains|island|swamp|mountain|forest)walk can be blocked as though they didn't have \1walk$/))) return [{ type: 'static', kind: 'ignoreLandwalk', land: cap(m[1]), scope: { who: 'self' } }];
   if (/^creatures with landwalk abilities can be blocked as though they didn't have those abilities$/.test(t)) return [{ type: 'static', kind: 'ignoreLandwalk', land: null, scope: { who: 'self' } }];
-  if ((m = t.match(/^(?:(.+?) )?spells?( you cast)? costs? \{(\d+)\} (more|less) to cast$/))) {
+  // Defense Grid: a tax that only applies off-turn.
+  if ((m = t.match(/^each spell costs \{(\d+)\} more to cast except during its controller's turn$/))) return [{ type: 'static', kind: 'costMod', delta: Number(m[1]), filter: {}, who: 'all', offTurn: true, scope: { who: 'self' } }];
+  if ((m = t.match(/^(?:(.+?) )?spells?( you cast| your opponents cast)? costs? \{(\d+)\} (more|less) to cast$/))) {
     const kinds = !m[1] ? null : m[1].split(/ and | or /).map(w => w.trim());
     const f = {};
     if (kinds) {
@@ -750,7 +779,7 @@ function parseStatic(t) {
       if (subs.some(k => !/^[a-z]+(?:-[a-z]+)?$/.test(k))) return null;
       if (subs.length) f.subtypes = subs.map(capSub);   // "Goblin spells you cast cost {1} less" (Goblin Warchief)
     }
-    return [{ type: 'static', kind: 'costMod', delta: (m[4] === 'more' ? 1 : -1) * Number(m[3]), filter: f, who: m[2] ? 'you' : 'all', scope: { who: 'self' } }];
+    return [{ type: 'static', kind: 'costMod', delta: (m[4] === 'more' ? 1 : -1) * Number(m[3]), filter: f, who: m[2] === ' your opponents cast' ? 'opp' : m[2] ? 'you' : 'all', scope: { who: 'self' } }];
   }
   if (/^you may play any number of lands on each of your turns$/.test(t)) return [{ type: 'static', kind: 'extraLands', any: true, who: 'you', scope: { who: 'self' } }];
   if (/^each player may play an additional land during each of their turns$/.test(t)) return [{ type: 'static', kind: 'extraLands', n: 1, who: 'all', scope: { who: 'self' } }];
@@ -837,6 +866,7 @@ function parseStatic(t) {
   }
   if ((m = t.match(/^~'s power and toughness are each equal to the number of (.+?) you control$/))) return [{ type: 'static', kind: 'cda', count: m[1], scope: { who: 'self' } }];
   if ((m = t.match(/^~'s power and toughness are each equal to the number of cards in your hand$/))) return [{ type: 'static', kind: 'cda', count: 'cards in hand', scope: { who: 'self' } }];
+  if ((m = t.match(/^~'s power and toughness are each equal to the total number of cards in all players' hands$/))) return [{ type: 'static', kind: 'cda', count: 'cards in all hands', scope: { who: 'self' } }];   // Multani, Maro-Sorcerer
   if ((m = t.match(/^~'s power is equal to the number of creature cards in all graveyards and its toughness is equal to that number plus 1$/))) return [{ type: 'static', kind: 'cda', count: 'creature cards in graveyards', plusT: 1, scope: { who: 'self' } }];
   if (/^~ enters(?: the battlefield)? tapped$/.test(t)) return [{ type: 'static', kind: 'entersTapped', scope: { who: 'self' } }];
   if ((m = t.match(/^~ enters(?: the battlefield)? with (\S+) ([+-]\d+\/[+-]\d+|[a-z]+) counters? on it$/))) return [{ type: 'static', kind: 'entersWithCounters', amount: amt(m[1]), counter: m[2], scope: { who: 'self' } }];
@@ -860,6 +890,7 @@ function parseCreatureFilter(text) {
 function parseScope(text) {
   const t = text.trim().toLowerCase();
   if (t === '~') return { who: 'self' };
+  if (t === 'all creatures of the chosen type') return { who: 'all', types: ['creature'], subtype: '$chosen' };   // Engineered Plague
   if (t === 'enchanted creature' || t === 'enchanted permanent' || t === 'enchanted land' || t === 'enchanted wall' || t === 'equipped creature') return { who: 'enchanted' };
   if (t === 'creatures you control' || t === 'all creatures you control') return { who: 'you', types: ['creature'] };
   if (t === 'all creatures' || t === 'creatures' || t === 'each creature') return { who: 'all', types: ['creature'] };
@@ -903,6 +934,9 @@ function parseAbilityLine(line, ctx) {
     // Undiscovered Paradise: the land bounces itself during your next untap step after being tapped for mana.
     let bounceOnUntap = false;
     body = body.replace(/\.?\s*during your next untap step, as you untap your permanents, return ~ to its owner's hand\.?$/i, () => { bounceOnUntap = true; return ''; });
+    // Volrath's Dungeon: "Any player may activate this ability but only during their turn" — only the controller can here.
+    let anyPlayerNote = null;
+    body = body.replace(/\.?\s*any player may activate this ability but only during their turn\.?$/i, () => { timing = 'yourTurn'; anyPlayerNote = 'only its controller can activate it (any player may, in the real rules)'; return ''; });
     const manaExtra = { ...(limit ? { limit } : {}), ...(sacWhenEmpty ? { sacWhenEmpty } : {}), ...(bounceOnUntap ? { bounceOnUntap: true } : {}) };
     // Metalworker: "{T}: Reveal any number of artifact cards in your hand. Add {C}{C} for each card revealed this way."
     let mw;
@@ -926,6 +960,7 @@ function parseAbilityLine(line, ctx) {
     if (/^add one mana of any color that a land an opponent controls could produce\.?$/.test(body)) return { type: 'mana', cost, produces: COLORS.slice(), amount: 1, notes: ['Approximated: adds any color, whatever lands the opponent controls'] };
     const eff = parseEffects(body);
     if (!eff.effects.length) return null;
+    if (anyPlayerNote) eff.notes.push('Approximated: ' + anyPlayerNote);
     const zone = eff.effects.some(e => e.type === 'selfFromGraveyard') ? 'graveyard' : undefined;   // Ashen Ghoul activates from the graveyard
     return { type: 'activated', cost, effects: eff.effects, optional: eff.optional, timing, limit, once: limit === 1, condition, zone, notes: eff.notes, text: line };
   }
@@ -1076,6 +1111,8 @@ function normalizeOracle(text, name, legendary) {
   // Legendary cards are often referred to by first name in older text.
   const first = short.split(/[, ]/)[0];
   if (legendary && first.length > 3 && /^[A-Z]/.test(first) && short.includes(' ')) t = t.replace(new RegExp("\\b" + esc(first) + "\\b(?![\\w'])", 'g'), '~');
+  if (legendary && first.length > 3 && /^[A-Z]/.test(first) && short.includes(' ')) t = t.replace(new RegExp("\\b" + esc(first) + "'s\\b", 'g'), "~'s");   // "Multani's power and toughness"
+
   t = t.replace(/\b(this creature|this permanent|this artifact|this enchantment|this land|this spell|this aura|this equipment|this card)\b/gi, '~');
   // A one-word name that is also the verb of its own text (Exile, Recall): restore the verb.
   if (!short.includes(' ')) t = t.replace(/(^|\. |\n)~ (target|all|each|up to|the top|two|three|x |a |an )/g, (m0, pre, w) => pre + short.toLowerCase() + ' ' + w);
