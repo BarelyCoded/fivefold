@@ -25,6 +25,7 @@ const CASES = [
   ['Keep Watch', d => hasType(d, 'draw') && d.spell.effects[0].amount?.calc === 'attackers', 'draw per attacker'],
   ['Tolarian Winds', d => hasType(d, 'discardDraw'), 'discard hand, draw that many'],
   ['Dream Cache', d => hasType(d, 'draw') && hasType(d, 'putBack'), 'draw three, put two back'],
+  ['Curiosity', d => (d.abilities||[]).some(a => a.type === 'triggered' && (a.effects||[]).some(e => e.type === 'draw')), 'aura: draw on combat damage'],
 ];
 
 let pass = 0, fail = 0;

@@ -862,6 +862,7 @@ function parseEvent(w) {
   if (/^a creature dealt damage by ~ this turn dies$/.test(w)) return { event: 'damagedByDies' };
   if (/^(?:a|another) creature enters(?: the battlefield)?(?: under your control)?$/.test(w)) return { event: 'anyCreatureEtb', yours: /your control/.test(w), other: /another/.test(w) };
   if (/^enchanted creature (?:deals damage|deals combat damage)$/.test(w)) return { event: 'enchantedDealsDamage' };
+  if (/^enchanted creature deals (?:combat )?damage to (?:an opponent|a player)$/.test(w)) return { event: 'enchantedDealsDamage' };
   if (/^enchanted creature deals (?:combat )?damage to you$/.test(w)) return { event: 'enchantedDealsDamage', toYou: true };
   if (/^enchanted creature dies$/.test(w)) return { event: 'enchantedDies' };
   if (/^enchanted creature attacks$/.test(w)) return { event: 'enchantedAttacks' };
