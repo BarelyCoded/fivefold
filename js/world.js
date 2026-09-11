@@ -821,7 +821,14 @@ function drawFigure(ctx, cx, cy, robe, robeL, hat, opts = {}) {
 // canvas in real device pixels so nothing is resampled by CSS, and paints labels at full resolution.
 export function present(canvas, frame, fw, fh, labels = [], opts = {}) {
   const avail = (canvas.parentElement?.clientWidth || fw * 2) - 8;
-  const k = opts.scale || (avail >= fw * 2 ? 2 : avail >= fw * 1.5 ? 1.5 : 1);
+  let k;
+  if (opts.scale) k = opts.scale;
+  else if (opts.fit) {
+    // Fill the box: scale continuously so the map is as large as it can be without overflowing the width
+    // or the viewport height, instead of snapping to 1x/1.5x/2x and leaving the width unfilled.
+    const availH = Math.max(260, (window.innerHeight || 800) - (opts.chrome || 96));
+    k = Math.max(0.75, Math.min(avail / fw, availH / fh));
+  } else k = avail >= fw * 2 ? 2 : avail >= fw * 1.5 ? 1.5 : 1;
   const dpr = window.devicePixelRatio || 1;
   const s = k * dpr;
   const cw = Math.round(fw * s), ch = Math.round(fh * s);
@@ -910,6 +917,6 @@ export function drawWorld(canvas, world, player, opts = {}) {
   const g = f.createRadialGradient(fw / 2, fh / 2, fh * 0.45, fw / 2, fh / 2, fw * 0.72);
   g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,.35)'); f.fillStyle = g; f.fillRect(0, 0, fw, fh);
 
-  present(canvas, frame, fw, fh, labels);
+  present(canvas, frame, fw, fh, labels, { fit: true });
   return { x: camPxX / PX, y: camPxY / PX, pxX: camPxX, pxY: camPxY, fw, fh };
 }
