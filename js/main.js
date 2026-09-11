@@ -1,5 +1,6 @@
 // Fivefold app controller: screens, world loop, persistence.
 import { parseList, importNames, defOf, forgetDefs, loadArtIndex, artFor, artCount, hasOwnArt, hasServer } from './collection.js';
+import { premodernLegality, BASIC_LANDS } from './format.js';
 import { fetchCards, cacheSize, cached as cachedCard, allCached } from './scryfall.js';
 import { COLORS, COLOR_NAME, manaHtml, statusLabel } from './cards.js';
 import { generateWorld, drawWorld, drawMinimap, tileAt, inBounds, cityAt, linkAt, enemyAt, stepEnemies, BIOME, TILE, VIEW, placeDungeons, dungeonAt, relocateDungeon, placeLandmarks, landmarkAt, placeSpecials, specialAt, placeMotes, moteAt, spawnMote, castleAt, WARDEN_HOLD, roadAt, ensureRoads, bazaarAt, spawnBazaar, lavaAt, placeLava, swampAt, placeSwamp, brambleAt, placeBrambles, fogAt, placeFog, saltAt, placeSalt } from './world.js';
@@ -15,6 +16,12 @@ import { unlock, sfx, music, toggleAudio, audioMuted } from './audio.js';
 import { LESSONS, TUTORIAL_CARDS } from './tutorial.js';
 
 const SAVE_KEY = 'ff.save.v1', COLL_KEY = 'ff.collection.v1', TIER_KEY = 'ff.tierOverrides.v1';
+const BREW_KEY = 'ff.brew.v1';   // constructed (Premodern) deck, separate from the adventure deck
+function loadBrew() { try { S.brew = JSON.parse(localStorage.getItem(BREW_KEY)) || {}; } catch { S.brew = {}; } S.brew.deck ||= {}; S.brew.side ||= {}; }
+function saveBrew() { try { localStorage.setItem(BREW_KEY, JSON.stringify(S.brew)); } catch {} }
+// The Premodern legal pool (by colour) and format (banned/rules), loaded lazily from content/.
+async function ensurePool() { if (S.pool !== undefined) return S.pool; try { S.pool = (await (await fetch('content/premodern-pool.json')).json()).pool; } catch { S.pool = null; } if (S.pool) { S.poolIndex = new Map(); for (const [col, list] of Object.entries(S.pool)) for (const c of list) S.poolIndex.set(c.name, { ...c, col }); } return S.pool; }
+async function ensureFmt() { if (S.fmt) return S.fmt; try { const f = await (await fetch('content/premodern.json')).json(); S.fmt = { banned: new Set(f.banned || []), rules: f.rules, sets: f.sets }; } catch { S.fmt = { banned: new Set(), rules: {}, sets: [] }; } return S.fmt; }
 const BOSS_LINKS = 5;   // mana links the Usurper must bind to win
 loadAtlas();
 const BASICS = { W: 'Plains', U: 'Island', B: 'Swamp', R: 'Mountain', G: 'Forest' };
@@ -79,6 +86,7 @@ function save() {
 }
 function load() {
   try { S.collection = JSON.parse(localStorage.getItem(COLL_KEY) || '{}'); } catch { S.collection = {}; }
+  loadBrew();
   try { S.game = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); } catch { S.game = null; }
   try { S.tierOverrides = JSON.parse(localStorage.getItem(TIER_KEY) || '{}') || {}; } catch { S.tierOverrides = {}; }
 }
@@ -772,6 +780,7 @@ function nearestTown(g) {
   return (standing.length ? standing : cs).slice().sort((a, b) => d(a) - d(b))[0];
 }
 function finishDuel(winner) {
+  if (S.duel?.brew) { S.duel = null; toast(winner === 0 ? 'You win the sparring match.' : winner === 1 ? 'Your sparring partner wins.' : 'The match ends.'); go('brew'); return; }
   const g = S.game; const { duel, tpl, ante, roamUid, dungeon, tutorial } = S.duel; S.duel = null;
   sfx(winner === 0 ? 'win' : 'lose');
   if (tutorial) {
@@ -1053,7 +1062,7 @@ function renderTop() {
 function render() {
   app.classList.toggle('full', S.screen === 'duel' || S.screen === 'mpduel');
   renderTop();
-  const views = { title, collection, deck, map, city, bazaar, duel, result, end, dungeon, tutorial, tiers, mplobby, mpdeck, mpduel };
+  const views = { title, collection, deck, map, city, bazaar, duel, result, end, dungeon, tutorial, tiers, mplobby, mpdeck, mpduel, brew };
   music({ title: 'title', tutorial: 'title', collection: 'map', deck: 'map', map: 'map', result: 'map', end: 'title', city: 'city', bazaar: 'city', duel: 'duel', dungeon: 'dungeon' }[S.screen] || 'title');
   // The map keeps its canvas between steps (re-creating a full-size canvas every keypress is what made walking feel slow).
   const keepMap = S.screen === 'map' && !!app.querySelector('.mapscreen #map');
@@ -1073,6 +1082,7 @@ function title() {
     <div class="box learn">
       <div><h2>New to Magic?</h2><p>Eight short lessons cover everything a duel needs: lands, mana, creatures, combat and spells. Then fight a practice duel with hints that read the table and tell you what to do next.</p></div>
       <div class="btnrow"><button class="btn primary" data-go="tutorial">Learn to play</button><button class="btn" id="b-practice">Practice duel</button><button class="btn" id="b-multiplayer">Multiplayer (1v1)</button></div>
+        <div class="btnrow"><button class="btn" data-go="brew">Premodern deck builder</button></div>
     </div>
     <div class="cols">
       <form id="newgame" class="box">
@@ -1225,6 +1235,92 @@ function deckStatsHtml(deckObj) {
     </div>` : '<p class="small statmsg">Colored spells show your color split here.</p>'}
   </div>`;
   return `<div class="deckstats">${curveHtml}${pieHtml}</div>${deckAdvice({ size, lands, spells, creatures, others: spells - creatures, curve, avg })}`;
+}
+// ---- constructed Premodern deck builder -----------------------------------------------
+const BREW_COLS = [['W','White'],['U','Blue'],['B','Black'],['R','Red'],['G','Green'],['C','Colorless'],['M','Multi'],['L','Land']];
+const brewCount = o => Object.values(o || {}).reduce((a, b) => a + b, 0);
+function brewLegality() {
+  const legal = S.poolIndex ? new Set(S.poolIndex.keys()) : null;
+  return premodernLegality(S.brew.deck, S.brew.side, { legal, banned: S.fmt.banned, rules: S.fmt.rules, basics: BASIC_LANDS });
+}
+function brewAdd(name, where, n) {
+  const o = S.brew[where]; const cur = o[name] || 0;
+  if (n > 0 && !BASIC_LANDS.has(name)) { const other = (where === 'deck' ? S.brew.side : S.brew.deck)[name] || 0; if (cur + other >= (S.fmt.rules?.maxCopies || 4)) { toast(`4 copies of ${name} is the maximum.`); return; } }
+  const v = Math.max(0, cur + n); if (v) o[name] = v; else delete o[name];
+  saveBrew(); brew();
+}
+function brew() {
+  if (S.pool === undefined || !S.fmt) { app.innerHTML = '<section class="screen"><div class="box"><h2>Premodern deck builder</h2><p class="small">Loading the card pool…</p></div></section>'; Promise.all([ensurePool(), ensureFmt()]).then(() => { if (S.screen === 'brew') brew(); }); return; }
+  if (!S.pool) { app.innerHTML = `<section class="screen"><div class="box"><h2>Premodern deck builder</h2><p class="small">The card pool has not been built yet. Run <code>node tools/build-catalog.mjs</code>.</p><button class="btn" data-go="title">Back</button></div></section>`; return; }
+  const q = (S.brewQ || '').toLowerCase(), cols = S.brewCols || [], cmc = S.brewCmc, type = S.brewType || '', showBad = !!S.brewBad, target = S.brewTarget || 'deck';
+  // filter the flat pool
+  const matches = [];
+  for (const [col, list] of Object.entries(S.pool)) {
+    if (cols.length && !cols.includes(col)) continue;
+    for (const c of list) {
+      if (q && !c.name.toLowerCase().includes(q)) continue;
+      if (cmc != null && (cmc === 7 ? c.cmc < 7 : c.cmc !== cmc)) continue;
+      if (type && c.t !== type) continue;
+      if (!showBad && !c.supported) continue;
+      matches.push({ ...c, col });
+    }
+  }
+  matches.sort((a, b) => a.cmc - b.cmc || a.name.localeCompare(b.name));
+  const CAP = 240; const shown = matches.slice(0, CAP);
+  const badge = c => c.supported ? (c.approx ? '<span class="bw-b approx" title="The rules engine approximates this card">≈</span>' : '') : '<span class="bw-b unsup" title="The rules engine cannot play this card yet">✖</span>';
+  const dot = col => `<i class="dot c-${col === 'M' ? 'gold' : col}"></i>`;
+  const poolRow = c => `<div class="bw-row"><span class="bw-cmc">${c.cmc}</span>${dot(c.col)}<span class="bw-nm" data-preview="${esc(c.name)}">${esc(c.name)}</span>${badge(c)}<span class="bw-add"><button class="btn tiny" data-brewadd="${esc(c.name)}">+</button><button class="btn tiny ghost" data-brewsb="${esc(c.name)}" title="Add to sideboard">SB</button></span></div>`;
+  // decklist grouped by type
+  const idx = S.poolIndex;
+  const groupOf = n => { const e = idx.get(n); if (!e) return BASIC_LANDS.has(n) ? 'Lands' : 'Other'; return e.t === 'creature' ? 'Creatures' : e.t === 'land' ? 'Lands' : (e.t === 'instant' || e.t === 'sorcery') ? 'Spells' : e.t === 'artifact' || e.t === 'enchantment' ? 'Artifacts & Enchantments' : 'Other'; };
+  const GROUPS = ['Creatures', 'Spells', 'Artifacts & Enchantments', 'Other', 'Lands'];
+  const deckList = which => {
+    const o = S.brew[which]; const byG = {};
+    for (const [n, c] of Object.entries(o)) (byG[groupOf(n)] ||= []).push([n, c]);
+    return GROUPS.filter(g => byG[g]).map(g => { const rows = byG[g].sort((a, b) => (idx.get(a[0])?.cmc || 0) - (idx.get(b[0])?.cmc || 0) || a[0].localeCompare(b[0])); const gn = rows.reduce((a, r) => a + r[1], 0); return `<div class="bw-grp"><div class="bw-grp-h">${g} · ${gn}</div>${rows.map(([n, c]) => `<div class="bw-row"><span class="bw-q">${c}</span><span class="bw-nm" data-preview="${esc(n)}">${esc(n)}</span><span class="bw-add"><button class="btn tiny" data-brewsub-${which}="${esc(n)}">−</button><button class="btn tiny" data-brewadd-${which}="${esc(n)}">+</button></span></div>`).join('')}</div>`; }).join('') || '<p class="small">Empty.</p>';
+  };
+  const leg = brewLegality();
+  const main = brewCount(S.brew.deck), side = brewCount(S.brew.side);
+  const status = leg.legal && !leg.warnings.length ? '<span class="bw-ok">Legal ✓</span>' : leg.errors.length ? `<span class="bw-bad">Illegal</span>` : '<span class="bw-warn">Legal with notes</span>';
+  const issues = [...leg.errors.map(e => `<li class="err">${esc(e)}</li>`), ...leg.warnings.map(w => `<li class="warn">${esc(w)}</li>`)].join('');
+  app.innerHTML = `<section class="screen brewscreen">
+    <div class="bw-head"><h2>Premodern deck builder</h2><div class="bw-status">${status} · <b>${main}</b> main, <b>${side}</b> side ${issues ? `<button class="btn tiny ghost" id="bw-issues">${leg.errors.length + leg.warnings.length} note${leg.errors.length + leg.warnings.length > 1 ? 's' : ''}</button>` : ''}</div>
+      <div class="bw-actions"><button class="btn small" id="bw-import">Import</button><button class="btn small" id="bw-export">Export</button><button class="btn small" id="bw-playtest">Playtest</button><button class="btn small ghost" id="bw-clear">Clear</button><button class="btn small ghost" data-go="title">Done</button></div></div>
+    ${issues && S.brewShowIssues ? `<ul class="bw-issues">${issues}</ul>` : ''}
+    ${S.brewImport ? `<div class="bw-importbox"><textarea id="bw-imp" rows="6" placeholder="Paste a decklist: one card per line, e.g. &#10;4 Lightning Bolt&#10;24 Mountain&#10;&#10;Sideboard&#10;3 Pyroblast"></textarea><div><button class="btn small" id="bw-imp-go">Load into deck</button><button class="btn small ghost" id="bw-imp-cancel">Cancel</button></div></div>` : ''}
+    <div class="bw-cols">
+      <div class="box bw-pool">
+        <div class="bw-filters">
+          <input id="bw-q" placeholder="Search ${matches.length} cards…" value="${esc(S.brewQ || '')}">
+          <div class="bw-chips">${BREW_COLS.map(([k, l]) => `<button class="bw-chip${cols.includes(k) ? ' on' : ''}" data-brewcol="${k}">${l}</button>`).join('')}</div>
+          <div class="bw-chips">${[0,1,2,3,4,5,6,7].map(n => `<button class="bw-chip${cmc === n ? ' on' : ''}" data-brewcmc="${n}">${n === 7 ? '7+' : n}</button>`).join('')}${['creature','instant','sorcery','artifact','enchantment','land'].map(t => `<button class="bw-chip${type === t ? ' on' : ''}" data-brewtype="${t}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}<button class="bw-chip${showBad ? ' on' : ''}" data-brewbad="1" title="Show cards the rules engine can't play yet">Show unplayable</button><button class="bw-chip ghost" data-brewclear="1">Reset</button></div>
+        </div>
+        <div class="bw-list">${shown.map(poolRow).join('') || '<p class="small">No cards match.</p>'}${matches.length > CAP ? `<p class="small bw-more">Showing ${CAP} of ${matches.length} — refine your search.</p>` : ''}</div>
+      </div>
+      <div class="box bw-deck">
+        <div class="rowhead"><h3>Deck · ${main}</h3><span class="small">basics: ${COLORS.map(c => `${BASICS[c]} <button class="btn tiny" data-brewsub-deck="${BASICS[c]}">−</button><button class="btn tiny" data-brewadd-deck="${BASICS[c]}">+</button>`).join(' ')}</span></div>
+        <div class="bw-list">${deckList('deck')}</div>
+        <div class="rowhead"><h3>Sideboard · ${side}</h3></div>
+        <div class="bw-list side">${side ? deckList('side') : '<p class="small">Empty.</p>'}</div>
+      </div>
+    </div></section>`;
+}
+// A goldfish/mirror duel to test a constructed deck: your deck against a copy of itself, 20 life, no ante.
+async function startBrewDuel() {
+  await ensurePool();
+  const deck = S.brew.deck;
+  const supported = {}, unsup = [];
+  for (const [n, c] of Object.entries(deck)) { const e = S.poolIndex?.get(n); if (e && !e.supported && !BASIC_LANDS.has(n)) unsup.push(n); else supported[n] = c; }
+  if (brewCount(supported) < 40) { toast('Add at least 40 playable cards to playtest.'); return; }
+  setBusy('Fetching card data…');
+  try { await fetchCards(Object.keys(supported), (d, t) => setBusy(`Fetching cards… ${d}/${t}`), { skipArt: true }); forgetDefs(); } catch (e) { setBusy('Could not load cards: ' + e.message); return; }
+  const exp = () => expandDeck(supported).filter(d => d && d.kind !== 'unsupported');
+  const color = (() => { const p = {}; for (const [n, c] of Object.entries(supported)) { const e = S.poolIndex?.get(n); if (e && 'WUBRG'.includes(e.col)) p[e.col] = (p[e.col] || 0) + c; } return Object.entries(p).sort((a, b) => b[1] - a[1])[0]?.[0] || 'G'; })();
+  const tpl = { name: 'Sparring Partner', color, tier: 1, boss: false, deck: supported };
+  const d = new Duel({ player: { name: S.game?.name || 'You', deck: exp(), life: 20 }, ai: { name: 'Sparring Partner', deck: exp(), life: 20, ai: true }, hooks: aiHooks, rules: {} });
+  S.duel = { duel: d, tpl, ante: null, roamUid: null, dungeon: null, tutorial: true, brew: true };
+  if (unsup.length) toast(`${unsup.length} unsupported card${unsup.length > 1 ? 's' : ''} left out of the playtest.`);
+  setBusy(null); go('duel');
 }
 function deck() {
   const g = S.game; if (!g) return title();
@@ -1693,6 +1789,47 @@ document.addEventListener('click', ev => {
   }
 });
 document.addEventListener('input', ev => { if (ev.target.id === 'dfilter') { S.deckFilter = ev.target.value; deck(); document.getElementById('dfilter').focus(); const el = document.getElementById('dfilter'); el.setSelectionRange(el.value.length, el.value.length); } });
+// ---- constructed deck builder events ----
+function brewImport(text) {
+  const parts = text.split(/^\s*sideboard\s*:?\s*$/im);
+  const toMap = t => { const m = {}; for (const { name, count } of parseList(t)) m[name] = (m[name] || 0) + count; return m; };
+  S.brew = { deck: toMap(parts[0] || ''), side: toMap(parts[1] || '') };
+  saveBrew(); S.brewImport = false; brew();
+  const bad = [...Object.keys(S.brew.deck), ...Object.keys(S.brew.side)].filter(n => !BASIC_LANDS.has(n) && S.poolIndex && !S.poolIndex.has(n));
+  if (bad.length) toast(`${bad.length} name${bad.length > 1 ? 's' : ''} not in the Premodern pool: ${bad.slice(0, 3).join(', ')}${bad.length > 3 ? '…' : ''}`);
+}
+function brewExport() {
+  const fmt = o => Object.entries(o).sort((a, b) => a[0].localeCompare(b[0])).map(([n, c]) => `${c} ${n}`).join('\n');
+  let txt = fmt(S.brew.deck); if (brewCount(S.brew.side)) txt += `\n\nSideboard\n${fmt(S.brew.side)}`;
+  try { navigator.clipboard?.writeText(txt).then(() => toast('Decklist copied to clipboard.'), () => {}); } catch {}
+  S.brewImport = true; brew(); const el = document.getElementById('bw-imp'); if (el) el.value = txt;
+}
+document.addEventListener('input', ev => { if (ev.target.id === 'bw-q') { S.brewQ = ev.target.value; brew(); const el = document.getElementById('bw-q'); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } } });
+document.addEventListener('click', ev => {
+  const el = ev.target.closest('[data-brewadd],[data-brewsb],[data-brewadd-deck],[data-brewsub-deck],[data-brewadd-side],[data-brewsub-side],[data-brewcol],[data-brewcmc],[data-brewtype],[data-brewbad],[data-brewclear],#bw-issues,#bw-import,#bw-export,#bw-playtest,#bw-clear,#bw-imp-go,#bw-imp-cancel');
+  if (!el) return;
+  const ds = el.dataset;
+  if (ds.brewadd) return brewAdd(ds.brewadd, 'deck', 1);
+  if (ds.brewsb) return brewAdd(ds.brewsb, 'side', 1);
+  if (ds.brewaddDeck) return brewAdd(ds.brewaddDeck, 'deck', 1);
+  if (ds.brewsubDeck) return brewAdd(ds.brewsubDeck, 'deck', -1);
+  if (ds.brewaddSide) return brewAdd(ds.brewaddSide, 'side', 1);
+  if (ds.brewsubSide) return brewAdd(ds.brewsubSide, 'side', -1);
+  if (ds.brewcol) { S.brewCols = S.brewCols || []; const i = S.brewCols.indexOf(ds.brewcol); if (i >= 0) S.brewCols.splice(i, 1); else S.brewCols.push(ds.brewcol); return brew(); }
+  if (ds.brewcmc != null) { const n = Number(ds.brewcmc); S.brewCmc = S.brewCmc === n ? null : n; return brew(); }
+  if (ds.brewtype != null) { S.brewType = S.brewType === ds.brewtype ? '' : ds.brewtype; return brew(); }
+  if (ds.brewbad != null) { S.brewBad = !S.brewBad; return brew(); }
+  if (ds.brewclear != null) { S.brewQ = ''; S.brewCols = []; S.brewCmc = null; S.brewType = ''; S.brewBad = false; return brew(); }
+  switch (el.id) {
+    case 'bw-issues': S.brewShowIssues = !S.brewShowIssues; return brew();
+    case 'bw-import': S.brewImport = !S.brewImport; return brew();
+    case 'bw-imp-cancel': S.brewImport = false; return brew();
+    case 'bw-imp-go': return brewImport(document.getElementById('bw-imp')?.value || '');
+    case 'bw-export': return brewExport();
+    case 'bw-clear': if (confirm('Clear the whole deck and sideboard?')) { S.brew = { deck: {}, side: {} }; saveBrew(); brew(); } return;
+    case 'bw-playtest': return void startBrewDuel().catch(e => setBusy('Playtest failed: ' + e.message));
+  }
+});
 // ---- power-tier screen: re-ranking, filters, export ----
 document.addEventListener('input', ev => { if (ev.target.id === 'tier-q') { S.tierSearch = ev.target.value; tiers(); const el = document.getElementById('tier-q'); el.focus(); el.setSelectionRange(el.value.length, el.value.length); } });
 document.addEventListener('change', ev => {

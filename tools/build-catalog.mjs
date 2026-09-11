@@ -40,7 +40,9 @@ export function buildPool() {
     const d = compile(trim(raw));
     const supported = d.kind !== 'unsupported';
     const approx = supported && (d.notes || []).some(n => n.startsWith('Ignored: '));
-    pool[bucketOf(d)].push({ name: raw.name, cmc: d.cmc ?? 0, supported, approx });
+    const TYPES = ['Creature', 'Land', 'Instant', 'Sorcery', 'Artifact', 'Enchantment', 'Planeswalker'];
+    const t = (TYPES.find(x => d.types.includes(x)) || d.types[0] || 'Other').toLowerCase();
+    pool[bucketOf(d)].push({ name: raw.name, cmc: d.cmc ?? 0, t, supported, approx });
   }
   for (const k of Object.keys(pool)) pool[k].sort((a, b) => a.cmc - b.cmc || a.name.localeCompare(b.name));
   const missing = fmt.sets.filter(c => !present.has(c));
