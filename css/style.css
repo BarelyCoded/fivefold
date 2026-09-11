@@ -119,6 +119,11 @@ tr.st-unsupported td:nth-child(7), tr.st-unsupported td:nth-child(3), tr.st-miss
 
 /* rules-core duel additions */
 .stack { background: #2a2320; border: 1px solid #6a5a3a; border-radius: 6px; padding: 6px 10px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+/* The stack floats over the middle of the board so casting doesn't inflate the divider and shove the zones.
+   The container ignores clicks (so the board underneath stays interactive); the panel itself takes them. */
+.stack-overlay { position: absolute; left: 50%; top: 46%; transform: translate(-50%, -50%); z-index: 6; pointer-events: none; max-width: 92%; }
+.stack-overlay .stack { pointer-events: auto; background: rgba(34, 28, 24, .95); border-color: #a07c48; box-shadow: 0 12px 34px rgba(0,0,0,.7), 0 0 0 1px rgba(0,0,0,.4); animation: stackIn .18s ease-out; }
+@keyframes stackIn { from { opacity: 0; transform: translateY(6px) scale(.97); } to { opacity: 1; transform: none; } }
 .stack-title { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--gold); }
 .stack-item { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 4px 8px; font-size: 13px; }
 .stack-item span { color: var(--ink3); font-size: 11px; }

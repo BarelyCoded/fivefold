@@ -424,13 +424,14 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
           <div class="field"><div class="row perms">${permsOf(ai)}</div><div class="row creatures">${creaturesOf(ai)}</div></div>
           ${landStack(ai)}
         </section>
-        <div class="divider"><span class="div-turn">Turn ${duel.turn}</span>${stackHtml()}${ante ? `<span class="ante">Ante: ${esc(ante.mine)} vs ${esc(ante.theirs)}</span>` : ''}</div>
+        <div class="divider"><span class="div-turn">Turn ${duel.turn}</span>${ante ? `<span class="ante">Ante: ${esc(ante.mine)} vs ${esc(ante.theirs)}</span>` : ''}</div>
         <section class="zone mine">
           ${playerBox(me)}
           <div class="field"><div class="row creatures">${creaturesOf(me)}</div><div class="row perms">${permsOf(me)}</div></div>
           ${landStack(me)}
         </section>
         <section class="hand">${me.hand.map(handCard).join('')}</section>
+        ${duel.stack.length ? `<div class="stack-overlay">${stackHtml()}</div>` : ''}
       </div>
       <aside class="panel">
         <div class="log">${duel.log.slice(-18).map(l => `<div>${esc(l)}</div>`).join('')}</div>
