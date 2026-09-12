@@ -385,6 +385,19 @@ svg.arrows { position: absolute; left: 0; top: 0; pointer-events: none; z-index:
 .modal .mbtns .btn { max-width: 100%; }
 
 /* ---- learn to play ---------------------------------------------------------------- */
+.msg.notice { background: #253a33; border-color: var(--accent); color: var(--ink); }
+.home .modes { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+@media (max-width: 900px) { .home .modes { grid-template-columns: 1fr; } }
+.home .mode { position: relative; overflow: hidden; margin-bottom: 0; padding: 20px 22px 16px; border-top: 3px solid var(--line); }
+.home .mode-adv { border-top-color: #7fb069; } .home .mode-con { border-top-color: var(--gold); }
+.home .mode-k { font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--ink3); margin-bottom: 6px; }
+.home .mode h2 { margin-top: 0; font-size: 24px; }
+.home .mode p { color: var(--ink2); max-width: 60ch; }
+.home .mode .btnrow { margin: 14px 0 6px; }
+.home .mode .small { color: var(--ink3); margin: 0; }
+.home .gamelogs { margin-top: 8px; }
+.adventure .rowhead { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.adventure .rowhead h1 { margin-bottom: 4px; }
 .title .learn { display: flex; align-items: center; justify-content: space-between; gap: 24px; flex-wrap: wrap; border-color: var(--accent); }
 .title .learn h2 { margin-top: 0; }
 .title .learn p { margin: 0; color: var(--ink2); max-width: 70ch; }

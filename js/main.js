@@ -1057,20 +1057,31 @@ async function doImport(text) {
 onAtlas(() => { if (S.screen === 'map' || S.screen === 'dungeon') render(); });
 function go(screen) { S.screen = screen; S.modal = null; hidePreview(); window.scrollTo(0, 0); render(); }
 
+// Which half of the app a screen belongs to: the adventure campaign, constructed Premodern play, or neither (home, lessons).
+function modeOf() {
+  const sc = S.screen;
+  if (['brew', 'mplobby', 'mpdeck', 'mpduel'].includes(sc) || (sc === 'duel' && S.duel?.brew)) return 'constructed';
+  if (['adventure', 'map', 'collection', 'deck', 'city', 'bazaar', 'result', 'end', 'dungeon', 'tiers'].includes(sc) || (sc === 'duel' && !S.duel?.tutorial)) return 'adventure';
+  return null;
+}
 function renderTop() {
-  const g = S.game; const inDuel = S.screen === 'duel';
-  const tabs = [['map', 'Map'], ['collection', 'Collection'], ['deck', 'Deck']];
-  topbar.innerHTML = `<div class="brand" data-go="title">Fivefold <span>demo</span></div>
-    <nav>${tabs.map(([k, l]) => `<button class="tab${S.screen === k ? ' on' : ''}" data-go="${k}" ${inDuel || (k !== 'collection' && !g) ? 'disabled' : ''}>${l}</button>`).join('')}</nav>
-    ${g ? `<div class="stats"><span title="Life">♥ ${g.player.life}/${g.player.maxLife}</span><span title="Gold">◎ ${g.player.gold}</span><span title="Food" class="${g.player.food === 0 ? 'starving' : ''}">✦ ${g.player.food}${g.player.food === 0 ? ' STARVING' : ''}</span><span title="Day">Day ${g.player.day}</span><span title="Usurper's links">Links ${g.boss.links}/${BOSS_LINKS}</span></div>${g && totalAmulets() ? `<div class="amurow" title="Amulets">${amuletGems()}</div>` : ''}` : ''}
-    <button class="tab audio${g ? '' : ' solo'}" data-audio title="${audioMuted() ? 'Sound is off. Click to turn it on.' : 'Sound is on. Click to mute.'}">${audioMuted() ? '🔇' : '🔊'}</button>`;
+  const g = S.game; const inDuel = S.screen === 'duel' || S.screen === 'mpduel'; const mode = modeOf();
+  const tabs = mode === 'adventure' ? [['adventure', 'Adventure'], ['map', 'Map'], ['collection', 'Collection'], ['deck', 'Deck']]
+    : mode === 'constructed' ? [['brew', 'Deck builder'], ['mplobby', 'Multiplayer']] : [];
+  const tab = ([k, l]) => k === 'mplobby'
+    ? `<button class="tab${S.screen.startsWith('mp') ? ' on' : ''}" id="b-multiplayer" ${inDuel ? 'disabled' : ''}>${l}</button>`
+    : `<button class="tab${S.screen === k ? ' on' : ''}" data-go="${k}" ${inDuel || (['map', 'deck'].includes(k) && !g) ? 'disabled' : ''}>${l}</button>`;
+  topbar.innerHTML = `<div class="brand" data-go="title">Fivefold <span>${mode === 'adventure' ? 'adventure' : mode === 'constructed' ? 'premodern' : 'demo'}</span></div>
+    <nav>${tabs.map(tab).join('')}</nav>
+    ${g && mode === 'adventure' ? `<div class="stats"><span title="Life">♥ ${g.player.life}/${g.player.maxLife}</span><span title="Gold">◎ ${g.player.gold}</span><span title="Food" class="${g.player.food === 0 ? 'starving' : ''}">✦ ${g.player.food}${g.player.food === 0 ? ' STARVING' : ''}</span><span title="Day">Day ${g.player.day}</span><span title="Usurper's links">Links ${g.boss.links}/${BOSS_LINKS}</span></div>${g && totalAmulets() ? `<div class="amurow" title="Amulets">${amuletGems()}</div>` : ''}` : ''}
+    <button class="tab audio${g && mode === 'adventure' ? '' : ' solo'}" data-audio title="${audioMuted() ? 'Sound is off. Click to turn it on.' : 'Sound is on. Click to mute.'}">${audioMuted() ? '🔇' : '🔊'}</button>`;
 }
 
 function render() {
   app.classList.toggle('full', S.screen === 'duel' || S.screen === 'mpduel');
   renderTop();
-  const views = { title, collection, deck, map, city, bazaar, duel, result, end, dungeon, tutorial, tiers, mplobby, mpdeck, mpduel, brew };
-  music({ title: 'title', tutorial: 'title', collection: 'map', deck: 'map', map: 'map', result: 'map', end: 'title', city: 'city', bazaar: 'city', duel: 'duel', dungeon: 'dungeon' }[S.screen] || 'title');
+  const views = { title, adventure, collection, deck, map, city, bazaar, duel, result, end, dungeon, tutorial, tiers, mplobby, mpdeck, mpduel, brew };
+  music({ title: 'title', adventure: 'title', tutorial: 'title', collection: 'map', deck: 'map', map: 'map', result: 'map', end: 'title', city: 'city', bazaar: 'city', duel: 'duel', dungeon: 'dungeon' }[S.screen] || 'title');
   // The map keeps its canvas between steps (re-creating a full-size canvas every keypress is what made walking feel slow).
   const keepMap = S.screen === 'map' && !!app.querySelector('.mapscreen #map');
   if (keepMap) { for (const el of app.querySelectorAll('.overlay, .toast')) el.remove(); } else app.innerHTML = '';
@@ -1080,18 +1091,45 @@ function render() {
   setBusy(S.busy);
 }
 
+// Home: the two ways to play. Adventure is the story campaign played with the cards you own; Constructed is the
+// Premodern deck builder with playtests against the AI decks and 1v1 multiplayer.
 function title() {
-  const g = S.game;
-  app.innerHTML = `<section class="screen title">
+  const g = S.game; if (S.decks === undefined) loadDecks();
+  const decks = S.decks?.length || 0, ai = S.aiDecks ? Object.keys(S.aiDecks).length : 0;
+  app.innerHTML = `<section class="screen title home">
     <h1>Fivefold</h1>
-    <p class="lede">A generation ago a wandering mage with a weak deck broke five corrupt guilds and drove a planeswalker back beyond the barrier. The barrier healed crooked. Mana pools and drains in tides now, the five Orders hoard the links that pin the cracks shut, and something that came through before the seal closed has spent thirty years whispering to their Wardens. The old Wanderer is dying. The letter, and the title, are yours.</p>
-    <p class="lede small">Walk a world where geography is color. Duel the mages who roam it with the cards you actually own. Wager cards you cannot buy back. Find which Warden the Usurper is wearing before the Sealing completes.</p>
+    <p class="lede">Magic: The Gathering in the browser, two ways: a story campaign you walk across a world of colour with the cards you actually own, or Premodern constructed decks to build, playtest against the AI and play against a friend.</p>
+    <div class="modes">
+      <div class="box mode mode-adv">
+        <div class="mode-k">Adventure</div>
+        <h2>Walk the world, duel with the cards you own</h2>
+        <p>A journey across five realms: roam, duel the mages you meet, wager cards you cannot buy back, and find which Warden the Usurper is wearing before the Sealing completes. Starts with a ready-made 40-card deck; grow it from your own collection.</p>
+        <div class="btnrow">${g ? `<button class="btn primary" data-go="${g.status === 'playing' ? 'map' : 'end'}">Continue${g.status === 'playing' ? ` — ${esc(g.name)}, day ${g.player.day}` : ''}</button><button class="btn" data-go="adventure">New journey</button>` : '<button class="btn primary" data-go="adventure">Begin a journey</button>'}<button class="btn ghost" data-go="collection">Collection</button></div>
+        <p class="small">${g ? `${g.wins} wins, ${g.losses} losses${g.status !== 'playing' ? ' · this journey is over' : ''}.` : 'No journey under way.'} ${Object.values(S.collection).reduce((a, b) => a + b, 0)} cards in your collection.</p>
+      </div>
+      <div class="box mode mode-con">
+        <div class="mode-k">Constructed · Premodern</div>
+        <h2>Build a Premodern deck and play it</h2>
+        <p>The full Premodern card pool (Fourth Edition to Scourge) with the banned list enforced. Build or import a 60-card deck with a sideboard, save it to your list, playtest it against real decks from the metagame, or play a friend 1v1.</p>
+        <div class="btnrow"><button class="btn primary" data-go="brew">Deck builder</button><button class="btn" id="b-my-decks">My decks${decks ? ` (${decks})` : ''}</button><button class="btn" id="b-multiplayer">Multiplayer (1v1)</button></div>
+        <p class="small">${decks ? `${decks} saved deck${decks === 1 ? '' : 's'}` : 'No saved decks yet'}${ai ? ` · ${ai} AI decks to play against` : ' · AI decks from the Premodern metagame to play against'}.</p>
+      </div>
+    </div>
     <div class="box learn">
       <div><h2>New to Magic?</h2><p>Eight short lessons cover everything a duel needs: lands, mana, creatures, combat and spells. Then fight a practice duel with hints that read the table and tell you what to do next.</p></div>
-      <div class="btnrow"><button class="btn primary" data-go="tutorial">Learn to play</button><button class="btn" id="b-practice">Practice duel</button><button class="btn" id="b-multiplayer">Multiplayer (1v1)</button></div>
-        <div class="btnrow"><button class="btn" data-go="brew">Premodern deck builder</button></div>
-        <p class="small gamelogs">Games are logged to improve the rules engine (your plays and the engine's log — nothing personal). <b>${listGameLogs().length}</b> kept in this browser${unsentCount() ? `, ${unsentCount()} waiting to send` : ''}${hasServer() ? '; the server also keeps a copy in <code>logs/games/</code>' : ''}. <button class="btn tiny" id="b-logs-export" ${listGameLogs().length ? '' : 'disabled'}>Export</button> <button class="btn tiny ghost" id="b-logs-clear" ${listGameLogs().length ? '' : 'disabled'}>Clear</button> <a class="small" href="admin.html">Match log (admin)</a></p>
+      <div class="btnrow"><button class="btn primary" data-go="tutorial">Learn to play</button><button class="btn" id="b-practice">Practice duel</button></div>
     </div>
+    <p class="small gamelogs">Games are logged to improve the rules engine (your plays and the engine's log — nothing personal). <b>${listGameLogs().length}</b> kept in this browser${unsentCount() ? `, ${unsentCount()} waiting to send` : ''}${hasServer() ? '; the server also keeps a copy in <code>logs/games/</code>' : ''}. <button class="btn tiny" id="b-logs-export" ${listGameLogs().length ? '' : 'disabled'}>Export</button> <button class="btn tiny ghost" id="b-logs-clear" ${listGameLogs().length ? '' : 'disabled'}>Clear</button> <a class="small" href="admin.html">Match log (admin)</a> · <button class="btn tiny ghost" id="b-reset-all">Reset everything</button></p>
+    <footer class="legal">Unofficial fan project under the Wizards of the Coast Fan Content Policy. Not approved or endorsed by Wizards. Card data is fetched from Scryfall at runtime; nothing is bundled. Magic: The Gathering is a trademark of Wizards of the Coast.</footer>
+  </section>`;
+}
+
+function adventure() {
+  const g = S.game;
+  app.innerHTML = `<section class="screen title adventure">
+    <div class="rowhead"><h1>Adventure</h1><button class="btn ghost" data-go="title">← Home</button></div>
+    <p class="lede">A generation ago a wandering mage with a weak deck broke five corrupt guilds and drove a planeswalker back beyond the barrier. The barrier healed crooked. Mana pools and drains in tides now, the five Orders hoard the links that pin the cracks shut, and something that came through before the seal closed has spent thirty years whispering to their Wardens. The old Wanderer is dying. The letter, and the title, are yours.</p>
+    <p class="lede small">Walk a world where geography is color. Duel the mages who roam it with the cards you actually own. Wager cards you cannot buy back. Find which Warden the Usurper is wearing before the Sealing completes.</p>
     <div class="cols">
       <form id="newgame" class="box">
         <h2>New journey</h2>
@@ -1121,7 +1159,7 @@ function tutorial() {
       <h2>Learn to play</h2>
       <ol>${LESSONS.map((x, k) => `<li class="${k === i ? 'on' : ''}${k < i ? ' done' : ''}"><button class="linkbtn" data-lesson="${k}">${esc(x.title)}</button></li>`).join('')}</ol>
       <p class="small">Hover a green card name to see the card. Nothing here touches your collection or save.</p>
-      <button class="btn" data-go="title">Back to the title</button>
+      <button class="btn" data-go="title">Back home</button>
     </aside>
     <div class="box lesson">
       <div class="small">Lesson ${i + 1} of ${LESSONS.length}</div>
@@ -1838,7 +1876,7 @@ document.addEventListener('click', ev => {
     case 'b-rest': if (g.player.food >= 3) { g.player.food -= 3; g.player.life = Math.min(g.player.maxLife, g.player.life + 5); g.player.day++; if (g.player.day % 30 === 0) bossLink(); stepEnemies(g.world, Math.random, g.player); save(); render(); } break;
     case 'b-food': if (g.player.gold >= 2) { g.player.gold -= 2; g.player.food += 20; save(); render(); } break;
     case 'b-leave': go('map'); break;
-    case 'b-newgame': S.game = null; save(); go('title'); break;
+    case 'b-newgame': S.game = null; save(); go('adventure'); break;
     case 'b-dleave': dungeonExitPrompt(false); break;
     case 'b-practice': startTutorialDuel().catch(e => setBusy('Could not load card data: ' + e.message)); break;
     case 'b-bounty': { const c = cityAt(g.world, g.player.x, g.player.y); if (c) acceptBounty(c); break; }
@@ -1879,6 +1917,7 @@ document.addEventListener('input', ev => { if (ev.target.id === 'bw-deckname') S
 document.addEventListener('change', ev => { if (ev.target.id === 'bw-opp') S.brewOpp = ev.target.value; });
 document.addEventListener('click', ev => {
   if (ev.target.id === 'b-logs-export') { const blob = new Blob([exportGameLogs()], { type: 'application/x-ndjson' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `fivefold-games-${new Date().toISOString().slice(0, 10)}.jsonl`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); }
+  if (ev.target.id === 'b-my-decks') { S.brewDecks = true; go('brew'); }
   if (ev.target.id === 'b-logs-clear') { if (confirm('Delete the game logs stored in this browser?')) { clearGameLogs(); render(); } }
 });
 recoverPartial();

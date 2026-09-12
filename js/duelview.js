@@ -50,7 +50,9 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     mana: (c, i, col) => duel.manaFor(localIdx, c, i, col), answer: v => duel.answerFor(localIdx, v),
     mulligan: () => duel.mulligan(localIdx), concede: () => duel.end(1 - localIdx, `${me.name} concedes.`),
   };
-  const ui = { wizard: null, attackers: new Set(), blocks: {}, blocker: null, message: '', menu: null, viewer: null, choice: null, order: null, report: null };
+  const ui = { wizard: null, attackers: new Set(), blocks: {}, blocker: null, message: '', notice: null, menu: null, viewer: null, choice: null, order: null, report: null };
+  // A notice outlives the next board change (a message is wiped by it): the report acknowledgement stays up a few seconds.
+  function notice(text, ms = 5000) { ui.notice = text; setTimeout(() => { if (ui.notice === text) { ui.notice = null; if (root.isConnected) render(); } }, ms); }
   let finished = false, running = false;
 
   // Auto-pass: when the human holds priority but has no land to play, no spell to cast, and no
@@ -445,7 +447,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
   function template() {
     return `
     <div class="duel">
-      <aside class="rail">${phaseStrip()}<div class="controls">${tutor()}${controls()}${ui.message ? `<div class="msg">${esc(ui.message)}</div>` : ''}</div></aside>
+      <aside class="rail">${phaseStrip()}<div class="controls">${tutor()}${controls()}${ui.message ? `<div class="msg">${esc(ui.message)}</div>` : ''}${ui.notice ? `<div class="msg notice">${esc(ui.notice)}</div>` : ''}</div></aside>
       <div class="table">
         <section class="zone opp">
           ${playerBox(ai)}
@@ -757,7 +759,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
         const r = ui.report; if (!r || !(r.text || '').trim()) return;
         const card = r.card === '__other' ? (r.cardName || '').trim() || null : (r.card || null);
         const sent = flagIssue(r.text.trim(), duel, localIdx, { category: r.category, card });
-        ui.report = null; ui.message = sent ? 'Report saved with the game log — thank you.' : 'The report could not be saved.'; render(); run(); return;
+        ui.report = null; notice(sent ? 'Report saved with the game log — thank you.' : 'The report could not be saved.'); render(); run(); return;
       }
       case 'b-concede': if (confirm(input ? 'Concede this duel?' : 'Concede this duel? You will lose your ante card.')) { act.concede(); run(); } return;
     }
