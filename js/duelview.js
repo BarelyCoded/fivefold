@@ -44,7 +44,9 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
   // localIdx is which seat this client renders from (0 single-player/host, 1 guest). `input`, when given
   // (the guest), routes every action over the network instead of mutating the local mirror duel.
   const me = duel.players[localIdx], ai = duel.players[1 - localIdx];
-  if (duel.logViewer == null) duel.logViewer = localIdx;   // name this seat's drawn cards in the log; the opponent's show only a count
+  // Name this seat's drawn cards in the log only when the opponent is the AI. In multiplayer the log is shared
+  // with the human opponent through snapshots, so naming any draw would leak it — leave it count-only there.
+  if (duel.logViewer == null && ai?.ai) duel.logViewer = localIdx;
   const act = input || {
     pass: () => duel.passFor(localIdx), endTurn: () => duel.endTurnFor(localIdx),
     cast: (c, o) => duel.castFor(localIdx, c, o), activate: (c, i, o) => duel.activateFor(localIdx, c, i, o),

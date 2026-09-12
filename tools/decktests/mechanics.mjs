@@ -405,5 +405,17 @@ section('Fact or Fiction shows the taker two piles, then puts one in hand and on
   const inHand = cards.filter(c => c.zone === 'hand'), inGy = cards.filter(c => c.zone === 'graveyard');
   ok(inHand.length + inGy.length === 5 && inHand.length === sawPiles[0].cards.length, `pile 1 went to hand, the rest to the graveyard (${inHand.length}/${inGy.length})`); }
 
+section('Draw log never names cards in multiplayer (shared log), only versus the AI');
+{ // two human players: the log is shared, so a draw must show only a count
+  const mp = new Duel({ player: { name: 'Host', deck: [], life: 20 }, ai: { name: 'Guest', deck: [], life: 20, ai: false }, hooks: {}, rules: {} });
+  mainPhase(mp); lib(mp, D('Lightning Bolt'), 0);
+  ok(mp.namesDrawFor(mp.players[0]) === false, 'no seat is named in a two-human game');
+  mp.drawCards(mp.players[0], 1);
+  ok(/Host draws a card/.test(mp.log.slice(-1)[0]) && !/Lightning Bolt/.test(mp.log.slice(-1)[0]), `multiplayer draw is a count (${mp.log.slice(-1)[0]})`);
+  // versus the AI, the human's own draw is named
+  const sp = newDuel(); mainPhase(sp); sp.logViewer = 0; lib(sp, D('Lightning Bolt'), 0);
+  sp.drawCards(sp.players[0], 1);
+  ok(/draws Lightning Bolt/.test(sp.log.slice(-1)[0]), `single-player draw is named (${sp.log.slice(-1)[0]})`); }
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
