@@ -8,7 +8,7 @@ const pi = args.indexOf('--pull');
 if (pi >= 0) {
   const base = (args[pi + 1] || '').replace(/\/$/, ''); const ti = args.indexOf('--token'); const token = ti >= 0 ? args[ti + 1] : process.env.LOG_TOKEN;
   if (!base || !token) { console.log('usage: node tools/gamelogs.mjs --pull https://your-relay.onrender.com --token <LOG_TOKEN>'); process.exit(1); }
-  const res = await fetch(`${base}/api/logs?token=${encodeURIComponent(token)}`); if (!res.ok) { console.log('pull failed:', res.status, await res.text()); process.exit(1); }
+  const res = await fetch(`${base}/api/logs`, { headers: { Authorization: 'Bearer ' + token } }); if (!res.ok) { console.log('pull failed:', res.status, await res.text()); process.exit(1); }
   const dest = new URL('../logs/games.jsonl', import.meta.url).pathname; fs.mkdirSync(new URL('../logs', import.meta.url).pathname, { recursive: true });
   const have = new Set(fs.existsSync(dest) ? fs.readFileSync(dest, 'utf8').split('\n').filter(Boolean).map(l => { try { return JSON.parse(l).id; } catch { return null; } }) : []);
   const lines = (await res.text()).split('\n').filter(Boolean); let added = 0;

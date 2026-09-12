@@ -9,6 +9,7 @@
 //   collection.csv  your card list (see collection.example.csv)
 
 import http from 'node:http';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -35,6 +36,7 @@ function listArt() {
   return fs.readdirSync(dir).filter(f => IMAGE_EXT.has(path.extname(f).toLowerCase()));
 }
 
+const logRate = new Map();   // ip -> recent POST /api/log timestamps
 http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   let p = decodeURIComponent(url.pathname);
@@ -47,16 +49,25 @@ http.createServer((req, res) => {
   const logFile = () => { const dir = process.env.LOG_DIR || path.join(ROOT, 'logs'); fs.mkdirSync(dir, { recursive: true }); return path.join(dir, 'games.jsonl'); };
   if (p === '/api/log' && req.method === 'OPTIONS') { res.writeHead(204, CORS); return res.end(); }
   if (p === '/api/logs' && req.method === 'GET') {
-    const token = process.env.LOG_TOKEN; const given = url.searchParams.get('token') || (req.headers.authorization || '').replace(/^Bearer /, '');
-    if (!token || given !== token) { res.writeHead(403, CORS); return res.end('LOG_TOKEN required'); }
+    const token = process.env.LOG_TOKEN || ''; const given = (req.headers.authorization || '').replace(/^Bearer /, '') || url.searchParams.get('token') || '';
+    const same = token && given.length === token.length && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(token));
+    if (!same) { res.writeHead(403, CORS); return res.end('LOG_TOKEN required'); }
     const f = logFile(); res.writeHead(200, { ...CORS, 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-store' });
     return fs.existsSync(f) ? fs.createReadStream(f).pipe(res) : res.end('');
   }
   if (p === '/api/log' && req.method === 'POST') {   // one game record per line, appended by js/gamelog.js
+    // Anyone may post (every player's browser does), so keep it cheap to abuse-proof: a size cap, a per-address
+    // rate limit, a shape check, and a ceiling on the file so junk can't fill the disk.
+    const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+    const nowT = Date.now(); const hits = (logRate.get(ip) || []).filter(t => nowT - t < 10 * 60e3); hits.push(nowT); logRate.set(ip, hits);
+    if (hits.length > 60) { res.writeHead(429, CORS); return res.end('too many records'); }
     let body = ''; let size = 0;
-    req.on('data', chunk => { size += chunk.length; if (size > 8e6) { req.destroy(); return; } body += chunk; });
+    req.on('data', chunk => { size += chunk.length; if (size > 1.5e6) { res.writeHead(413, CORS); res.end('record too large'); req.destroy(); return; } body += chunk; });
     req.on('end', () => {
-      let rec; try { rec = JSON.parse(body); } catch { return send(res, 400, 'bad json'); }
+      if (size > 1.5e6) return;
+      let rec; try { rec = JSON.parse(body); } catch { res.writeHead(400, CORS); return res.end('bad json'); }
+      if (!rec || typeof rec !== 'object' || typeof rec.id !== 'string' || !Array.isArray(rec.events) || !Array.isArray(rec.players)) { res.writeHead(400, CORS); return res.end('not a game record'); }
+      try { const f = logFile(); if (fs.existsSync(f) && fs.statSync(f).size > 900e6) { res.writeHead(507, CORS); return res.end('log full'); } } catch {}
       const line = JSON.stringify({ ...rec, receivedAt: new Date().toISOString() }) + '\n';
       fs.appendFile(logFile(), line, err => { res.writeHead(err ? 500 : 200, { ...CORS, 'Content-Type': MIME['.json'], 'Cache-Control': 'no-store' }); res.end(err ? '{"ok":false}' : '{"ok":true}'); });
     });

@@ -14,7 +14,7 @@ async function loadRelay() {
   S.err = '';
   const base = S.endpoint.replace(/\/api\/log\/?$/, '');
   try {
-    const r = await fetch(`${base}/api/logs?token=${encodeURIComponent(S.token)}`);
+    const r = await fetch(`${base}/api/logs`, { headers: { Authorization: 'Bearer ' + S.token } });   // header, not URL: keeps the token out of request logs
     if (!r.ok) { S.err = r.status === 403 ? 'The relay refused the token.' : `The relay answered ${r.status}.`; S.games = []; S.source = ''; return render(); }
     S.games = dedupe(parseJsonl(await r.text())); S.source = `relay ${base}`; localStorage.setItem('ff.admin.token', S.token);
   } catch (e) { S.err = 'Could not reach the relay: ' + e.message; }
@@ -46,6 +46,7 @@ function render() {
         <button class="btn small primary" id="adm-load">Load from relay</button>
         <button class="btn small" id="adm-browser">This browser's games</button>
         <label class="btn small">Open a .jsonl file <input id="adm-file" type="file" accept=".jsonl,.json,.txt" hidden></label>
+        ${S.token ? '<button class="btn small ghost" id="adm-forget" title="Remove the remembered token from this browser">Forget token</button>' : ''}
         <span class="small">${S.endpoint ? `relay: ${esc(S.endpoint.replace(/\/api\/log\/?$/, ''))}` : ''}</span>
       </div>
       ${S.err ? `<p class="msg">${esc(S.err)}</p>` : ''}
@@ -97,6 +98,7 @@ document.addEventListener('click', ev => {
     case 'adm-load': S.token = document.getElementById('adm-token').value.trim(); S.open = null; loadRelay(); break;
     case 'adm-browser': loadBrowser(); break;
     case 'adm-close': S.open = null; render(); break;
+    case 'adm-forget': S.token = ''; localStorage.removeItem('ff.admin.token'); loadBrowser(); break;
   }
 });
 document.addEventListener('change', ev => {
