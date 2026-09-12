@@ -740,6 +740,7 @@ function parseKeywordLine(line, def) {
     else if ((m = p.match(/^Cumulative upkeep[—\s-]+(.+)$/))) { const c = parseAbilityCost(m[1].replace(/\.$/, '')); if (c && !c.sacSelf) found.push({ k: 'Cumulative upkeep', cost: c }); else def.notes.push('Cumulative upkeep ignored'); }
     else if ((m = p.match(/^Cycling (\{.+\})$/))) found.push({ k: 'Cycling', cost: parseCost(m[1]) });
     else if ((m = p.match(/^Kicker (\{.+\})$/))) found.push({ k: 'Kicker', cost: parseCost(m[1]) });
+    else if ((m = p.match(/^Flashback[—-](\{.+?\}), pay (\d+) life$/i))) found.push({ k: 'Flashback', cost: parseCost(m[1]), life: Number(m[2]) });   // Spirit Flare, Chill to the Bone, …
     else if ((m = p.match(/^Flashback (\{.+\})$/))) found.push({ k: 'Flashback', cost: parseCost(m[1]) });
     else if ((m = p.match(/^Flashback—sacrifice (?:a|an) (\w+)$/i))) found.push({ k: 'Flashback', cost: { pips: [], generic: 0, x: false }, sacrifice: m[1].toLowerCase() });   // Cabal Therapy
     else if ((m = p.match(/^Buyback (\{.+\})$/))) found.push({ k: 'Buyback', cost: parseCost(m[1]) });
@@ -816,6 +817,7 @@ function parseStatic(t) {
   if ((m = t.match(/^~ can't attack if defending player controls an untapped creature with power (\d+) or greater$/))) return [{ type: 'static', kind: 'cantAttackIfDefenderPower', n: Number(m[1]), scope: { who: 'self' } }];
   if (/^prevent all combat damage that would be dealt to and dealt by enchanted creature$/.test(t)) return [{ type: 'static', kind: 'noCombatDamage', scope: { who: 'enchanted' } }];
   if (/^prevent all damage that would be dealt to ~ by creatures it's blocking$/.test(t)) return [{ type: 'static', kind: 'noCombatDamageTo', scope: { who: 'self' } }];
+  if (/^prevent all damage that would be dealt to ~$/.test(t)) return [{ type: 'static', kind: 'preventAllDamage', scope: { who: 'self' } }];   // Cho-Manno, Dawn Elemental, Glittering Lion
   if ((m = t.match(/^prevent all damage that would be dealt to (enchanted creature|~) by (artifact|white|blue|black|red|green) sources$/))) return [{ type: 'static', kind: 'preventFrom', from: COLOR_WORD[m[2]] || 'artifact', scope: parseScope(m[1]) }];
   if ((m = t.match(/^you control enchanted (creature|land|artifact|permanent)$/))) return [{ type: 'static', kind: 'control', scope: { who: 'enchanted' } }];
   if ((m = t.match(/^(~|enchanted creature) has shroud as long as it's untapped$/))) return [{ type: 'static', kind: 'keyword', keyword: 'Shroud', scope: parseScope(m[1]), condition: m[1] === '~' ? { selfUntapped: true } : { enchantedUntapped: true } }];
@@ -1242,6 +1244,7 @@ export function compile(c) {
     if (def.unsupportedReason) break;
     // Instant / sorcery text is spell effects; permanents have abilities.
     if (/^(?:this spell|~) can't be countered(?: by spells or abilities)?\.?$/i.test(lower)) { def.uncounterable = true; continue; }   // Blurred Mongoose, Kavu Chameleon, Vexing Beetle, …
+    if ((m = lower.match(/^flashback[—-]\s*(\{.+?\}), pay (\d+) life\.?$/))) { def.keywords.push({ k: 'Flashback', cost: parseCost(m[1]), life: Number(m[2]) }); continue; }   // Spirit Flare, Chill to the Bone
     // Cabal Ritual: the threshold "Add {B}{B}{B}{B}{B} instead …" rider folds into the ritual on the line before it.
     if ((m = lower.match(/^(?:threshold — )?add ((?:\{[wubrgc]\})+) instead if there are seven or more cards in your graveyard\.?$/)) && spellEffects.length && spellEffects[spellEffects.length - 1].type === 'addMana') {
       spellEffects[spellEffects.length - 1].threshold = [...m[1].matchAll(/\{(\w)\}/g)].map(x => x[1].toUpperCase()); continue;

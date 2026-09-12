@@ -347,5 +347,16 @@ section('Depletion land: enters tapped with two counters, makes double mana');
   if (inst.def.abilities.some(a => a.kind === 'entersTapped')) inst.tapped = true;
   ok((inst.counters['depletion'] || 0) === 2 && inst.tapped, `enters tapped with two depletion counters (${inst.counters['depletion']}, tapped=${inst.tapped})`); }
 
+section('Cho-Manno: all damage to it is prevented');
+{ const d = newDuel(); mainPhase(d); const cho = place(d, D('Cho-Manno, Revolutionary'), 0); const bolt = hand(d, D('Lightning Bolt'), 1); pool(d, 1, { R:1 }); d.priority = 1;
+  ok(d.cast(d.players[1], bolt, { targets: [{ type: 'perm', id: cho.id }] }), 'Bolt targets Cho-Manno');
+  while (d.stack.length) drive(d.resolveTop());
+  ok(cho.damage === 0 && cho.zone === 'battlefield', `no damage marked, Cho-Manno lives (${cho.damage} dmg)`); }
+
+section('Spirit Flare: flashback costs mana and life');
+{ const d = newDuel(); mainPhase(d); const sf = D('Spirit Flare'); const g = gy(d, sf, 0); pool(d, 0, { W:1, C:1 }); d.players[0].life = 20;
+  const fb = g.def.keywords.find(k => k.k === 'Flashback');
+  ok(fb && fb.life === 3 && fb.cost.generic === 1, `flashback is {1}{W} plus 3 life (${JSON.stringify(fb?.cost)}, life ${fb?.life})`); }
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

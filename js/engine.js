@@ -828,6 +828,7 @@ export class Duel {
       this.say(`${p.name} sacrifices ${chosen.map(l => l.def.name).join(' and ')} to cast ${d.name}.`);
     }
     else this.payMana(p, this.planPayment(p, cost, opts.x || 0, opts.poolOnly));
+    if (fromGrave) { const fl = d.keywords.find(k => k.k === 'Flashback')?.life; if (fl) { p.life -= fl; this.say(`${p.name} pays ${fl} life for flashback.`); } }
     const fbSac = fromGrave ? d.keywords.find(k => k.k === 'Flashback')?.sacrifice : null;
     const add = (fbSac ? { sacrifice: fbSac } : null) || d.spell?.additionalCost || d.additionalCost;
     if (add) {
@@ -1780,7 +1781,7 @@ export class Duel {
     if (target.def) { // creature
       if (this.protectedFrom(target, source)) { this.say(`${target.def.name} is protected from ${source.def.name}.`); return 0; }
       if (!noPrev && opts.combat && (this.fog || target.flags.has('noCombatDamage') || source.flags?.has('noCombatDamage') || target.cur?.flags.has('noCombatDamage') || source.cur?.flags.has('noCombatDamage') || source.flags?.has('dealsNoCombatDamage') || target.cur?.flags.has('noCombatDamageTo'))) return 0;
-      if (!noPrev && (target.flags.has('noDamage') || source.flags?.has('dealsNoDamage'))) { this.say(`Damage to ${target.def.name} is prevented.`); return 0; }
+      if (!noPrev && (target.flags.has('noDamage') || target.cur?.flags.has('preventAllDamage') || source.flags?.has('dealsNoDamage'))) { this.say(`Damage to ${target.def.name} is prevented.`); return 0; }
       if (!noPrev && target.cur?.preventFrom && target.cur.preventFrom.some(f => f === 'artifact' ? isType(source, 'artifact') : (source.def?.colors || []).includes(f))) { this.say(`${target.def.name} is shielded from ${source.def.name}.`); return 0; }
       if (!noPrev && target.cur?.flags.has('phantom')) { if ((target.counters['+1/+1'] || 0) > 0) target.counters['+1/+1']--; this.say(`Damage to ${target.def.name} is prevented; it loses a +1/+1 counter.`); this.refresh(); return 0; }   // Phantom Nishoba
       if (!noPrev && target.shield > 0) { const used = Math.min(target.shield, n); target.shield -= used; n -= used; this.say(`${used} damage to ${target.def.name} is prevented.`); if (n <= 0) return 0; }
@@ -1953,6 +1954,7 @@ export class Duel {
           case 'attackOnlyIfDefenderHas': c.cur.attackOnlyIfDefenderHas = ab.land; break;
           case 'animateLand': if (isLand(c)) { c.cur.types.add('creature'); c.cur.p += ab.p; c.cur.t += ab.t; } break;
           case 'preventFrom': (c.cur.preventFrom ||= []).push(ab.from); break;
+          case 'preventAllDamage': c.cur.flags.add('preventAllDamage'); break;
           case 'phantom': c.cur.flags.add('phantom'); break;
         }
       }
