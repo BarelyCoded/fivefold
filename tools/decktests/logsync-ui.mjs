@@ -61,6 +61,15 @@ await p.click('#adm-send'); await p.waitForTimeout(1000);
 const b2 = await p.evaluate(()=>document.body.innerText);
 ok(/Sent 1 game to the relay/.test(b2) && /The relay holds 3 games/.test(b2) && files().some(x=>x.id==='gqueued01'), `Send now delivers it (${(b2.match(/The relay holds[^.]*\./)||[''])[0]})`);
 ok((await p.evaluate(()=>JSON.parse(localStorage.getItem('ff.gamelog.unsent.v1')).length))===0, 'queue drained');
+// games recorded before delivery tracking (no sent flag) and a relay that lost them: Re-send all posts everything
+await p.evaluate(()=>{ const l=JSON.parse(localStorage.getItem('ff.gamelogs.v1')); const r={...l[0], id:'goldgame01'}; delete r.sent; delete r.sentAt; l.push(r); localStorage.setItem('ff.gamelogs.v1',JSON.stringify(l)); });
+await p.reload(); await p.waitForSelector('#adm-resend',{timeout:5000});
+ok(!(await p.$('#adm-send')), 'no Send now button: nothing is queued, the old game just has no delivery state');
+ok((await p.$$eval('.adm-row td:last-child', td=>td.map(t=>t.innerText))).includes('?'), 'the old game shows an unknown delivery state');
+await p.click('#adm-resend'); await p.waitForTimeout(1500);
+const b3 = await p.evaluate(()=>document.body.innerText);
+ok(/accepted 3 of 3 games/.test(b3) && /The relay holds 4 games/.test(b3) && files().some(x=>x.id==='goldgame01') && files().length===3, `Re-send all delivers the old game and duplicates nothing (${(b3.match(/accepted[^.]*\./)||[''])[0]}; ${files().length} files)`);
+ok((await p.$$eval('.adm-row td:last-child', td=>td.map(t=>t.innerText))).every(t=>t==='✓'), 'every game now shows as sent');
 // the relay without LOG_DIR warns at startup and in status
 const rc = spawn('node',['/home/user/fivefold/relay.js'],{env:{...process.env,PORT:'8845'},stdio:['ignore','pipe','pipe']});
 const note = await new Promise(res=>{let s=''; rc.stdout.on('data',d=>{s+=String(d); if(/Game logs:/.test(s)) res(s);}); setTimeout(()=>res(s),4000);});

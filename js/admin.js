@@ -1,7 +1,7 @@
 // Admin view of the global game log: every match the collector has received (or this browser holds, or an
 // exported file), one row each, with the full turn-by-turn record, flagged moments and errors behind it.
 // Reading from the relay needs its LOG_TOKEN; the token is remembered in this browser only.
-import { retryUnsent, unsentCount, listGameLogs } from './gamelog.js';
+import { retryUnsent, resendAll, unsentCount, listGameLogs } from './gamelog.js';
 const app = document.getElementById('app');
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const S = { games: [], source: '', token: localStorage.getItem('ff.admin.token') || '', endpoint: '', open: null, filter: { mode: '', only: '', q: '' }, sort: 'newest', err: '', status: null, sending: false };
@@ -29,6 +29,7 @@ async function loadStatus() {
   try { const r = await fetch(`${base}/api/log/status`); S.status = r.ok ? await r.json() : { error: `answered ${r.status}` }; } catch (e) { S.status = { error: e.message }; }
   render();
 }
+async function resendEverything() { S.sending = true; render(); const n = await resendAll(); S.sending = false; if (S.source === 'this browser') loadBrowser(); S.err = `The relay accepted ${n} of ${listGameLogs().length} game${listGameLogs().length === 1 ? '' : 's'} from this browser.`; loadStatus(); }
 async function sendUnsent() { S.sending = true; render(); const n = await retryUnsent(); S.sending = false; if (S.source === 'this browser') loadBrowser(); S.err = n ? `Sent ${n} game${n === 1 ? '' : 's'} to the relay.` : (unsentCount() ? 'The relay did not accept them — is it reachable?' : ''); loadStatus(); }
 function loadFile(file) { const rd = new FileReader(); rd.onload = () => { S.games = dedupe(parseJsonl(String(rd.result))); S.source = file.name; S.err = ''; S.open = null; render(); }; rd.readAsText(file); }
 
@@ -46,7 +47,7 @@ const result = g => !g.result ? `<span class="warn">in progress${g.partial ? ' (
 function statusLine() {
   const st = S.status, n = unsentCount();
   const relay = !st ? 'Checking the relay…' : st.error ? `<span class="warn">Relay unreachable (${esc(st.error)}).</span>` : `The relay holds <b>${st.games}</b> game${st.games === 1 ? '' : 's'}${st.persistent ? '' : ' <span class="warn">on a folder that is wiped at every deploy — set LOG_DIR to a mounted disk (see render.yaml)</span>'}.`;
-  const mine = `This browser keeps ${listGameLogs().length}${n ? `, <span class="warn">${n} not yet delivered</span> <button class="btn tiny" id="adm-send" ${S.sending ? 'disabled' : ''}>${S.sending ? 'Sending…' : 'Send now'}</button>` : ''}.`;
+  const mine = `This browser keeps ${listGameLogs().length}${n ? `, <span class="warn">${n} not yet delivered</span> <button class="btn tiny" id="adm-send" ${S.sending ? 'disabled' : ''}>${S.sending ? 'Sending…' : 'Send now'}</button>` : ''}.${listGameLogs().length ? ` <button class="btn tiny ghost" id="adm-resend" ${S.sending ? 'disabled' : ''} title="Post every game this browser holds again; the relay replaces by id, so nothing is duplicated">${S.sending ? 'Sending…' : 'Re-send all to the relay'}</button>` : ''}`;
   return `${relay} ${mine}`;
 }
 function render() {
@@ -116,6 +117,7 @@ document.addEventListener('click', ev => {
     case 'adm-close': S.open = null; render(); break;
     case 'adm-forget': S.token = ''; localStorage.removeItem('ff.admin.token'); loadBrowser(); break;
     case 'adm-send': sendUnsent(); break;
+    case 'adm-resend': resendEverything(); break;
   }
 });
 document.addEventListener('change', ev => {

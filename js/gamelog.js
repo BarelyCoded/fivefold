@@ -80,6 +80,13 @@ async function syncPartial(force = false) {
 }
 function onHidden() { if (document.visibilityState === 'hidden') { savePartial(); syncPartial(true); } }
 export const unsentCount = () => (store.get(UNSENT) || []).length;
+// Post every game this browser holds again — for records that predate delivery tracking, or a relay that lost
+// its folder. The collector replaces by id, so nothing is duplicated. Returns how many it accepted.
+export async function resendAll() {
+  const t = await targets(); let sent = 0;
+  for (const rec of store.get(KEY) || []) { const { sent: _s, sentAt: _a, ...clean } = rec; if (await post(t.primary, clean)) { sent++; dequeueUnsent(rec.id); markSent(rec.id, true); } else markSent(rec.id, false); }
+  return sent;
+}
 // What the collector reports about itself (games held, whether its folder survives deploys), or null if unreachable.
 export async function collectorStatus() { try { const t = await targets(); const r = await fetch(t.primary.replace(/\/?$/, '/status')); return r.ok ? { url: t.primary, ...(await r.json()) } : null; } catch { return null; } }
 
