@@ -56,8 +56,16 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
   // Auto-pass: when the human holds priority but has no land to play, no spell to cast, and no
   // (non-mana) activated ability available, there is nothing to decide — skip the step for them.
   // Mana abilities alone don't count: adding mana with nothing to spend it on isn't a real play.
+  // Every way to pay for a card from hand: its mana cost, or an alternative cost (pitch a card, sacrifice lands).
+  function pitchCandidates(card) { const alt = card.def.spell?.alternativeCost; return alt?.pitch ? me.hand.filter(c => c !== card && c.def.colors.includes(alt.pitch)) : []; }
+  function playable(card) {
+    if (duel.canCast(me, card)) return true;
+    if (pitchCandidates(card).some(c => duel.canCast(me, card, { pitch: c.id }))) return true;
+    if (card.def.spell?.alternativeCost?.sacLands && duel.canCast(me, card, { sacLands: true })) return true;
+    return false;
+  }
   function hasAnyPlay() {
-    for (const c of me.hand) if (duel.canCast(me, c)) return true;
+    for (const c of me.hand) if (playable(c)) return true;
     for (const c of me.battlefield) { const abs = abilitiesOf(c); for (let i = 0; i < abs.length; i++) if (abs[i].type === 'activated' && duel.canActivate(me, c, i)) return true; }
     for (const c of me.graveyard) { const abs = c.def.abilities; for (let i = 0; i < abs.length; i++) if (abs[i].type === 'activated' && abs[i].zone === 'graveyard' && duel.canActivate(me, c, i)) return true; }
     return false;
@@ -95,6 +103,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
         return;
       }
       for (let guard = 0; guard < 5000; guard++) {
+        if (ui.report) { render(); return; }   // paused while a report is being written; closing the form calls run() again
         const r = duel.tick();
         render();
         const fxWait = playFx();
@@ -217,7 +226,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
   }
   function handCard(c) {
     const classes = [];
-    if (duel.pending?.type === 'priority' && !ui.wizard && (duel.canCast(me, c) || duel.canCast(me, c, { cycling: true }))) classes.push('castable');
+    if (duel.pending?.type === 'priority' && !ui.wizard && (playable(c) || duel.canCast(me, c, { cycling: true }))) classes.push('castable');
     if (c.def.kind === 'unsupported') classes.push('dead');
     if (ui.wizard?.stage === 'targets' && ui.wizard.card === c) classes.push('selected');
     return cardHtml(c.def, { id: c.id, zone: 'hand', classes });
@@ -507,7 +516,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     const r = ui.report;
     return `<div class="overlay"><div class="modal repform">
       <h3>⚑ Report a problem</h3>
-      <p class="small">Turn ${duel.turn}, ${esc(STEP_NAME[duel.step] || duel.step)}. The board, stack and recent log are saved with your note so it can be reproduced.</p>
+      <p class="small">Turn ${duel.turn}, ${esc(STEP_NAME[duel.step] || duel.step)} — the game is paused. The board, stack and recent log are saved with your note so it can be reproduced.</p>
       <div class="rep-kinds">${REPORT_KINDS.map(([k, l]) => `<label class="radio"><input type="radio" name="rep-kind" value="${k}" ${r.category === k ? 'checked' : ''}> ${l}</label>`).join('')}</div>
       <label>Card involved <select id="rep-card"><option value="">— none / not sure —</option>${reportCards().map(n => `<option value="${esc(n)}" ${r.card === n ? 'selected' : ''}>${esc(n)}</option>`).join('')}<option value="__other" ${r.card === '__other' ? 'selected' : ''}>A card not listed…</option></select></label>
       ${r.card === '__other' ? `<label>Card name <input id="rep-cardname" value="${esc(r.cardName || '')}" placeholder="Card name"></label>` : ''}
@@ -540,9 +549,11 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
       if (duel.canCast(me, card, { ...opts, buyback: true })) { ui.menu = { title: `Pay buyback ${costString(info.buyback)}?`, items: [{ label: 'Buyback', primary: true, action: () => { opts.buyback = true; ui.menu = null; next(w); } }, { label: 'No', action: () => { opts.buyback = false; ui.menu = null; next(w); } }] }; render(); return; }
       opts.buyback = false;
     }
-    if (info.pitch && !('pitch' in opts) && !duel.canPay(me, card.def.cost)) {
-      const cands = me.hand.filter(c => c !== card && c.def.colors.includes(info.pitch));
-      if (cands.length) { ui.menu = { title: `Exile a ${info.pitch} card instead of paying?`, items: [...cands.map(c => ({ label: c.def.name, action: () => { opts.pitch = c.id; ui.menu = null; next(w); } })), { label: 'Pay mana instead', action: () => { opts.pitch = undefined; ui.menu = null; next(w); } }] }; render(); return; }
+    if (info.pitch && !('pitch' in opts)) {
+      const cands = pitchCandidates(card), canPayMana = duel.canPay(me, card.def.cost);
+      const COLOR = { W: 'white', U: 'blue', B: 'black', R: 'red', G: 'green' };
+      if (cands.length) { ui.menu = { title: `${card.def.name}: exile a ${COLOR[info.pitch] || info.pitch} card from your hand instead of paying ${costString(card.def.cost)}?`, items: [...cands.map(c => ({ label: `Exile ${c.def.name}`, primary: !canPayMana, action: () => { opts.pitch = c.id; ui.menu = null; next(w); } })), ...(canPayMana ? [{ label: `Pay ${costString(card.def.cost)} instead`, primary: true, action: () => { opts.pitch = undefined; ui.menu = null; next(w); } }] : [])] }; render(); return; }
+      opts.pitch = undefined;
     }
     // Fireblast: sacrifice lands instead of paying. Offered whenever enough of the named land is in play.
     if (info.sacLands && !('sacLands' in opts)) {
@@ -603,7 +614,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
   // Single vs double click on a hand card. Auto (double) lets the engine pay; manual (single) makes you tap.
   function handClick(card, auto) {
     if (duel.pending?.type !== 'priority') return;
-    const canCast = duel.canCast(me, card), canCycle = duel.canCast(me, card, { cycling: true });
+    const canCast = playable(card), canCycle = duel.canCast(me, card, { cycling: true });
     if (!canCast && !canCycle) { ui.message = card.def.kind === 'unsupported' ? 'This card is not supported by the engine yet.' : 'Cannot play that now.'; render(); return; }
     if (canCast && canCycle) {
       ui.menu = { title: card.def.name, items: [
@@ -740,13 +751,13 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
       case 'b-order': { const ids = (ui.order || []).slice(); ui.order = null; act.answer(ids); run(); return; }
       case 'b-divide': { const d = ui.divide; if (!d) return; const plan = { ...d.map }; if (d.player) plan.player = d.player; ui.divide = null; act.answer(plan); run(); return; }
       case 'b-look': { act.answer(null); run(); return; }
-      case 'b-flag': ui.report = { category: 'card', card: '', cardName: '', text: '' }; render(); setTimeout(() => root.querySelector('#rep-text')?.focus(), 0); return;
-      case 'rep-cancel': ui.report = null; render(); return;
+      case 'b-flag': ui.report = { category: 'card', card: '', cardName: '', text: '' }; render(); setTimeout(() => root.querySelector('#rep-text')?.focus(), 0); return;   // run() bails while ui.report is set, so the game waits
+      case 'rep-cancel': ui.report = null; render(); run(); return;
       case 'rep-send': {
         const r = ui.report; if (!r || !(r.text || '').trim()) return;
         const card = r.card === '__other' ? (r.cardName || '').trim() || null : (r.card || null);
         const sent = flagIssue(r.text.trim(), duel, localIdx, { category: r.category, card });
-        ui.report = null; ui.message = sent ? 'Report saved with the game log — thank you.' : 'The report could not be saved.'; render(); return;
+        ui.report = null; ui.message = sent ? 'Report saved with the game log — thank you.' : 'The report could not be saved.'; render(); run(); return;
       }
       case 'b-concede': if (confirm(input ? 'Concede this duel?' : 'Concede this duel? You will lose your ante card.')) { act.concede(); run(); } return;
     }
@@ -790,7 +801,9 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
   root.addEventListener('change', ev => { const r = ui.report; if (!r) return; if (ev.target.name === 'rep-kind') r.category = ev.target.value; if (ev.target.id === 'rep-card') { r.card = ev.target.value; render(); } });
   document.addEventListener('keydown', function onKey(ev) {
     if (!root.isConnected) { document.removeEventListener('keydown', onKey); return; }
-    if (ev.key === 'Escape') { ui.wizard = null; ui.menu = null; ui.viewer = null; ui.paying = null; ui.report = null; render(); }
+    if (ui.report) { if (ev.key === 'Escape') { ui.report = null; render(); run(); } return; }   // typing a report must never drive the game
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(ev.target?.tagName)) return;
+    if (ev.key === 'Escape') { ui.wizard = null; ui.menu = null; ui.viewer = null; ui.paying = null; render(); }
     if (ev.key === ' ' && duel.pending?.type === 'priority' && !ui.wizard && !ui.menu && !ui.paying) { ev.preventDefault(); act.pass(); run(); }
   });
 

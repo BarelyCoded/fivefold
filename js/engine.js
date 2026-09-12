@@ -1195,7 +1195,7 @@ export class Duel {
         else { const ids = yield { kind: 'choose', player: p.idx, text: `${src.def.name}: choose a card from ${pl.name}'s hand`, options: opts.map(c => ({ id: c.id, label: c.def.name })), min: 1, max: 1 }; pick = this.card((ids || [])[0]); if (!pick || !opts.includes(pick)) pick = opts[0]; }
         if (e.action === 'exile') { this.moveTo(pick, 'exile'); src.linkedExile = pick.id; this.say(`${pick.def.name} is exiled.`); }
         else if (e.action === 'discardName') { const all = pl.hand.filter(c => c.def.name === pick.def.name); this.discardCards(pl, all); this.say(`${p.name} names ${pick.def.name}; ${pl.name} discards ${all.length}.`); }   // Cabal Therapy
-        else { this.discardCards(pl, [pick]); this.say(`${pl.name} discards ${pick.def.name}.`); }
+        else this.discardCards(pl, [pick]);
       } break;
       case 'returnLinkedExile': { const c = src.linkedExile != null ? this.card(src.linkedExile) : null; if (c && c.zone === 'exile') { this.moveTo(c, 'hand'); this.say(`${c.def.name} returns to ${this.players[c.owner].name}'s hand.`); } break; }
       // Goblin Lackey: put a matching permanent card from your hand onto the battlefield.
