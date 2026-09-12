@@ -942,10 +942,14 @@ function parseAbilityLine(line, ctx) {
     // Undiscovered Paradise: the land bounces itself during your next untap step after being tapped for mana.
     let bounceOnUntap = false;
     body = body.replace(/\.?\s*during your next untap step, as you untap your permanents, return ~ to its owner's hand\.?$/i, () => { bounceOnUntap = true; return ''; });
+    // Cinder Marsh, Mogg Hollows, Rootwater Depths, …: "{T}: Add {B} or {R}. This land doesn't untap during your
+    // next untap step." — strip the untap restriction so the mana line parses, and flag it on the ability.
+    let noUntapNext = false;
+    body = body.replace(/\.?\s*(?:~|this land|this permanent) doesn't untap during your next untap step\.?$/i, () => { noUntapNext = true; return ''; });
     // Volrath's Dungeon: "Any player may activate this ability but only during their turn" — only the controller can here.
     let anyPlayerNote = null;
     body = body.replace(/\.?\s*any player may activate this ability but only during their turn\.?$/i, () => { timing = 'yourTurn'; anyPlayerNote = 'only its controller can activate it (any player may, in the real rules)'; return ''; });
-    const manaExtra = { ...(limit ? { limit } : {}), ...(sacWhenEmpty ? { sacWhenEmpty } : {}), ...(bounceOnUntap ? { bounceOnUntap: true } : {}) };
+    const manaExtra = { ...(limit ? { limit } : {}), ...(sacWhenEmpty ? { sacWhenEmpty } : {}), ...(bounceOnUntap ? { bounceOnUntap: true } : {}), ...(noUntapNext ? { noUntapNext: true } : {}) };
     // Metalworker: "{T}: Reveal any number of artifact cards in your hand. Add {C}{C} for each card revealed this way."
     let mw;
     if ((mw = body.match(/^reveal any number of (\w+) cards in your hand\. add ((?:\{c\})+) for each card revealed this way\.?$/))) return { type: 'mana', cost, produces: ['C'], amount: { calc: 'handKind', what: mw[1], mult: mw[2].match(/\{c\}/g).length }, ...manaExtra };
@@ -955,7 +959,7 @@ function parseAbilityLine(line, ctx) {
     // mana ability
     let mm;
     if ((mm = body.match(/^add ((?:\{[wubrgc]\})+)\.?$/))) return { type: 'mana', cost, produces: [...new Set([...mm[1].matchAll(/\{(\w)\}/g)].map(x => x[1].toUpperCase()))] , amount: [...mm[1].matchAll(/\{(\w)\}/g)].length, ...manaExtra };
-    if ((mm = body.match(/^add (\{[wubrgc]\})(?: or (\{[wubrgc]\}))+\.?$/))) return { type: 'mana', cost, produces: [...body.matchAll(/\{(\w)\}/g)].map(x => x[1].toUpperCase()), amount: 1 };
+    if ((mm = body.match(/^add (\{[wubrgc]\})(?: or (\{[wubrgc]\}))+\.?$/))) return { type: 'mana', cost, produces: [...body.matchAll(/\{(\w)\}/g)].map(x => x[1].toUpperCase()), amount: 1, ...manaExtra };
     if ((mm = body.match(/^add ((?:\{[wubrgc]\})(?: or \{[wubrgc]\})*)\. put a (\w+) counter on ~\.?$/))) return { type: 'mana', cost, produces: [...mm[1].matchAll(/\{(\w)\}/g)].map(x => x[1].toUpperCase()), amount: 1, counter: mm[2] };
     if ((mm = body.match(/^add (\{[wubrgc]\}) for each (\w+) counter removed this way\.?$/)) && cost.removeCounter?.n === 'all') return { type: 'mana', cost, produces: [mm[1][1].toUpperCase()], amount: 1 };
     if ((mm = body.match(/^add (\S+) mana of any one color\.?$/))) return { type: 'mana', cost, produces: COLORS.slice(), amount: amt(mm[1]), sameColor: true };

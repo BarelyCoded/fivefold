@@ -289,5 +289,13 @@ section('Draws are logged: the viewer sees card names, the opponent only a count
   d.drawCards(d.players[0], 1); ok(d.log.some(l => /A draws Counterspell|A draws Lightning Bolt/.test(l)), `the viewer's draw is named (${d.log.slice(-1)})`);
   d.drawCards(d.players[1], 1); ok(d.log.some(l => /B draws a card/.test(l)) && !d.log.some(l => /B draws (Lightning Bolt|Counterspell)/.test(l)), `the opponent's draw is a count only (${d.log.slice(-1)})`); }
 
+section('Cinder Marsh: makes B or R, and stays tapped through the next untap step');
+{ const d = newDuel(); mainPhase(d); const cm = place(d, D('Cinder Marsh'), 0); cm.sick = false;
+  const ii = cm.def.manaAbilities.findIndex(m => m.produces.includes('B') && m.produces.includes('R'));
+  ok(ii >= 0, 'has a B-or-R mana ability (not just colorless)');
+  ok(d.activateMana(d.players[0], cm, ii, 'R'), 'tap for red');
+  ok(d.players[0].pool.R === 1 && d.players[0].pool.B === 0 && cm.tapped, `one red added, land tapped (${JSON.stringify({R:d.players[0].pool.R,B:d.players[0].pool.B})})`);
+  ok(cm.flags.has('noUntapNext'), 'flagged to skip its next untap step'); }
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

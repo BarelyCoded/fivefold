@@ -282,6 +282,7 @@ export class Duel {
           for (const c of ap.battlefield) {
             c.sick = false; c.attackedThisTurn = false; c.blockedThisTurn = false;
             if (c.flags.has('frozen')) { c.flags.delete('frozen'); continue; }
+            if (c.flags.has('noUntapNext')) { c.flags.delete('noUntapNext'); continue; }   // Cinder Marsh: skip this untap step, then untap normally
             if (c.cur?.flags.has('doesntUntap') || keep.has(c)) continue;
             if (c.tapped) c.tapped = false;
           }
@@ -635,6 +636,7 @@ export class Duel {
       if (ma?.limit) { const c = t.src.card; if (c.uses.turn !== this.turn) c.uses = { turn: this.turn, n: {} }; c.uses.n['m' + t.src.index] = (c.uses.n['m' + t.src.index] || 0) + 1; }
       if (ma?.counter) t.src.card.counters[ma.counter] = (t.src.card.counters[ma.counter] || 0) + 1;
       if (ma?.bounceOnUntap) t.src.card.flags.add('bounceOnUntap');   // Undiscovered Paradise
+      if (ma?.noUntapNext) t.src.card.flags.add('noUntapNext');
       if (!ma || ma.cost.tap) this.tappedForMana(p, t.src.card, ma, t.color);
       if (ma?.sacWhenEmpty && !(t.src.card.counters[ma.sacWhenEmpty] || 0)) { this.say(`${t.src.card.def.name} is spent.`); this.sacrifice(t.src.card); }   // Gemstone Mine
     }
@@ -694,6 +696,7 @@ export class Duel {
     if (ma.cost.addCounter) { const k = ma.cost.addCounter.kind; card.counters[k] = (card.counters[k] || 0) + ma.cost.addCounter.n; this.say(`${card.def.name} gets a ${k} counter (${card.counters[k]} now).`); }
     if (ma.counter) card.counters[ma.counter] = (card.counters[ma.counter] || 0) + 1;
     if (ma.bounceOnUntap) card.flags.add('bounceOnUntap');
+    if (ma.noUntapNext) card.flags.add('noUntapNext');   // Cinder Marsh & kin stay tapped through the next untap step
     const prod = ma.reflect ? this.reflectProduces(p, card) : ma.produces;
     const col = prod.includes(color) ? color : prod[0];
     if (!col) return false;
