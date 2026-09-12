@@ -8,6 +8,7 @@ const here='/home/user/fivefold/tools'; const all=new Map();
 for(const f of fs.readdirSync(path.join(here,'.sets'))) for(const c of JSON.parse(fs.readFileSync(path.join(here,'.sets',f),'utf8'))) if(!all.has(c.name.toLowerCase())) all.set(c.name.toLowerCase(),c);
 const stub=n=>({name:n,id:'s'+Math.random(),set:'x',mana_cost:'{1}',cmc:1,type_line:'Artifact',oracle_text:'',colors:[],keywords:[],rarity:'common',image_uris:null});
 const up=(port,env)=>{const pr=spawn('node',['/home/user/fivefold/relay.js'],{env:{...process.env,PORT:String(port),...env},stdio:['ignore','pipe','pipe']}); return new Promise((res,rej)=>{const t=setTimeout(()=>rej(new Error('to')),4000);pr.stdout.on('data',d=>{if(String(d).includes('relay at')){clearTimeout(t);res(pr);}});});};
+fs.rmSync(CDIR,{recursive:true,force:true});   // a clean collector for every run
 const ra=await up(A,{}), rb=await up(B,{LOG_DIR:CDIR, LOG_TOKEN:'secret'});
 const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium-1194/chrome-linux/chrome'});
 let pass=0,fail=0; const ok=(c,m)=>{if(c)pass++;else{fail++;console.log('  FAIL',m);}};
@@ -23,13 +24,15 @@ const playOne=async()=>{ await p.evaluate(()=>{window.ff.S.screen='brew'; window
 await p.goto(BASE); await p.waitForFunction(()=>window.ff&&window.ff.S,{timeout:30000}); await p.evaluate(()=>{try{localStorage.clear()}catch{}}); await p.reload(); await p.waitForFunction(()=>window.ff&&window.ff.S,{timeout:30000}); await p.waitForTimeout(400);
 const notice = await p.evaluate(()=>document.querySelector('.gamelogs')?.innerText||''); ok(/logged to improve the rules engine/.test(notice), 'title screen carries the logging notice');
 await playOne();
-const bf=path.join(CDIR,'games.jsonl'); const bl=()=>fs.existsSync(bf)?fs.readFileSync(bf,'utf8').trim().split('\n').filter(Boolean):[];
+const gd=path.join(CDIR,'games'); const bl=()=>fs.existsSync(gd)?fs.readdirSync(gd).filter(f=>f.endsWith('.json')).map(f=>fs.readFileSync(path.join(gd,f),'utf8')):[];
 ok(bl().length===1, `collector B received the game cross-origin (${bl().length})`);
-ok(fs.existsSync('/home/user/fivefold/logs/games.jsonl'), 'the serving relay A kept its own copy too');
+ok(fs.existsSync('/home/user/fivefold/logs/games') && fs.readdirSync('/home/user/fivefold/logs/games').length>=1, 'the serving relay A kept its own copy too');
 ok((await p.evaluate(()=>JSON.parse(localStorage.getItem('ff.gamelog.unsent.v1')||'[]').length))===0, 'nothing queued as unsent');
 // reading back needs the token
 const r1=await fetch(`http://localhost:${B}/api/logs`); const r2=await fetch(`http://localhost:${B}/api/logs?token=secret`);
 ok(r1.status===403 && r2.ok && (await r2.text()).trim().split('\n').length===1, `GET api/logs is token-gated (${r1.status}/${r2.status})`);
+const st=await (await fetch(`http://localhost:${B}/api/log/status`)).json(); ok(st.ok && st.games===1 && st.persistent===true, `api/log/status is public and counts games (${JSON.stringify(st)})`);
+ok((await p.evaluate(()=>JSON.parse(localStorage.getItem('ff.gamelogs.v1')||'[]').map(g=>g.sent)))[0]===true, 'browser record marked as sent');
 // collector unreachable: the record waits in the browser, then goes on the next visit
 endpoint=`http://localhost:${DEAD}/api/log`; await p.goto(BASE); await p.waitForFunction(()=>window.ff&&window.ff.S,{timeout:30000}); await p.waitForTimeout(400);
 await playOne();

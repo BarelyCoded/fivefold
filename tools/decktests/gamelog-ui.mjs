@@ -50,9 +50,9 @@ const rec = done.list[0];
 ok(rec.result && rec.result.winner===1 && rec.endedAt && rec.flags.length===1 && rec.events.some(e=>e.k==='log'), `result recorded (winner=${rec.result?.winner}, why=${rec.result?.why}), ${rec.events.length} events, approximations: ${Object.keys(rec.approximations||{}).length}`);
 // server side
 await p.waitForTimeout(500);
-const file = '/home/user/fivefold/logs/games.jsonl';
-ok(fs.existsSync(file) && fs.readFileSync(file,'utf8').trim().split('\n').length===1, 'one line appended to logs/games.jsonl by the relay');
-const srvRec = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file,'utf8').trim().split('\n')[0]) : null;
+const file = `/home/user/fivefold/logs/games/${rec.id}.json`;
+ok(fs.existsSync(file) && fs.readdirSync('/home/user/fivefold/logs/games').length===1, 'one file per game written to logs/games/ by the relay');
+const srvRec = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file,'utf8')) : null;
 ok(srvRec && srvRec.id===rec.id && srvRec.receivedAt, `server record matches (${srvRec?.id})`);
 // back on the title screen the count updates and export is enabled
 await p.waitForFunction(()=>window.ff.S.screen!=='duel',{timeout:10000}).catch(()=>{});

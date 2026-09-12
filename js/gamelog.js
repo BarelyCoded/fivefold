@@ -17,7 +17,8 @@ const config = () => configP ||= fetch('content/config.json').then(r => r.ok ? r
 // The collector is what must accept a record; the page's own server (if any) gets a best-effort copy — on the
 // static site that POST just 404s.
 async function targets() { const c = await config(); const ep = (c.logEndpoint || '').trim(); const sameOrigin = 'api/log'; return { primary: ep || sameOrigin, all: [...new Set([ep, sameOrigin].filter(Boolean))] }; }
-async function post(url, rec) { try { const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rec) }); return r.ok; } catch { return false; } }
+// keepalive lets a small record finish sending while the page is being closed (browsers cap that at ~64 KB).
+async function post(url, rec) { try { const body = JSON.stringify(rec); const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: body.length < 60000 }); return r.ok; } catch { return false; } }
 let current = null, unlisten = null, sinceSave = 0;
 const now = () => Date.now();
 const store = { get(k) { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }, del(k) { try { localStorage.removeItem(k); } catch {} } };
@@ -45,28 +46,45 @@ function push(ev) {
 }
 let saveTimer = null;
 function scheduleSave() { if (saveTimer) return; saveTimer = setTimeout(() => { saveTimer = null; savePartial(); }, 1000); }
-function savePartial() { if (!current) return; sinceSave = 0; store.set(PARTIAL, current.rec); }
+function savePartial() { if (!current) return; sinceSave = 0; store.set(PARTIAL, current.rec); syncPartial(); }
 
-// Flush a finished (or abandoned) record: browser first, then the server if there is one.
+// Mark a record in this browser's list as delivered (or not) so the title screen and admin page can show it.
+function markSent(id, ok) { const list = store.get(KEY) || []; const r = list.find(x => x.id === id); if (r) { r.sent = ok; if (ok) r.sentAt = now(); store.set(KEY, list); } }
+const queueUnsent = rec => { const q = (store.get(UNSENT) || []).filter(r => r.id !== rec.id); q.push(rec); while (q.length > KEEP_UNSENT) q.shift(); store.set(UNSENT, q); };
+const dequeueUnsent = id => store.set(UNSENT, (store.get(UNSENT) || []).filter(r => r.id !== id));
+// Flush a finished (or abandoned) record: browser first, then the collector. The record sits in the unsent
+// queue from before the POST until the collector says OK, so a tab closed mid-send still retries next visit.
 async function flush(rec) {
-  const list = store.get(KEY) || []; list.push(rec); while (list.length > KEEP) list.shift(); store.set(KEY, list);
+  const list = (store.get(KEY) || []).filter(r => r.id !== rec.id); list.push({ ...rec, sent: false }); while (list.length > KEEP) list.shift(); store.set(KEY, list);
   store.del(PARTIAL);
+  queueUnsent(rec);
   const t = await targets();
   let accepted = false;
   for (const url of t.all) { const ok = await post(url, rec); if (url === t.primary) accepted = ok; }
-  if (!accepted) { const q = store.get(UNSENT) || []; q.push(rec); while (q.length > KEEP_UNSENT) q.shift(); store.set(UNSENT, q); }
+  if (accepted) { dequeueUnsent(rec.id); markSent(rec.id, true); }
 }
-// Send whatever the collector didn't accept last time (offline, spun-down free tier, first visit).
+// Send whatever the collector didn't accept last time (offline, spun-down free tier, first visit, closed tab).
 export async function retryUnsent() {
   const q = store.get(UNSENT) || []; if (!q.length) return 0;
-  const t = await targets(); let sent = 0; const left = [];
-  for (const rec of q) { if (await post(t.primary, rec)) sent++; else left.push(rec); }
-  store.set(UNSENT, left); return sent;
+  const t = await targets(); let sent = 0;
+  for (const rec of q) { if (await post(t.primary, rec)) { sent++; dequeueUnsent(rec.id); markSent(rec.id, true); } }
+  return sent;
 }
+// The game in progress goes to the collector every so often (and when the tab is hidden), marked partial, so a
+// browser that never comes back still leaves the match on record; the collector keeps the newest version.
+const SYNC_EVERY = 120e3; let lastSync = 0, syncing = false;
+async function syncPartial(force = false) {
+  if (!current || syncing) return; if (!force && now() - lastSync < SYNC_EVERY) return;
+  syncing = true; lastSync = now();
+  try { const t = await targets(); await post(t.primary, { ...current.rec, partial: true }); } finally { syncing = false; }
+}
+function onHidden() { if (document.visibilityState === 'hidden') { savePartial(); syncPartial(true); } }
 export const unsentCount = () => (store.get(UNSENT) || []).length;
+// What the collector reports about itself (games held, whether its folder survives deploys), or null if unreachable.
+export async function collectorStatus() { try { const t = await targets(); const r = await fetch(t.primary.replace(/\/?$/, '/status')); return r.ok ? { url: t.primary, ...(await r.json()) } : null; } catch { return null; } }
 
 // A game left unfinished by the last session (crash, reload) becomes a record marked abandoned.
-export function recoverPartial() { const rec = store.get(PARTIAL); if (rec) { rec.result = rec.result || { abandoned: true }; rec.endedAt = rec.endedAt || now(); flush(rec); } }
+export function recoverPartial() { const rec = store.get(PARTIAL); if (rec) { rec.result = rec.result || { abandoned: true, why: 'closed' }; rec.endedAt = rec.endedAt || now(); flush(rec); } }
 
 export function attachGameLog(duel, meta = {}) {
   if (current) detach();
@@ -77,6 +95,7 @@ export function attachGameLog(duel, meta = {}) {
     events: [], flags: [], errors: [], approximations: {}, result: null,
   };
   current = { duel, rec }; sinceSave = 0;
+  retryUnsent().catch(() => {});   // a new game is a good moment to deliver what earlier ones couldn't
   // engine narration, with the turn and step it happened in
   const say = duel.say.bind(duel); duel.say = msg => { say(msg); push({ k: 'log', msg }); };
   // the human's actions (what the engine accepted or refused)
@@ -90,8 +109,8 @@ export function attachGameLog(duel, meta = {}) {
   unlisten = () => {};
   duel.onChange(() => { const req = duel.pending?.type === 'request' ? duel.pending.req : null; if (req && req !== lastReq && !duel.players[req.player]?.ai) { lastReq = req; push({ k: 'req', kind: req.kind, text: req.text, options: (req.options || []).slice(0, 40).map(o => o.label ?? o) }); } });
   const end = duel.end.bind(duel); duel.end = (winner, why) => { end(winner, why); finish({ winner, winnerName: duel.players[winner]?.name, why, turns: duel.turn }); };
-  if (typeof window !== 'undefined') { window.addEventListener('error', onError); window.addEventListener('unhandledrejection', onError); window.addEventListener('beforeunload', savePartial); }
-  savePartial();
+  if (typeof window !== 'undefined') { window.addEventListener('error', onError); window.addEventListener('unhandledrejection', onError); window.addEventListener('beforeunload', savePartial); document.addEventListener('visibilitychange', onHidden); }
+  lastSync = now(); savePartial();
   return rec.id;
 }
 function onError(ev) { if (!current) return; const e = ev.error || ev.reason || ev; const entry = { t: now() - current.rec.startedAt, turn: current.duel.turn, step: current.duel.step, message: String(e?.message || e), stack: String(e?.stack || '').split('\n').slice(0, 8).join('\n') }; current.rec.errors.push(entry); push({ k: 'error', message: entry.message }); savePartial(); }
@@ -114,7 +133,7 @@ function finish(result) {
   const rec = current.rec; rec.result = result; rec.endedAt = now(); rec.approximations = approximations(current.duel);
   detach(); flush(rec);
 }
-function detach() { if (typeof window !== 'undefined') { window.removeEventListener('error', onError); window.removeEventListener('unhandledrejection', onError); window.removeEventListener('beforeunload', savePartial); } current = null; }
+function detach() { if (typeof window !== 'undefined') { window.removeEventListener('error', onError); window.removeEventListener('unhandledrejection', onError); window.removeEventListener('beforeunload', savePartial); document.removeEventListener('visibilitychange', onHidden); } current = null; }
 // A duel that ends without the engine declaring a winner (leaving the screen) is closed out here.
 export function closeGameLog(reason = 'left') { if (current) finish({ abandoned: true, why: reason, turns: current.duel.turn }); }
 

@@ -1,13 +1,15 @@
 // Admin view of the global game log: every match the collector has received (or this browser holds, or an
 // exported file), one row each, with the full turn-by-turn record, flagged moments and errors behind it.
 // Reading from the relay needs its LOG_TOKEN; the token is remembered in this browser only.
+import { retryUnsent, unsentCount, listGameLogs } from './gamelog.js';
 const app = document.getElementById('app');
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const S = { games: [], source: '', token: localStorage.getItem('ff.admin.token') || '', endpoint: '', open: null, filter: { mode: '', only: '', q: '' }, sort: 'newest', err: '' };
+const S = { games: [], source: '', token: localStorage.getItem('ff.admin.token') || '', endpoint: '', open: null, filter: { mode: '', only: '', q: '' }, sort: 'newest', err: '', status: null, sending: false };
 const fmtDate = t => t ? new Date(t).toLocaleString() : '—';
 const mins = g => g.endedAt && g.startedAt ? Math.max(1, Math.round((g.endedAt - g.startedAt) / 60000)) : null;
 const parseJsonl = text => text.split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
-const dedupe = list => { const seen = new Set(); return list.filter(g => g && g.id && !seen.has(g.id) && seen.add(g.id)); };
+// One row per game, newest version wins: a game in progress is re-sent as it goes, then once more when it ends.
+const dedupe = list => { const m = new Map(); for (const g of list) if (g && g.id && !(m.has(g.id) && m.get(g.id).result && !g.result)) m.set(g.id, g); return [...m.values()]; };
 
 async function config() { try { const c = await (await fetch('content/config.json')).json(); return c; } catch { return {}; } }
 async function loadRelay() {
@@ -20,7 +22,14 @@ async function loadRelay() {
   } catch (e) { S.err = 'Could not reach the relay: ' + e.message; }
   render();
 }
-function loadBrowser() { try { S.games = dedupe(JSON.parse(localStorage.getItem('ff.gamelogs.v1') || '[]')); } catch { S.games = []; } S.source = 'this browser'; S.err = ''; S.open = null; render(); }
+function loadBrowser() { try { S.games = dedupe(listGameLogs()); } catch { S.games = []; } S.source = 'this browser'; S.err = ''; S.open = null; render(); }
+// What the collector says about itself: how many games it holds and whether its folder survives a deploy.
+async function loadStatus() {
+  const base = S.endpoint.replace(/\/api\/log\/?$/, '');
+  try { const r = await fetch(`${base}/api/log/status`); S.status = r.ok ? await r.json() : { error: `answered ${r.status}` }; } catch (e) { S.status = { error: e.message }; }
+  render();
+}
+async function sendUnsent() { S.sending = true; render(); const n = await retryUnsent(); S.sending = false; if (S.source === 'this browser') loadBrowser(); S.err = n ? `Sent ${n} game${n === 1 ? '' : 's'} to the relay.` : (unsentCount() ? 'The relay did not accept them — is it reachable?' : ''); loadStatus(); }
 function loadFile(file) { const rd = new FileReader(); rd.onload = () => { S.games = dedupe(parseJsonl(String(rd.result))); S.source = file.name; S.err = ''; S.open = null; render(); }; rd.readAsText(file); }
 
 function visible() {
@@ -32,8 +41,14 @@ function visible() {
 }
 const who = g => (g.players || []).map(p => `${esc(p.name)}${p.ai ? ' <span class="ai">AI</span>' : ''}`).join(' vs ');
 const decks = g => g.meta?.playerDeck || g.meta?.opponentDeck ? `${esc(g.meta.playerDeck || '—')} vs ${esc(g.meta.opponentDeck || g.meta.opponent || '—')}` : esc(g.meta?.opponent || '');
-const result = g => !g.result ? '<span class="warn">in progress</span>' : g.result.abandoned ? `<span class="warn">abandoned${g.result.why ? ` (${esc(g.result.why)})` : ''}</span>` : `${esc(g.result.winnerName || (g.players || [])[g.result.winner]?.name || '?')} won${g.result.why ? ` · ${esc(g.result.why)}` : ''}`;
+const result = g => !g.result ? `<span class="warn">in progress${g.partial ? ' (synced mid-game)' : ''}</span>` : g.result.abandoned ? `<span class="warn">abandoned${g.result.why ? ` (${esc(g.result.why)})` : ''}</span>` : `${esc(g.result.winnerName || (g.players || [])[g.result.winner]?.name || '?')} won${g.result.why ? ` · ${esc(g.result.why)}` : ''}`;
 
+function statusLine() {
+  const st = S.status, n = unsentCount();
+  const relay = !st ? 'Checking the relay…' : st.error ? `<span class="warn">Relay unreachable (${esc(st.error)}).</span>` : `The relay holds <b>${st.games}</b> game${st.games === 1 ? '' : 's'}${st.persistent ? '' : ' <span class="warn">on a folder that is wiped at every deploy — set LOG_DIR to a mounted disk (see render.yaml)</span>'}.`;
+  const mine = `This browser keeps ${listGameLogs().length}${n ? `, <span class="warn">${n} not yet delivered</span> <button class="btn tiny" id="adm-send" ${S.sending ? 'disabled' : ''}>${S.sending ? 'Sending…' : 'Send now'}</button>` : ''}.`;
+  return `${relay} ${mine}`;
+}
 function render() {
   const list = visible();
   const modes = [...new Set(S.games.map(g => g.mode))].sort();
@@ -49,6 +64,7 @@ function render() {
         ${S.token ? '<button class="btn small ghost" id="adm-forget" title="Remove the remembered token from this browser">Forget token</button>' : ''}
         <span class="small">${S.endpoint ? `relay: ${esc(S.endpoint.replace(/\/api\/log\/?$/, ''))}` : ''}</span>
       </div>
+      <p class="small adm-status">${statusLine()}</p>
       ${S.err ? `<p class="msg">${esc(S.err)}</p>` : ''}
     </div>
     ${S.games.length ? `<div class="box">
@@ -59,8 +75,8 @@ function render() {
         <select id="adm-sort"><option value="newest" ${S.sort === 'newest' ? 'selected' : ''}>newest first</option><option value="oldest" ${S.sort === 'oldest' ? 'selected' : ''}>oldest first</option><option value="longest" ${S.sort === 'longest' ? 'selected' : ''}>most turns</option><option value="flags" ${S.sort === 'flags' ? 'selected' : ''}>most flags/errors</option></select>
         <span class="small">${list.length} shown · ${S.games.reduce((a, x) => a + (x.flags || []).length, 0)} ⚑ · ${S.games.reduce((a, x) => a + (x.errors || []).length, 0)} errors</span>
       </div>
-      <div class="tablewrap"><table class="coll adm-table"><tr><th>When</th><th>Mode</th><th>Players</th><th>Decks</th><th>Result</th><th>Turns</th><th>Min</th><th>⚑</th><th>Err</th></tr>
-      ${list.map(x => `<tr class="adm-row${x.id === S.open ? ' open' : ''}${(x.flags || []).length || (x.errors || []).length ? ' hot' : ''}" data-open="${esc(x.id)}"><td>${fmtDate(x.startedAt)}</td><td>${esc(x.mode)}</td><td>${who(x)}</td><td>${decks(x)}</td><td>${result(x)}</td><td>${x.result?.turns ?? '—'}</td><td>${mins(x) ?? '—'}</td><td>${(x.flags || []).length || ''}</td><td>${(x.errors || []).length || ''}</td></tr>`).join('')}</table></div>
+      <div class="tablewrap"><table class="coll adm-table"><tr><th>When</th><th>Mode</th><th>Players</th><th>Decks</th><th>Result</th><th>Turns</th><th>Min</th><th>⚑</th><th>Err</th>${S.source === 'this browser' ? '<th>Sent</th>' : ''}</tr>
+      ${list.map(x => `<tr class="adm-row${x.id === S.open ? ' open' : ''}${(x.flags || []).length || (x.errors || []).length ? ' hot' : ''}" data-open="${esc(x.id)}"><td>${fmtDate(x.startedAt)}</td><td>${esc(x.mode)}</td><td>${who(x)}</td><td>${decks(x)}</td><td>${result(x)}</td><td>${x.result?.turns ?? '—'}</td><td>${mins(x) ?? '—'}</td><td>${(x.flags || []).length || ''}</td><td>${(x.errors || []).length || ''}</td>${S.source === 'this browser' ? `<td>${x.sent ? '✓' : x.sent === false ? '<span class="warn">no</span>' : '?'}</td>` : ''}</tr>`).join('')}</table></div>
     </div>` : ''}
     ${g ? detail(g) : ''}
   </section>`;
@@ -99,6 +115,7 @@ document.addEventListener('click', ev => {
     case 'adm-browser': loadBrowser(); break;
     case 'adm-close': S.open = null; render(); break;
     case 'adm-forget': S.token = ''; localStorage.removeItem('ff.admin.token'); loadBrowser(); break;
+    case 'adm-send': sendUnsent(); break;
   }
 });
 document.addEventListener('change', ev => {
@@ -113,6 +130,6 @@ document.addEventListener('keydown', ev => { if (ev.target.id === 'adm-token' &&
 (async () => {
   const c = await config();
   S.endpoint = (c.logEndpoint || '').trim() || new URL('api/log', location.href).href;
-  render();
+  render(); loadStatus();
   if (S.token) loadRelay(); else loadBrowser();
 })();

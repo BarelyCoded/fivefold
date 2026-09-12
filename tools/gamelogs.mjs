@@ -17,8 +17,13 @@ if (pi >= 0) {
 }
 const gi = args.indexOf('--game');
 const file = args.find((a, i) => !a.startsWith('--') && i !== gi + 1) || new URL('../logs/games.jsonl', import.meta.url).pathname;
-if (!fs.existsSync(file)) { console.log(`No log file at ${file}. Play a game with node server.js (or relay.js) running, or export from the title screen.`); process.exit(0); }
-const games = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+// The local server keeps one file per game in logs/games/ (newest version of each), older records in games.jsonl.
+const gamesDir = new URL('../logs/games', import.meta.url).pathname;
+const byId = new Map();
+if (fs.existsSync(file)) for (const l of fs.readFileSync(file, 'utf8').split('\n').filter(Boolean)) { try { const g = JSON.parse(l); if (g?.id) byId.set(g.id, g); } catch {} }
+if (file.endsWith('games.jsonl') && fs.existsSync(gamesDir)) for (const f of fs.readdirSync(gamesDir)) if (f.endsWith('.json')) { try { const g = JSON.parse(fs.readFileSync(`${gamesDir}/${f}`, 'utf8')); if (g?.id) byId.set(g.id, g); } catch {} }
+if (!byId.size) { console.log(`No games in ${file} or ${gamesDir}. Play a game with node server.js (or relay.js) running, or export from the title screen.`); process.exit(0); }
+const games = [...byId.values()];
 const flag = f => args.includes(f); const gameId = gi >= 0 ? args[gi + 1] : null;
 if (gameId) { const g = games.find(x => x.id === gameId); if (!g) { console.log('no such game'); process.exit(1); } for (const e of g.events) console.log(`T${e.turn} ${e.step.padEnd(11)} ${e.k.padEnd(6)} ${e.k === 'log' ? e.msg : e.k === 'act' ? `${e.a} ${e.card || ''} ${JSON.stringify(e.opts || {})} ${e.ok ? '' : '(refused)'}` : e.k === 'req' ? `${e.kind}: ${e.text}` : e.k === 'answer' ? `${e.kind} -> ${JSON.stringify(e.value)}` : e.k === 'flag' ? `⚑ ${e.note}` : JSON.stringify(e)}`); process.exit(0); }
 const dur = g => g.endedAt && g.startedAt ? Math.round((g.endedAt - g.startedAt) / 60000) : null;
