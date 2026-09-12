@@ -358,5 +358,11 @@ section('Spirit Flare: flashback costs mana and life');
   const fb = g.def.keywords.find(k => k.k === 'Flashback');
   ok(fb && fb.life === 3 && fb.cost.generic === 1, `flashback is {1}{W} plus 3 life (${JSON.stringify(fb?.cost)}, life ${fb?.life})`); }
 
+section('Daru Cavalier: on entry, fetch another copy to hand');
+{ const d = newDuel(); mainPhase(d); const lib1 = lib(d, D('Daru Cavalier'), 0); lib(d, D('Grizzly Bears'), 0);
+  const dc = place(d, D('Daru Cavalier'), 0);
+  d.fireEvent({ type: 'etb', card: dc }); processAndResolve(d, [], y => y.options ? [y.options[0].id] : []);
+  ok(d.card(lib1.id)?.zone === 'hand', `a second Daru Cavalier was fetched to hand (${d.card(lib1.id)?.zone})`); }
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

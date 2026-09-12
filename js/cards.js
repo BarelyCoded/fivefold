@@ -478,6 +478,8 @@ const rules = [
   }],
   // Mercenary / Rebel chains: "Search your library for a Mercenary permanent card with mana value N or less, put it onto the battlefield, then shuffle."
   [/^search your library for (?:a|an) (.+?) permanent card with mana value (\d+) or less, put it onto the battlefield, then shuffle$/, m => [{ type: 'tutor', what: m[1].replace(/ or /g, '|'), maxMv: Number(m[2]), to: 'battlefield' }]],
+  // "Search your library for a card named ~, reveal it, put it into your hand, then shuffle." (Daru Cavalier, Avarax, Screaming Seahawk).
+  [/^search your library for a card named ~(?:, reveal (?:it|that card))?,? (?:and )?put (?:it|that card) (into your hand|onto the battlefield), then shuffle$/, m => [{ type: 'tutor', what: 'card', to: m[1].startsWith('into') ? 'hand' : 'battlefield', named: '$self' }]],
   [/^search your library for a card, put (?:it|that card) into your hand, then shuffle$/, () => [{ type: 'tutor', what: 'card', to: 'hand' }]],
   [/^search your library for a card and put (?:it|that card) into your hand\. then shuffle$/, () => [{ type: 'tutor', what: 'card', to: 'hand' }]],
   [/^tap (target .+)$/, m => tgt({ type: 'tap' }, m[1])],
@@ -1245,6 +1247,8 @@ export function compile(c) {
     // Instant / sorcery text is spell effects; permanents have abilities.
     if (/^(?:this spell|~) can't be countered(?: by spells or abilities)?\.?$/i.test(lower)) { def.uncounterable = true; continue; }   // Blurred Mongoose, Kavu Chameleon, Vexing Beetle, …
     if ((m = lower.match(/^flashback[—-]\s*(\{.+?\}), pay (\d+) life\.?$/))) { def.keywords.push({ k: 'Flashback', cost: parseCost(m[1]), life: Number(m[2]) }); continue; }   // Spirit Flare, Chill to the Bone
+    // "You may cast ~ as though it had flash. …": approximate as Flash; the "sacrifice at cleanup if cast at instant speed" downside is dropped.
+    if (/^you may cast ~ as though it had flash\b/.test(lower)) { if (!def.keywords.some(k => k.k === 'Flash')) def.keywords.push({ k: 'Flash' }); def.notes.push('Approximated: cast at instant speed; the "sacrifice it at cleanup if cast that way" downside is not enforced'); continue; }
     // Cabal Ritual: the threshold "Add {B}{B}{B}{B}{B} instead …" rider folds into the ritual on the line before it.
     if ((m = lower.match(/^(?:threshold — )?add ((?:\{[wubrgc]\})+) instead if there are seven or more cards in your graveyard\.?$/)) && spellEffects.length && spellEffects[spellEffects.length - 1].type === 'addMana') {
       spellEffects[spellEffects.length - 1].threshold = [...m[1].matchAll(/\{(\w)\}/g)].map(x => x[1].toUpperCase()); continue;

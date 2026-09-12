@@ -1431,7 +1431,7 @@ export class Duel {
         if (e.drawController) this.delayed.push({ player: s.item.controller, type: 'draw', amount: e.drawController });
         this.counterItem(s.item);
       } break;
-      case 'tutor': yield* this.tutor(p, e); break;
+      case 'tutor': yield* this.tutor(p, e, src); break;
       case 'returnSelfToHand': if (src.zone === 'graveyard') { this.moveTo(src, 'hand'); this.say(`${src.def.name} returns to its owner's hand.`); } break;
       // Amplify N: reveal any number of hand cards sharing a creature type with ~, enter with N counters per card.
       case 'amplify': { const self = src; const mine = (self.def.subtypes || []).filter(Boolean);
@@ -1566,9 +1566,9 @@ export class Duel {
     this.sacrifice(c);
     return true;
   }
-  *tutor(p, e) {
+  *tutor(p, e, src = null) {
     const what = e.what.replace(/ cards?$/, '');
-    const opts = p.library.filter(c => matchCardWhat(c, what) && (e.maxMv == null || (c.def.cmc ?? 0) <= e.maxMv));
+    const opts = p.library.filter(c => matchCardWhat(c, what) && (e.maxMv == null || (c.def.cmc ?? 0) <= e.maxMv) && (e.named !== '$self' || c.def.name === src.def.name));
     if (!opts.length) { this.say(`${p.name} finds nothing.`); shuffle(p.library, this.rng); return; }
     const max = Math.min(e.n || 1, opts.length);
     const ids = yield { kind: 'choose', player: p.idx, text: `Search your library for ${max > 1 ? `up to ${max} ${what} cards` : `a ${what}`}`, options: opts.map(c => ({ id: c.id, label: c.def.name })), min: 0, max, secret: true };
