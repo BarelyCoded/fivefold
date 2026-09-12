@@ -7,7 +7,7 @@ services:
   - type: web
     name: fivefold-relay
     runtime: node
-    plan: free            # free spins down when idle (first visitor waits ~30-60s); use "starter" to stay always-on
+    plan: starter         # always-on; "free" spins down when idle (first visitor waits ~30-60s) and cannot mount a disk
     buildCommand: npm install   # no dependencies, so this is effectively a no-op
     startCommand: node relay.js  # Render injects PORT, which relay.js already honors
     healthCheckPath: /
@@ -15,5 +15,11 @@ services:
     envVars:
       - key: LOG_TOKEN        # needed to read the game logs back: node tools/gamelogs.mjs --pull <url> --token <this>
         generateValue: true
-    # The free plan's disk is wiped on each deploy/restart. To keep game logs across restarts, attach a disk
-    # (Render: Disks -> mount at /data) and set LOG_DIR=/data; until then, --pull them regularly.
+      - key: LOG_DIR          # game logs live on the persistent disk below, so they survive deploys and restarts
+        value: /data
+    # Game logs (logs/games.jsonl) persist here. A disk pins the service to one instance and turns off
+    # zero-downtime deploys — fine for a relay; the multiplayer lobby is in memory anyway.
+    disk:
+      name: gamelogs
+      mountPath: /data
+      sizeGB: 1
