@@ -109,6 +109,9 @@ tr.st-unsupported td:nth-child(7), tr.st-unsupported td:nth-child(3), tr.st-miss
 .mpdeck .cols.wide { gap: 16px; }
 .mp-quick { margin: 8px 0; border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; }
 .mp-quick summary { cursor: pointer; color: var(--ink2); }
+.mp-load-h { font-size: 12px; color: var(--ink3); margin: 8px 0 4px; }
+.mp-deckpick { display: flex; flex-wrap: wrap; gap: 6px; }
+.mp-deckpick .btn { flex: 0 1 auto; }
 .mullhand { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 .mullcard { padding: 3px 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg2); font-size: 13px; }
 .mullcard .dot { width: 9px; height: 9px; vertical-align: 0; }

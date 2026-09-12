@@ -2010,9 +2010,33 @@ function mpWire(net) {
 function mpToDeck() {
   const mp = S.mp; mp.view = 'deck'; mp.ready = false; mp.oppReady = false; mp.started = false;
   mp.mull = false; mp.begun = false; mp.guestKeptLocal = false; mp.lastSnap = null; mp.duel = null; mp.mirror = null; mp.root = null; mp.api = null;
+  if (S.decks === undefined) loadDecks();
+  ensureAiDecks().then(() => { if (S.screen === 'mpdeck') render(); });   // the same preset decks the vs-AI screen offers
   if (!mp.deck) mp.deck = buildStartDeck(mp.deckColor, DIFF[mp.deckDiff].colors, Math.random);
   go('mpdeck');
 }
+// Load a preset (vs-AI archetype) or a saved deck into the multiplayer deck slot. The cards are fetched
+// first so their rules resolve even if this browser has never cached them; anything unsupported is dropped.
+async function mpLoadDeckObj(deckObj, label) {
+  const mp = S.mp; if (!mp || !deckObj) return;
+  const names = Object.keys(deckObj);
+  setBusy(`Loading ${label}…`);
+  try { await importNames(names.map(n => ({ name: n, count: deckObj[n] }))); } catch {}
+  setBusy('');
+  const deck = {}; const missing = [];
+  for (const [name, count] of Object.entries(deckObj)) {
+    const d = defOf(name);
+    if (!d || d.kind === 'unsupported') { missing.push(name); continue; }
+    deck[name] = Math.min(count, copyCap(name));
+  }
+  if (!Object.keys(deck).length) { toast(`None of “${label}” is available yet.`); return; }
+  mp.deck = deck;
+  if (mp.ready) { mp.ready = false; mp.net?.relay({ k: 'ready', ready: false }); }
+  toast(missing.length ? `Loaded “${label}” (${missing.length} card${missing.length === 1 ? '' : 's'} skipped).` : `Loaded “${label}”.`);
+  render();
+}
+function mpLoadPreset(name) { const d = S.aiDecks?.find(x => x.name === name); if (d) mpLoadDeckObj(d.deck, d.name); }
+function mpLoadSaved(id) { const d = S.decks?.find(x => x.id === id); if (d) mpLoadDeckObj(d.deck, d.name); }
 function mpSetDeck(color, diff) { const mp = S.mp; mp.deckColor = color; mp.deckDiff = diff; mp.deck = buildStartDeck(color, DIFF[diff].colors, Math.random); mp.ready = false; mp.net.relay({ k: 'ready', ready: false }); render(); }
 function mpReroll() { const mp = S.mp; mp.deck = buildStartDeck(mp.deckColor, DIFF[mp.deckDiff].colors, Math.random); mp.ready = false; mp.net.relay({ k: 'ready', ready: false }); render(); }
 function mpReady() { const mp = S.mp; mp.ready = true; mp.net.relay({ k: 'deck', deck: mp.deck, name: mp.name, ready: true }); render(); mpTryStart(); }
@@ -2259,7 +2283,13 @@ function mpdeck() {
     </div>
     <div class="box">
       <div class="rowhead"><h2>Your deck · ${size} cards, ${lands} lands</h2><span class="rowtools"><button class="btn" id="mp-import">Import</button><button class="btn" id="mp-export"${size ? '' : ' disabled'}>Export</button><button class="btn" id="mp-clear"${size ? '' : ' disabled'}>Clear</button></span></div>
-      <details class="mp-quick"><summary>Quick deck</summary>
+      <details class="mp-quick" open><summary>Load a deck</summary>
+        ${(S.aiDecks && S.aiDecks.length) ? `<div class="mp-load-h">Premodern archetypes <span class="small">— the same decks you can play against the AI</span></div>
+          <div class="mp-deckpick">${S.aiDecks.map(d => `<button class="btn small" data-mppreset="${esc(d.name)}">${esc(d.name)}</button>`).join('')}</div>` : '<p class="small">Loading preset decks…</p>'}
+        ${(S.decks && S.decks.length) ? `<div class="mp-load-h">Your saved decks</div>
+          <div class="mp-deckpick">${S.decks.slice().sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0)).map(d => `<button class="btn small" data-mpsaved="${esc(d.id)}">${esc(d.name)} <span class="small">(${brewCount(d.deck)})</span></button>`).join('')}</div>` : ''}
+      </details>
+      <details class="mp-quick"><summary>Quick deck (random)</summary>
         <fieldset><legend>Main colour</legend>${COLORS.map(c => `<label class="radio"><input type="radio" name="mpcolor" value="${c}" ${c === mp.deckColor ? 'checked' : ''}> <i class="dot c-${c}"></i>${COLOR_NAME[c]}</label>`).join('')}</fieldset>
         <label>Colours <select id="mp-diff">${Object.entries(DIFF).map(([k, d]) => `<option value="${k}" ${k === mp.deckDiff ? 'selected' : ''}>${['', 'One colour', 'Two colours', 'Three colours'][d.colors]}</option>`).join('')}</select></label>
         <button class="btn" id="mp-reroll">Generate this deck</button>
@@ -2301,6 +2331,8 @@ document.addEventListener('click', ev => {
   const mp = S.mp;
   const jb = ev.target.closest('[data-mpjoin]'); if (jb && mp?.net) { mp.msg = ''; mp.net.join(jb.dataset.mpjoin); return; }
   if (mp && S.screen === 'mpdeck') {
+    const pre = ev.target.closest('[data-mppreset]'); if (pre) { mpLoadPreset(pre.dataset.mppreset); return; }
+    const sav = ev.target.closest('[data-mpsaved]'); if (sav) { mpLoadSaved(sav.dataset.mpsaved); return; }
     const sandbox = mpSandbox();
     const el = ev.target.closest('[data-mpadd],[data-mpaddmax],[data-mprem],[data-mpremmax]');
     if (el) {
