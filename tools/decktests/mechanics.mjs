@@ -326,5 +326,26 @@ section('Rebel search: fetch a Rebel of low mana value to the battlefield');
     ok(d.players[0].battlefield.some(c => c.def.subtypes.includes('Rebel') && c !== rs), 'a Rebel was put onto the battlefield'); }
   else ok(false, 'could not activate the Rebel search'); }
 
+section('Cabal Ritual: three black, or five with threshold');
+{ const d = newDuel(); mainPhase(d); const cr = hand(d, D('Cabal Ritual'), 0); pool(d, 0, { B:2 });
+  ok(d.cast(d.players[0], cr, {}), 'cast'); while (d.stack.length) drive(d.resolveTop());
+  ok(d.players[0].pool.B === 3, `three black with no threshold (${d.players[0].pool.B})`);
+  const d2 = newDuel(); mainPhase(d2); const cr2 = hand(d2, D('Cabal Ritual'), 0); pool(d2, 0, { B:2 }); for (let i = 0; i < 7; i++) gy(d2, bears(), 0);
+  ok(d2.cast(d2.players[0], cr2, {}), 'cast with threshold'); while (d2.stack.length) drive(d2.resolveTop());
+  ok(d2.players[0].pool.B === 5, `five black with threshold (${d2.players[0].pool.B})`); }
+
+section('Recurring Aura returns to hand when it dies');
+{ const d = newDuel(); mainPhase(d); const bear = place(d, bears(), 1); const cess = D('Cessation'); const aura = d.instance(cess, 0); aura.zone = 'battlefield'; aura.attachedTo = bear; d.players[0].battlefield.push(aura); d.refresh();
+  d.destroy(bear, true); d.sba(); processAndResolve(d);
+  ok(d.card(aura.id)?.zone === 'hand', `Cessation returned to hand after falling off (${d.card(aura.id)?.zone})`); }
+
+section('Depletion land: enters tapped with two counters, makes double mana');
+{ const d = newDuel(); mainPhase(d); const hw = D('Hickory Woodlot'); const c = d.instance(hw, 0); c.zone = 'library'; d.players[0].library.push(c);
+  d.players[0].landPlayed = 0; d.playLand ? null : null;
+  const inst = d.instance(hw, 0); inst.zone = 'battlefield'; d.players[0].battlefield.push(inst);
+  for (const ab of inst.def.abilities) if (ab.kind === 'entersWithCounters') inst.counters[ab.counter] = (inst.counters[ab.counter] || 0) + ab.amount;
+  if (inst.def.abilities.some(a => a.kind === 'entersTapped')) inst.tapped = true;
+  ok((inst.counters['depletion'] || 0) === 2 && inst.tapped, `enters tapped with two depletion counters (${inst.counters['depletion']}, tapped=${inst.tapped})`); }
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

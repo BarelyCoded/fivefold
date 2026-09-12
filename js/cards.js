@@ -259,6 +259,7 @@ const rules = [
   [/^put (target creature card from a graveyard) onto the battlefield under your control$/, m => tgt({ type: 'fromGraveyard', to: 'battlefield' }, m[1])],
   [/^return that card to the battlefield under your control$/, () => [{ type: 'fromGraveyard', to: 'battlefield', sel: 'prev' }]],
   [/^return that card to its owner's hand$/, () => [{ type: 'fromGraveyard', to: 'hand', sel: 'prev' }]],
+  [/^return (?:it|~) to its owner's hand$/, () => [{ type: 'returnSelfToHand' }]],   // recurring Auras: Cessation, Sleeper's Guile, …
   [/^sacrifice (?:it|~)$/, () => [{ type: 'sacrificeSelf' }]],
   [/^sacrifice a creature other than ~\. if you can't, ~ deals (\d+) damage to you$/, m => [{ type: 'sacrifice', what: 'creature', other: true, sel: 'you', orElse: [{ type: 'damage', amount: Number(m[1]), sel: 'you' }] }]],
   [/^(target player|target opponent|each player|each opponent|you|that player|its controller) sacrifices? (?:a|an|\S+) (creature|land|artifact|enchantment|permanent)s?(?: of (?:their|an opponent's) choice)?$/, m => { const k = T(m[1]); return k ? [{ type: 'sacrifice', what: m[2], ...k }] : null; }],
@@ -607,6 +608,8 @@ export function parseEffects(text) {
   const whole = body.replace(/\s+/g, ' ').replace(/\.$/, '').trim();   // collapse newlines so multi-sentence whole-text rules match
   if (/^each player chooses a number of lands they control equal to the number of lands controlled by the player who controls the fewest, then sacrifices the rest\. (?:each player discards cards the same way, then sacrifices creatures the same way|players discard cards and sacrifice creatures the same way)$/.test(whole)) { out.effects.push({ type: 'balance' }); return out; }
   let wm;
+  // Cabal Ritual: "Add {B}{B}{B}. Threshold — Add {B}{B}{B}{B}{B} instead if there are seven or more cards in your graveyard."
+  if ((wm = whole.match(/^add ((?:\{[wubrgc]\})+)\. (?:threshold — )?add ((?:\{[wubrgc]\})+) instead if there are seven or more cards in your graveyard$/))) { const base = [...wm[1].matchAll(/\{(\w)\}/g)].map(x => x[1].toUpperCase()); const thr = [...wm[2].matchAll(/\{(\w)\}/g)].map(x => x[1].toUpperCase()); out.effects.push({ type: 'addMana', mana: base, threshold: thr }); return out; }
   if ((wm = whole.match(/^sacrifice a creature other than ~\. if you can't, ~ deals (\d+) damage to you$/))) { out.effects.push({ type: 'sacrifice', what: 'creature', other: true, sel: 'you', orElse: [{ type: 'damage', amount: Number(wm[1]), sel: 'you' }] }); return out; }
   if (/^each player discards their hand, then draws cards equal to the greatest number of cards a player discarded this way$/.test(whole)) { out.effects.push({ type: 'windfall' }); return out; }
   if (/^each player discards any number of cards, then draws that many cards$/.test(whole)) { out.effects.push({ type: 'fluxDiscard' }); return out; }
@@ -888,6 +891,8 @@ function parseStatic(t) {
   if ((m = t.match(/^~'s power is equal to the number of creature cards in all graveyards and its toughness is equal to that number plus 1$/))) return [{ type: 'static', kind: 'cda', count: 'creature cards in graveyards', plusT: 1, scope: { who: 'self' } }];
   if (/^~ enters(?: the battlefield)? tapped$/.test(t)) return [{ type: 'static', kind: 'entersTapped', scope: { who: 'self' } }];
   if ((m = t.match(/^~ enters(?: the battlefield)? with (\S+) ([+-]\d+\/[+-]\d+|[a-z]+) counters? on it$/))) return [{ type: 'static', kind: 'entersWithCounters', amount: amt(m[1]), counter: m[2], scope: { who: 'self' } }];
+  // "~ enters tapped with two depletion counters on it" (Hickory Woodlot, Peat Bog, Sandstone Needle, …): both at once.
+  if ((m = t.match(/^~ enters(?: the battlefield)? tapped with (\S+) ([a-z]+) counters? on it$/))) return [{ type: 'static', kind: 'entersTapped', scope: { who: 'self' } }, { type: 'static', kind: 'entersWithCounters', amount: amt(m[1]), counter: m[2], scope: { who: 'self' } }];
   if (/^you may choose not to untap ~ during your untap step$/.test(t)) return [{ type: 'static', kind: 'mayNotUntap', scope: { who: 'self' } }];
   if ((m = t.match(/^when you control no (plains|islands|swamps|mountains|forests), sacrifice ~$/))) return [{ type: 'static', kind: 'needsLand', land: cap(m[1].replace(/s$/, '')), scope: { who: 'self' } }];
   if ((m = t.match(/^(~|enchanted creature) can't block creatures with power (\d+) or greater$/))) return [{ type: 'static', kind: 'cantBlockPowerGE', n: Number(m[2]), scope: parseScope(m[1]) }];
@@ -1237,6 +1242,10 @@ export function compile(c) {
     if (def.unsupportedReason) break;
     // Instant / sorcery text is spell effects; permanents have abilities.
     if (/^(?:this spell|~) can't be countered(?: by spells or abilities)?\.?$/i.test(lower)) { def.uncounterable = true; continue; }   // Blurred Mongoose, Kavu Chameleon, Vexing Beetle, …
+    // Cabal Ritual: the threshold "Add {B}{B}{B}{B}{B} instead …" rider folds into the ritual on the line before it.
+    if ((m = lower.match(/^(?:threshold — )?add ((?:\{[wubrgc]\})+) instead if there are seven or more cards in your graveyard\.?$/)) && spellEffects.length && spellEffects[spellEffects.length - 1].type === 'addMana') {
+      spellEffects[spellEffects.length - 1].threshold = [...m[1].matchAll(/\{(\w)\}/g)].map(x => x[1].toUpperCase()); continue;
+    }
     if (def.kind === 'instant' || def.kind === 'sorcery') {
       // "When you cycle ~, ..." / "When ~ is put into your graveyard from your library, ..." on a spell are
       // triggered abilities of the card, not part of the spell's effect.

@@ -1431,6 +1431,7 @@ export class Duel {
         this.counterItem(s.item);
       } break;
       case 'tutor': yield* this.tutor(p, e); break;
+      case 'returnSelfToHand': if (src.zone === 'graveyard') { this.moveTo(src, 'hand'); this.say(`${src.def.name} returns to its owner's hand.`); } break;
       // Amplify N: reveal any number of hand cards sharing a creature type with ~, enter with N counters per card.
       case 'amplify': { const self = src; const mine = (self.def.subtypes || []).filter(Boolean);
         const opts = p.hand.filter(c => isCreatureDef(c) && (c.def.subtypes || []).some(t => mine.includes(t)));
@@ -1495,7 +1496,7 @@ export class Duel {
       case 'removeCounters': for (const s of subs) if (s.card) { s.card.counters['+1/+1'] = 0; s.card.counters['-1/-1'] = 0; } break;
       case 'regenerate': for (const s of subs) if (s.card) { s.card.regen++; this.say(`${s.card.def.name} gains a regeneration shield.`); } break;
       case 'fog': this.fog = true; this.say('All combat damage this turn is prevented.'); break;
-      case 'addMana': { const times = e.times !== undefined ? this.amount(e.times, ctx) : 1; if (e.any) { const k = this.amount(e.any, ctx) * times; if (k > 0) { const col = p.ai ? (this.hooks.choose(this, { kind: 'color', player: p.idx }) || 'G') : yield { kind: 'color', player: p.idx, text: 'Choose a color' }; p.pool[col] += k; this.say(`${p.name} adds ${k} ${col}.`); } } else for (let i = 0; i < times; i++) for (const m of e.mana) p.pool[m]++; break; }
+      case 'addMana': { const times = e.times !== undefined ? this.amount(e.times, ctx) : 1; if (e.any) { const k = this.amount(e.any, ctx) * times; if (k > 0) { const col = p.ai ? (this.hooks.choose(this, { kind: 'color', player: p.idx }) || 'G') : yield { kind: 'color', player: p.idx, text: 'Choose a color' }; p.pool[col] += k; this.say(`${p.name} adds ${k} ${col}.`); } } else { const mana = e.threshold && p.graveyard.length >= 7 ? e.threshold : e.mana; for (let i = 0; i < times; i++) for (const m of mana) p.pool[m]++; this.say(`${p.name} adds ${(e.threshold && p.graveyard.length >= 7 ? e.threshold : e.mana).join('')}.`); } break; }
       case 'scry': yield* this.scry(p, n); break;
       case 'preventNext': for (const s of subs) { if (s.card) s.card.shield += n; else if (s.player) s.player.shield += n; this.say(`The next ${n} damage to ${s.card ? s.card.def.name : s.player.name} this turn will be prevented.`); } break;
       case 'copShield': for (const s of subs) if (s.player) { s.player.cop.push(e.from); this.say(`${s.player.name} is shielded from the next ${e.from === 'artifact' ? 'artifact' : e.from} source this turn.`); } break;
