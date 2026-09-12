@@ -1047,11 +1047,17 @@ export class Duel {
     }
     if (item.pay) {
       const payer = item.payer === 'thatPlayer' && item.thatPlayer !== undefined ? this.players[item.thatPlayer] : p;
-      let yes = false;
-      // "you may pay {X}" (Decree of Justice's cycling trigger): X is whatever the payer can afford.
-      let x = 0; if (item.pay.x) { for (x = 20; x > 0; x--) if (this.canPay(payer, item.pay, x)) break; }
-      if (item.pay.x ? x > 0 : this.canPay(payer, item.pay)) yes = yield { kind: 'yesno', player: payer.idx, text: `${card.def.name}: pay ${item.pay.x ? `{X} with X=${x}` : costString(item.pay)}? (${item.text || 'if you do, the effect happens'})`, card: card.id, value: 'payTrigger' };
-      if (!yes) { this.say(`${payer.name} does not pay for ${card.def.name}.`); this.afterResolve(); return; }
+      let x = 0;
+      if (item.pay.x) {
+        // "you may pay {X}" (Decree of Justice's cycling trigger): the human picks X up to what they can afford.
+        let maxX = 0; for (maxX = 20; maxX > 0; maxX--) if (this.canPay(payer, item.pay, maxX)) break;
+        if (maxX <= 0) { this.say(`${payer.name} cannot pay for ${card.def.name}.`); this.afterResolve(); return; }
+        x = payer.ai ? maxX : (yield { kind: 'number', player: payer.idx, text: `${card.def.name}: pay {X} — ${item.text || 'the effect uses X'} (0 to decline)`, min: 0, max: maxX, default: maxX });
+        if (!x || x <= 0) { this.say(`${payer.name} does not pay for ${card.def.name}.`); this.afterResolve(); return; }
+      } else {
+        const yes = this.canPay(payer, item.pay) && (yield { kind: 'yesno', player: payer.idx, text: `${card.def.name}: pay ${costString(item.pay)}? (${item.text || 'if you do, the effect happens'})`, card: card.id, value: 'payTrigger' });
+        if (!yes) { this.say(`${payer.name} does not pay for ${card.def.name}.`); this.afterResolve(); return; }
+      }
       this.payMana(payer, this.planPayment(payer, item.pay, x)); item.x = x; this.say(`${payer.name} pays ${item.pay.x ? `X=${x}` : costString(item.pay)} for ${card.def.name}.`);
     }
     const specs = item.effects.filter(needsTarget);

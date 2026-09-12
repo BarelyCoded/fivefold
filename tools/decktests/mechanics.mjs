@@ -12,12 +12,13 @@ const D = name => { const c = all.get(name); if (!c) throw new Error('missing ' 
 
 let pass = 0, fail = 0; const ok = (c, m) => { if (c) pass++; else { fail++; console.log('  FAIL', m); } };
 const section = n => console.log('-- ' + n);
-function drive(gen, targets = [], chooser = null) {
+function drive(gen, targets = [], chooser = null, numFn = null) {
   let r = gen.next();
   while (!r.done) {
     const y = r.value;
     if (y.kind === 'target') r = gen.next(targets.shift());
     else if (y.kind === 'yesno') r = gen.next(true);
+    else if (y.kind === 'number') r = gen.next(numFn ? numFn(y) : (y.default ?? y.max ?? 0));
     else if (y.kind === 'choose') r = gen.next(chooser ? chooser(y) : y.options.slice(0, Math.max(y.min, 1)).map(o => o.id));
     else r = gen.next();
   }
@@ -31,7 +32,7 @@ const mainPhase = d => { d.active = 0; d.priority = 0; d.step = 'main1'; d.turn 
 const pool = (d, i, o) => { d.players[i].pool = { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0, ...o }; };
 const bears = () => D('Grizzly Bears'), pile = () => D('Goblin Piledriver');
 const abIdx = (def, pred) => def.abilities.findIndex(pred);
-const processAndResolve = (d, targets = [], chooser = null) => { drive(d.processEvents(), targets, chooser); while (d.stack.length) drive(d.resolveTop(), targets, chooser); };
+const processAndResolve = (d, targets = [], chooser = null, numFn = null) => { drive(d.processEvents(), targets, chooser, numFn); while (d.stack.length) drive(d.resolveTop(), targets, chooser, numFn); };
 
 section('Squee returns from the graveyard at upkeep');
 { const d = newDuel(); mainPhase(d); const sq = gy(d, D('Squee, Goblin Nabob'), 0);
@@ -167,11 +168,24 @@ section('Gemstone Mine runs dry');
   for (let i = 0; i < 3; i++) { gm.tapped = false; d.activateMana(d.players[0], gm, 0, 'G'); }
   ok(gm.zone === 'graveyard', `sacrificed after the third use (zone=${gm.zone})`); }
 
-section('Decree of Justice: cycle, pay X, make Soldiers');
+section('Decree of Justice: cycle, then choose X (not forced to spend all mana)');
 { const d = newDuel(); mainPhase(d); pool(d, 0, { W: 1, R: 5 }); const dj = hand(d, D('Decree of Justice'), 0); lib(d, D('Island'), 0);
-  ok(d.cast(d.players[0], dj, { cycling: true }), 'cycled'); processAndResolve(d);
+  ok(d.cast(d.players[0], dj, { cycling: true }), 'cycled');
+  const asked = []; processAndResolve(d, [], null, y => { asked.push(y); return 2; });   // affordable up to X=6; the player picks 2
+  ok(asked.length === 1 && asked[0].kind === 'number' && asked[0].max === 3, `asked for an X value up to the mana left after cycling (max=${asked[0]?.max})`);
   const tokens = d.players[0].battlefield.filter(c => c.token);
-  ok(tokens.length === 3, `X=3 Soldier tokens made (${tokens.length})`); }
+  ok(tokens.length === 2, `made exactly the X the player chose (${tokens.length})`);
+  ok(Object.values(d.players[0].pool).reduce((a, b) => a + b, 0) === 1, `only 2 of the 3 remaining mana spent, 1 still floating (${JSON.stringify(d.players[0].pool)})`); }
+
+section('Decree of Justice: X=0 declines the trigger, no tokens');
+{ const d = newDuel(); mainPhase(d); pool(d, 0, { W: 1, R: 5 }); const dj = hand(d, D('Decree of Justice'), 0); lib(d, D('Island'), 0);
+  ok(d.cast(d.players[0], dj, { cycling: true }), 'cycled'); processAndResolve(d, [], null, () => 0);
+  ok(d.players[0].battlefield.filter(c => c.token).length === 0, 'X=0: no Soldiers'); }
+
+section('Decree of Justice: the AI takes the maximum X');
+{ const d = newDuel(); mainPhase(d); d.players[0].ai = true; pool(d, 0, { W: 1, R: 5 }); const dj = hand(d, D('Decree of Justice'), 0); lib(d, D('Island'), 0);
+  ok(d.cast(d.players[0], dj, { cycling: true }), 'cycled'); processAndResolve(d);
+  ok(d.players[0].battlefield.filter(c => c.token).length === 3, `AI spent the three left after cycling (${d.players[0].battlefield.filter(c => c.token).length})`); }
 
 section('Price of Progress');
 { const d = newDuel(); mainPhase(d); pool(d, 0, { R: 2 }); place(d, D('Mountain'), 0); place(d, D('Rishadan Port'), 1); place(d, D('Rishadan Port'), 1);
