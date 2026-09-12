@@ -30,12 +30,17 @@ const partial = await p.evaluate(()=>JSON.parse(localStorage.getItem('ff.gamelog
 ok(partial && partial.mode==='playtest' && partial.meta.opponentDeck==='Sligh' && partial.meta.playerDeck && partial.players.length===2 && Object.keys(partial.players[0].deck).length>3, `in-progress record saved (mode=${partial?.mode}, vs ${partial?.meta?.opponentDeck}, my deck ${partial?.meta?.playerDeck})`);
 ok(partial.events.some(e=>e.k==='log'), `engine lines captured (${partial.events.length} events so far)`);
 // flag an issue
-await p.evaluate(()=>{ window.prompt = () => 'Test flag: the Piledriver should have gotten +2/+0'; });
-await p.click('#b-flag'); await p.waitForTimeout(40);
-const msg = await p.evaluate(()=>document.body.innerText.includes('Noted in the game log'));
+await p.click('#b-flag'); await p.waitForSelector('.modal.report',{timeout:3000});
+ok(await p.$('#rep-send[disabled]'), 'send is disabled until something is written');
+await p.check('input[name="rep-kind"][value="mechanic"]');
+const cardOpts = await p.$$eval('#rep-card option', os=>os.map(o=>o.value)); ok(cardOpts.length>2, `card picker lists cards on the table (${cardOpts.length})`);
+await p.selectOption('#rep-card', cardOpts[1]); await p.waitForTimeout(100);
+await p.fill('#rep-text','Test flag: the Piledriver should have gotten +2/+0'); await p.waitForTimeout(100);
+await p.click('#rep-send'); await p.waitForTimeout(40);
+const msg = await p.evaluate(()=>document.body.innerText.includes('Report saved'));
 ok(msg, 'report acknowledged in the UI');
 const afterFlag = await p.evaluate(()=>JSON.parse(localStorage.getItem('ff.gamelog.partial.v1')||'null'));
-ok(afterFlag.flags.length===1 && afterFlag.flags[0].board && afterFlag.flags[0].board.players && typeof afterFlag.flags[0].turn==='number', `flag stored with a board snapshot (turn ${afterFlag.flags[0]?.turn}, ${afterFlag.flags[0]?.recent?.length} recent lines)`);
+ok(afterFlag.flags.length===1 && afterFlag.flags[0].board && afterFlag.flags[0].board.players && typeof afterFlag.flags[0].turn==='number' && afterFlag.flags[0].category==='mechanic' && afterFlag.flags[0].card===cardOpts[1], `flag stored with category, card and board snapshot (${afterFlag.flags[0]?.category}, ${afterFlag.flags[0]?.card}, turn ${afterFlag.flags[0]?.turn})`);
 // concede to finish
 await p.evaluate(()=>{ window.confirm = () => true; });
 await p.click('#b-concede'); await p.waitForTimeout(2500);

@@ -96,14 +96,17 @@ export function attachGameLog(duel, meta = {}) {
 }
 function onError(ev) { if (!current) return; const e = ev.error || ev.reason || ev; const entry = { t: now() - current.rec.startedAt, turn: current.duel.turn, step: current.duel.step, message: String(e?.message || e), stack: String(e?.stack || '').split('\n').slice(0, 8).join('\n') }; current.rec.errors.push(entry); push({ k: 'error', message: entry.message }); savePartial(); }
 
-// The player says something went wrong: keep their note with the board as it stands right now.
-export function flagIssue(note, duel, forIdx = 0) {
-  if (!current || (duel && duel !== current.duel)) return false;
-  const d = current.duel;
+// The player reports a problem — a card error, a mechanic that didn't work, something to improve — with
+// the board as it stands right now. `extra` carries the category and the card they pointed at. A duel
+// that isn't being recorded (a multiplayer guest's mirror) still gets its report through as a record of
+// its own.
+export function flagIssue(note, duel, forIdx = 0, extra = {}) {
+  const d = current && (!duel || duel === current.duel) ? current.duel : duel;
+  if (!d) return false;
   let board = null; try { board = d.snapshot(forIdx); } catch {}
-  const recent = current.rec.events.filter(e => e.k === 'log').slice(-12).map(e => e.msg);
-  current.rec.flags.push({ t: now() - current.rec.startedAt, turn: d.turn, step: d.step, note, recent, board, stack: d.stack.map(it => it.card ? it.card.def.name : it.kind) });
-  push({ k: 'flag', note }); savePartial();
+  const flag = { t: current ? now() - current.rec.startedAt : 0, turn: d.turn, step: d.step, category: extra.category || 'other', card: extra.card || null, note, recent: d.log.slice(-12), board, stack: d.stack.map(it => it.card ? it.card.def.name : it.kind) };
+  if (current && d === current.duel) { flag.recent = current.rec.events.filter(e => e.k === 'log').slice(-12).map(e => e.msg); current.rec.flags.push(flag); push({ k: 'flag', note, category: flag.category, card: flag.card }); savePartial(); }
+  else flush({ id: 'r' + now().toString(36) + Math.random().toString(36).slice(2, 6), startedAt: now(), endedAt: now(), mode: 'report', meta: { standalone: true }, url: typeof location !== 'undefined' ? location.href : '', ua: typeof navigator !== 'undefined' ? navigator.userAgent : '', players: d.players.map(p => ({ name: p.name, ai: !!p.ai, life: p.life, deck: deckOf(p), sideboard: [] })), events: [], flags: [flag], errors: [], approximations: approximations(d), result: { report: true } });
   return true;
 }
 function finish(result) {

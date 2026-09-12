@@ -50,7 +50,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     mana: (c, i, col) => duel.manaFor(localIdx, c, i, col), answer: v => duel.answerFor(localIdx, v),
     mulligan: () => duel.mulligan(localIdx), concede: () => duel.end(1 - localIdx, `${me.name} concedes.`),
   };
-  const ui = { wizard: null, attackers: new Set(), blocks: {}, blocker: null, message: '', menu: null, viewer: null, choice: null, order: null };
+  const ui = { wizard: null, attackers: new Set(), blocks: {}, blocker: null, message: '', menu: null, viewer: null, choice: null, order: null, report: null };
   let finished = false, running = false;
 
   // Auto-pass: when the human holds priority but has no land to play, no spell to cast, and no
@@ -455,6 +455,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
         <button id="b-concede" class="btn small ghost">Concede</button>
       </aside>
       ${ui.viewer !== null ? viewerHtml() : ''}
+      ${ui.report ? reportHtml() : ''}
       ${ui.mulligan ? mulliganHtml() : ''}
       ${cardChoiceActive() ? cardChoiceHtml() : ''}
     </div>`;
@@ -487,6 +488,28 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
       <p class="small">You drew <b>${lands} land${lands === 1 ? '' : 's'}</b> in ${me.hand.length} cards.${canMull ? ' A land-light hand — you may shuffle it back and redraw, free of charge.' : ' A workable hand.'}</p>
       <div class="viewer">${me.hand.map(c => cardHtml(c.def, { id: c.id, zone: 'mull' })).join('')}</div>
       <div class="btnrow"><button class="btn primary" id="b-mull-keep">Keep this hand</button><button class="btn" id="b-mull-again" ${canMull ? '' : 'disabled'}>Mulligan</button></div>
+    </div></div>`;
+  }
+  // Report a problem with this match: category, the card involved (anything visible on the table, in your
+  // hand, in a graveyard or on the stack), and what happened. Saved with a snapshot of the board.
+  const REPORT_KINDS = [['card', 'A card did the wrong thing'], ['mechanic', 'A rule or mechanic didn\'t work'], ['ui', 'Something confusing or to improve'], ['other', 'Something else']];
+  function reportCards() {
+    const names = new Set();
+    for (const c of me.hand) names.add(c.def.name);
+    for (const p of duel.players) for (const c of [...p.battlefield, ...p.graveyard]) names.add(c.def.name);
+    for (const it of duel.stack) if (it.card) names.add(it.card.def.name);
+    return [...names].sort();
+  }
+  function reportHtml() {
+    const r = ui.report;
+    return `<div class="overlay"><div class="modal report">
+      <h3>⚑ Report a problem</h3>
+      <p class="small">Turn ${duel.turn}, ${esc(STEP_NAME[duel.step] || duel.step)}. The board, stack and recent log are saved with your note so it can be reproduced.</p>
+      <div class="rep-kinds">${REPORT_KINDS.map(([k, l]) => `<label class="radio"><input type="radio" name="rep-kind" value="${k}" ${r.category === k ? 'checked' : ''}> ${l}</label>`).join('')}</div>
+      <label>Card involved <select id="rep-card"><option value="">— none / not sure —</option>${reportCards().map(n => `<option value="${esc(n)}" ${r.card === n ? 'selected' : ''}>${esc(n)}</option>`).join('')}<option value="__other" ${r.card === '__other' ? 'selected' : ''}>A card not listed…</option></select></label>
+      ${r.card === '__other' ? `<label>Card name <input id="rep-cardname" value="${esc(r.cardName || '')}" placeholder="Card name"></label>` : ''}
+      <label>What happened, and what should have happened? <textarea id="rep-text" rows="4" placeholder="e.g. Goblin Piledriver attacked with two other Goblins but stayed 1/2.">${esc(r.text || '')}</textarea></label>
+      <div class="mbtns"><button class="btn primary" id="rep-send" ${(r.text || '').trim() ? '' : 'disabled'}>Send report</button><button class="btn" id="rep-cancel">Cancel</button></div>
     </div></div>`;
   }
   function viewerHtml() {
@@ -714,7 +737,14 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
       case 'b-order': { const ids = (ui.order || []).slice(); ui.order = null; act.answer(ids); run(); return; }
       case 'b-divide': { const d = ui.divide; if (!d) return; const plan = { ...d.map }; if (d.player) plan.player = d.player; ui.divide = null; act.answer(plan); run(); return; }
       case 'b-look': { act.answer(null); run(); return; }
-      case 'b-flag': { const note = prompt('What went wrong? (The board, stack and recent log are saved with your note.)'); if (note !== null && note.trim()) { ui.message = flagIssue(note.trim(), duel, localIdx) ? 'Noted in the game log — thank you.' : 'No game log is recording.'; render(); } return; }
+      case 'b-flag': ui.report = { category: 'card', card: '', cardName: '', text: '' }; render(); setTimeout(() => root.querySelector('#rep-text')?.focus(), 0); return;
+      case 'rep-cancel': ui.report = null; render(); return;
+      case 'rep-send': {
+        const r = ui.report; if (!r || !(r.text || '').trim()) return;
+        const card = r.card === '__other' ? (r.cardName || '').trim() || null : (r.card || null);
+        const sent = flagIssue(r.text.trim(), duel, localIdx, { category: r.category, card });
+        ui.report = null; ui.message = sent ? 'Report saved with the game log — thank you.' : 'The report could not be saved.'; render(); return;
+      }
       case 'b-concede': if (confirm(input ? 'Concede this duel?' : 'Concede this duel? You will lose your ante card.')) { act.concede(); run(); } return;
     }
     if (btn.classList.contains('stack-item')) { if (targeting()) pickRef({ type: 'spell', id: Number(btn.dataset.stack) }); return; }
@@ -752,9 +782,12 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     const req = duel.pending?.req; if (req && req.max === 1 && ui.choice.size > 1) ui.choice = new Set([id]);
     render();
   });
+  // The report form's fields live in ui.report so the table can keep re-rendering underneath it.
+  root.addEventListener('input', ev => { const r = ui.report; if (!r) return; if (ev.target.id === 'rep-text') { r.text = ev.target.value; const b = root.querySelector('#rep-send'); if (b) b.disabled = !r.text.trim(); } if (ev.target.id === 'rep-cardname') r.cardName = ev.target.value; });
+  root.addEventListener('change', ev => { const r = ui.report; if (!r) return; if (ev.target.name === 'rep-kind') r.category = ev.target.value; if (ev.target.id === 'rep-card') { r.card = ev.target.value; render(); } });
   document.addEventListener('keydown', function onKey(ev) {
     if (!root.isConnected) { document.removeEventListener('keydown', onKey); return; }
-    if (ev.key === 'Escape') { ui.wizard = null; ui.menu = null; ui.viewer = null; ui.paying = null; render(); }
+    if (ev.key === 'Escape') { ui.wizard = null; ui.menu = null; ui.viewer = null; ui.paying = null; ui.report = null; render(); }
     if (ev.key === ' ' && duel.pending?.type === 'priority' && !ui.wizard && !ui.menu && !ui.paying) { ev.preventDefault(); act.pass(); run(); }
   });
 

@@ -614,3 +614,12 @@ svg.arrows { position: absolute; left: 0; top: 0; pointer-events: none; z-index:
 .adm-ev.k-req { color: #b6a98c; }
 .adm-ev.k-flag { background: color-mix(in srgb, var(--gold) 14%, transparent); }
 .adm-ev .flag { color: var(--gold); }
+
+/* ---- in-match problem report ---- */
+.modal.report { max-width: 520px; }
+.modal.report label { display: block; margin: 8px 0 4px; font-size: 13px; }
+.modal.report select, .modal.report textarea, .modal.report input { width: 100%; box-sizing: border-box; margin-top: 4px; }
+.rep-kinds { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; margin: 8px 0; }
+.rep-kinds .radio { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; }
+@media (max-width: 520px) { .rep-kinds { grid-template-columns: 1fr; } }
+.adm-cat { font-size: 11px; padding: 1px 6px; border-radius: 10px; background: color-mix(in srgb, var(--gold) 25%, transparent); color: var(--gold); }
