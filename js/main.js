@@ -1,5 +1,6 @@
 // Fivefold app controller: screens, world loop, persistence.
 import { parseList, importNames, defOf, forgetDefs, loadArtIndex, artFor, artCount, hasOwnArt, hasServer } from './collection.js';
+import { attachGameLog, closeGameLog, flagIssue, recoverPartial, listGameLogs, exportGameLogs, clearGameLogs, currentGameLog } from './gamelog.js';
 import { premodernLegality, BASIC_LANDS } from './format.js';
 import { fetchCards, cacheSize, cached as cachedCard, allCached } from './scryfall.js';
 import { COLORS, COLOR_NAME, manaHtml, statusLabel } from './cards.js';
@@ -785,7 +786,8 @@ function nearestTown(g) {
   return (standing.length ? standing : cs).slice().sort((a, b) => d(a) - d(b))[0];
 }
 function finishDuel(winner) {
-  if (S.duel?.brew) { S.duel = null; toast(winner === 0 ? 'You win the sparring match.' : winner === 1 ? 'Your sparring partner wins.' : 'The match ends.'); go('brew'); return; }
+  closeGameLog('finished');
+  if (S.duel?.brew) { S.duel = null; go('brew'); toast(winner === 0 ? 'You win the sparring match.' : winner === 1 ? 'Your sparring partner wins.' : 'The match ends.'); return; }   // leave the duel screen before rendering a toast
   const g = S.game; const { duel, tpl, ante, roamUid, dungeon, tutorial } = S.duel; S.duel = null;
   sfx(winner === 0 ? 'win' : 'lose');
   if (tutorial) {
@@ -1088,6 +1090,7 @@ function title() {
       <div><h2>New to Magic?</h2><p>Eight short lessons cover everything a duel needs: lands, mana, creatures, combat and spells. Then fight a practice duel with hints that read the table and tell you what to do next.</p></div>
       <div class="btnrow"><button class="btn primary" data-go="tutorial">Learn to play</button><button class="btn" id="b-practice">Practice duel</button><button class="btn" id="b-multiplayer">Multiplayer (1v1)</button></div>
         <div class="btnrow"><button class="btn" data-go="brew">Premodern deck builder</button></div>
+        <p class="small gamelogs">Game logs: <b>${listGameLogs().length}</b> recorded in this browser${hasServer() ? ' (also saved to <code>logs/games.jsonl</code> by the server)' : ''}. <button class="btn tiny" id="b-logs-export" ${listGameLogs().length ? '' : 'disabled'}>Export</button> <button class="btn tiny ghost" id="b-logs-clear" ${listGameLogs().length ? '' : 'disabled'}>Clear</button></p>
     </div>
     <div class="cols">
       <form id="newgame" class="box">
@@ -1746,6 +1749,7 @@ function duel() {
     const portrait = frames => { frames = frames.filter(Boolean); return { frames, scale: Math.min(2.6, ph / Math.max(...frames.map(f => f[3]))) }; };
     const mageFrames = (color, tier) => { const c = SPRITES.mage[color] ? color : 'M'; return [SPRITES.mage[c][tier >= 2 ? 1 : 0], SPRITES[`mage-${c}-${tier >= 2 ? 2 : 1}-alt`]]; };
     const foe = d.tpl.boss ? portrait(MONSTERS.dragon.idle) : d.dungeon ? portrait(MONSTERS[DUNGEON_MONSTER[d.tpl.color] || 'skeleton'].idle) : portrait(mageFrames(d.tpl.color, d.tpl.tier));
+    attachGameLog(d.duel, { mode: d.brew ? 'playtest' : d.tutorial ? 'tutorial' : d.dungeon ? 'dungeon' : 'adventure', opponent: d.tpl?.name, opponentTier: d.tpl?.tier, opponentDeck: d.brew ? d.tpl?.name : undefined, playerDeck: d.brew ? (S.decks?.find(x => x.id === S.activeDeck)?.name || 'working deck') : undefined, ante: !!d.ante });
     d.api = mountDuel(d.root, d.duel, { ante: d.ante ? { mine: d.ante.mine || '—', theirs: d.ante.theirs || '—' } : null, onEnd: finishDuel, portraits: { me: portrait([SPRITES.hero, SPRITES['hero-alt']]), foe }, tutorial: !!d.tutorial });
   }
   app.innerHTML = '';
@@ -1873,6 +1877,11 @@ function brewExport() {
 document.addEventListener('input', ev => { if (ev.target.id === 'bw-q') { S.brewQ = ev.target.value; brew(); const el = document.getElementById('bw-q'); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } } });
 document.addEventListener('input', ev => { if (ev.target.id === 'bw-deckname') S.newDeckName = ev.target.value; });
 document.addEventListener('change', ev => { if (ev.target.id === 'bw-opp') S.brewOpp = ev.target.value; });
+document.addEventListener('click', ev => {
+  if (ev.target.id === 'b-logs-export') { const blob = new Blob([exportGameLogs()], { type: 'application/x-ndjson' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `fivefold-games-${new Date().toISOString().slice(0, 10)}.jsonl`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); }
+  if (ev.target.id === 'b-logs-clear') { if (confirm('Delete the game logs stored in this browser?')) { clearGameLogs(); render(); } }
+});
+recoverPartial();
 document.addEventListener('keydown', ev => { if (ev.target.id === 'bw-deckname' && ev.key === 'Enter') { ev.preventDefault(); brewSaveDeck(ev.target.value); } });
 document.addEventListener('click', ev => {
   const el = ev.target.closest('[data-brewadd],[data-brewsb],[data-brewadd-deck],[data-brewsub-deck],[data-brewadd-side],[data-brewsub-side],[data-brewcol],[data-brewcmc],[data-brewtype],[data-brewbad],[data-brewclear],[data-deckload],[data-deckplay],[data-deckrename],[data-deckdel],[data-presetload],[data-presetplay],#bw-issues,#bw-import,#bw-export,#bw-playtest,#bw-clear,#bw-imp-go,#bw-imp-cancel,#bw-decks,#bw-deck-save');
@@ -2235,6 +2244,7 @@ function mpduel() {
     const portraits = { me: heroP, foe: heroP };
     if (mp.role === 'host') {
       // The duel was already started (hands dealt) during the mulligan phase; mount without re-dealing, then tick.
+      attachGameLog(mp.duel, { mode: 'multiplayer', role: 'host' });
       mp.api = mountDuel(mp.root, mp.duel, { onEnd: mpOnEnd, portraits, localIdx: 0, allowMulligan: false, autoStart: false });
       mp.api.run();
     } else {
@@ -2308,7 +2318,7 @@ window.addEventListener('blur', () => { heldDirs.length = 0; });   // don't let 
 
 // ---- boot -----------------------------------------------------------------------
 // Debug handle for the console and for automated tests: window.ff.S is the app state.
-window.ff = { S, defOf, save, render, startDuel, enemyById, startTutorialDuel, riddleDefs, makeRiddle, amuletShopPool, artifactShopPool, cityPool, wardenOf, finishDuel, advanceSieges, maxSieges, collectMote, ambushFromMote, amuletPrice, tierOf, leveledEnemy, colorBombs, roamTemplate, deckRoom, copyCap, sellPrice, sellableCopies, townGold, addTownGold, sellCard, MAX_COPIES, deckProblems, addClue, clueTarget, dungeonArchetype, knownPrizes, dungeonTemplate, FIND_CLUES, relocateDungeon, enterCity, roamResult, buildStartDeck, START_POOLS, spawnBazaar, bazaarPool, goldPrice, openBazaar, tickBazaar };
+window.ff = { S, defOf, currentGameLog, save, render, startDuel, enemyById, startTutorialDuel, riddleDefs, makeRiddle, amuletShopPool, artifactShopPool, cityPool, wardenOf, finishDuel, advanceSieges, maxSieges, collectMote, ambushFromMote, amuletPrice, tierOf, leveledEnemy, colorBombs, roamTemplate, deckRoom, copyCap, sellPrice, sellableCopies, townGold, addTownGold, sellCard, MAX_COPIES, deckProblems, addClue, clueTarget, dungeonArchetype, knownPrizes, dungeonTemplate, FIND_CLUES, relocateDungeon, enterCity, roamResult, buildStartDeck, START_POOLS, spawnBazaar, bazaarPool, goldPrice, openBazaar, tickBazaar };
 initPreview();
 load();
 render();

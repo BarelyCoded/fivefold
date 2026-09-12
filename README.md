@@ -112,3 +112,7 @@ Enemies are data. Add one to `content/enemies.json` with a name, color, tier, li
 ## Legal
 
 Unofficial fan content permitted under the Wizards of the Coast Fan Content Policy. Not approved or endorsed by Wizards. Magic: The Gathering and all card names and text are property of Wizards of the Coast. Card data is fetched at runtime from Scryfall under its API terms. This repository contains no card images and no material from the 1997 game. Code is GPL-3.0-or-later.
+
+## Game logs
+
+Every duel is recorded — each line of the engine's narration with its turn and step, every action and answer, the prompts shown, script errors, and any moment you flag with the **⚑ Report** button in a duel (that saves the whole board and stack with your note). With `node server.js` or `node relay.js` running, records are appended to `logs/games.jsonl` (kept out of git); the title screen shows how many games this browser holds and can export them as one `.jsonl` file. Summarise what broke across all games with `node tools/gamelogs.mjs` (add `--flags`, `--errors`, or `--game <id>` to replay one). This is the data the rules engine gets fixed from — flag anything that doesn't do what the card says.

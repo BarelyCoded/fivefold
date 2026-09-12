@@ -41,6 +41,17 @@ http.createServer((req, res) => {
 
   if (p === '/api/art') return send(res, 200, JSON.stringify(listArt()), MIME['.json']);
 
+  if (p === '/api/log' && req.method === 'POST') {   // one game record per line, appended by js/gamelog.js
+    let body = ''; let size = 0;
+    req.on('data', chunk => { size += chunk.length; if (size > 8e6) { req.destroy(); return; } body += chunk; });
+    req.on('end', () => {
+      let rec; try { rec = JSON.parse(body); } catch { return send(res, 400, 'bad json'); }
+      const dir = path.join(ROOT, 'logs'); fs.mkdirSync(dir, { recursive: true });
+      const line = JSON.stringify({ ...rec, receivedAt: new Date().toISOString() }) + '\n';
+      fs.appendFile(path.join(dir, 'games.jsonl'), line, err => err ? send(res, 500, 'could not write log') : send(res, 200, JSON.stringify({ ok: true }), MIME['.json']));
+    });
+    return;
+  }
   if (p === '/api/collection') {
     const file = path.join(ROOT, 'collection.csv');
     if (!fs.existsSync(file)) return send(res, 404, 'No collection.csv found next to server.js');

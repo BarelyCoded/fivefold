@@ -1,6 +1,7 @@
 // Duel screen for the rules core: renders state, drives the engine loop, collects human decisions,
 // and plays the engine's visual-effect events (attacks, blocks, strikes, damage).
 import { has, power, toughness, isCreature, isLand, isType, STEP_NAME, costText, abilitiesOf } from './engine.js';
+import { flagIssue } from './gamelog.js';
 import { artFor, hasOwnArt } from './collection.js';
 import { costString, manaHtml, COLORS } from './cards.js';
 import { spriteStyle, atlasReady } from './atlas.js';
@@ -450,6 +451,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
       </div>
       <aside class="panel">
         <div class="log">${duel.log.slice(-18).map(l => `<div>${esc(l)}</div>`).join('')}</div>
+        <button id="b-flag" class="btn small ghost" title="Something didn't work as the card says? Note it — the board and log are saved with it.">⚑ Report</button>
         <button id="b-concede" class="btn small ghost">Concede</button>
       </aside>
       ${ui.viewer !== null ? viewerHtml() : ''}
@@ -712,6 +714,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
       case 'b-order': { const ids = (ui.order || []).slice(); ui.order = null; act.answer(ids); run(); return; }
       case 'b-divide': { const d = ui.divide; if (!d) return; const plan = { ...d.map }; if (d.player) plan.player = d.player; ui.divide = null; act.answer(plan); run(); return; }
       case 'b-look': { act.answer(null); run(); return; }
+      case 'b-flag': { const note = prompt('What went wrong? (The board, stack and recent log are saved with your note.)'); if (note !== null && note.trim()) { ui.message = flagIssue(note.trim(), duel, localIdx) ? 'Noted in the game log — thank you.' : 'No game log is recording.'; render(); } return; }
       case 'b-concede': if (confirm(input ? 'Concede this duel?' : 'Concede this duel? You will lose your ante card.')) { act.concede(); run(); } return;
     }
     if (btn.classList.contains('stack-item')) { if (targeting()) pickRef({ type: 'spell', id: Number(btn.dataset.stack) }); return; }

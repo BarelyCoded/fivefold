@@ -10,3 +10,5 @@ __pycache__/
 # Playwright e2e screenshots (written to the repo root by test runs)
 mp-*.png
 lobby.png
+# Game logs written by server.js / relay.js (share the file, not the repo)
+logs/
