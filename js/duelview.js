@@ -400,6 +400,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
       case 'attackers': return `<div class="hint">Declare attackers: click your creatures.${req.must.length ? ' Some must attack.' : ''}</div><button id="b-attack" class="btn primary">Confirm ${ui.attackers.size ? `(${ui.attackers.size})` : 'no attack'}</button><button id="b-attack-all" class="btn" title="Attack with every creature that can attack">Attack with all (${req.options.length})</button>`;
       case 'blockers': return `<div class="hint">Declare blockers: click one of your creatures, then the attacker it blocks. Click a blocker again to clear it.</div><button id="b-block" class="btn primary">Confirm blocks</button>`;
       case 'yesno': return `<div class="hint">${esc(req.text)}</div><button class="btn primary" data-answer="yes">Yes</button><button class="btn" data-answer="no">No</button>`;
+      case 'piles': return `<div class="hint">${esc(req.text)}</div><div class="piles">${req.piles.map((pile, i) => `<div class="pile"><div class="pile-head">Pile ${i + 1}</div><div class="pile-cards">${pile.cards.length ? pile.cards.map(c => `<span class="pile-card" data-preview="${esc(c.name)}">${esc(c.name)}</span>`).join('') : '<span class="pile-empty">(nothing)</span>'}</div><button class="btn primary" data-pile="${i}">Take pile ${i + 1}</button></div>`).join('')}</div>`;
       case 'number': return `<div class="hint">${esc(req.text)} (${req.min}–${req.max})</div><div class="xrow"><input id="numval" type="number" min="${req.min}" max="${req.max}" value="${req.default ?? req.min}"><button class="btn primary" data-num="ok">OK</button></div>`;
       case 'color': return `<div class="hint">${esc(req.text)}</div>${COLORS.map(c => `<button class="btn" data-color="${c}">${c}</button>`).join('')}`;
       case 'target': {
@@ -729,6 +730,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     if (btn.dataset.wizref) { const [type, id] = btn.dataset.wizref.split(':'); pickRef({ type, id: Number(id) }); return; }
     if (btn.dataset.reqref) { const [type, id] = btn.dataset.reqref.split(':'); pickRef(type === 'player' ? { type, idx: Number(id) } : { type, id: Number(id) }); return; }
     if (btn.dataset.answer) { act.answer(btn.dataset.answer === 'yes'); run(); return; }
+    if (btn.dataset.pile !== undefined) { act.answer(Number(btn.dataset.pile)); run(); return; }
     if (btn.dataset.num) { const req = duel.pending?.req; if (!req || req.kind !== 'number') return; const v = Math.max(req.min, Math.min(req.max, Number(root.querySelector('#numval')?.value) || 0)); act.answer(v); run(); return; }
     if (btn.dataset.order && ui.order) { const i = Number(btn.dataset.idx), j = btn.dataset.order === 'up' ? i - 1 : i + 1; if (j >= 0 && j < ui.order.length) { [ui.order[i], ui.order[j]] = [ui.order[j], ui.order[i]]; render(); } return; }
     if (btn.dataset.div && ui.divide) {

@@ -717,6 +717,7 @@ export class Duel {
     if (!(card.zone === 'hand' && p.hand.includes(card)) && !(fromGrave && p.graveyard.includes(card))) return false;
     if (opts.cycling) { const cy = d.keywords.find(k => k.k === 'Cycling'); return !!cy && card.zone === 'hand' && this.canPay(p, cy.cost); }
     if (d.kind === 'land') return this.sorcerySpeed(p) && p.landPlayed < this.landLimit(p);
+    if (d.animateDead && !this.players.some(pl => pl.graveyard.some(c => isCreatureDef(c)))) return false;   // needs a creature in a graveyard to target
     if (this.active !== p.idx && this.ownTurnOnly()) return false;   // City of Solitude
     const instantSpeed = d.kind === 'instant' || has0(d, 'Flash');
     if (!instantSpeed && !this.sorcerySpeed(p)) return false;
@@ -1208,14 +1209,25 @@ export class Duel {
       case 'selfFromGraveyard': if (src.zone === 'graveyard') { this.moveTo(src, e.to, { controller: src.owner }); this.say(`${src.def.name} returns from the graveyard to ${e.to === 'hand' ? `${this.players[src.owner].name}'s hand` : 'the battlefield'}.`); } break;
       // Duress / Unmask / Mesmeric Fiend: look at a hand, pick a matching card, discard or exile it.
       case 'handPick': for (const s of subs) if (s.player) {
-        const pl = s.player; const opts = pl.hand.filter(c => this.cardMatchesFilter(c, e.filter));
+        const pl = s.player;
+        // Cabal Therapy names a card BLIND (before seeing the hand), then the target reveals and discards every copy.
+        if (e.action === 'discardName') {
+          let name;
+          if (p.ai) name = this.nameBlind(p, pl);   // a heuristic from public information, never the hidden hand
+          else { const opts = this.namePool(p, pl); const ids = yield { kind: 'choose', player: p.idx, text: `${src.def.name}: name a card (${pl.name} then reveals their hand and discards every copy)`, options: opts, min: 1, max: 1, secret: true }; name = (ids || [])[0]; if (typeof name === 'string' && name.startsWith('name:')) name = name.slice(5); }
+          this.say(`${p.name} names ${name || 'a card'}.`);
+          this.say(`${pl.name} reveals: ${pl.hand.map(c => c.def.name).join(', ') || 'an empty hand'}.`);
+          const all = pl.hand.filter(c => c.def.name === name);
+          if (all.length) this.discardCards(pl, all); else this.say(`${pl.name} has no ${name || 'named card'}.`);
+          continue;
+        }
+        const opts = pl.hand.filter(c => this.cardMatchesFilter(c, e.filter));
         this.say(`${pl.name} reveals: ${pl.hand.map(c => c.def.name).join(', ') || 'an empty hand'}.`);
         if (!opts.length) { this.say(`No matching card.`); continue; }
         let pick = null;
         if (p.ai) pick = opts.slice().sort((a, b) => (b.def.cmc || 0) - (a.def.cmc || 0))[0];
         else { const ids = yield { kind: 'choose', player: p.idx, text: `${src.def.name}: choose a card from ${pl.name}'s hand`, options: opts.map(c => ({ id: c.id, label: c.def.name })), min: 1, max: 1 }; pick = this.card((ids || [])[0]); if (!pick || !opts.includes(pick)) pick = opts[0]; }
         if (e.action === 'exile') { this.moveTo(pick, 'exile'); src.linkedExile = pick.id; this.say(`${pick.def.name} is exiled.`); }
-        else if (e.action === 'discardName') { const all = pl.hand.filter(c => c.def.name === pick.def.name); this.discardCards(pl, all); this.say(`${p.name} names ${pick.def.name}; ${pl.name} discards ${all.length}.`); }   // Cabal Therapy
         else this.discardCards(pl, [pick]);
       } break;
       case 'returnLinkedExile': { const c = src.linkedExile != null ? this.card(src.linkedExile) : null; if (c && c.zone === 'exile') { this.moveTo(c, 'hand'); this.say(`${c.def.name} returns to ${this.players[c.owner].name}'s hand.`); } break; }
@@ -1284,7 +1296,7 @@ export class Duel {
         else { const ids = yield { kind: 'choose', player: opp.idx, text: `${src.def.name}: pick the cards for pile 1 (the rest form pile 2)`, options: top.map(c => ({ id: c.id, label: c.def.name })), min: 0, max: top.length }; pileA = (ids || []).map(id => this.card(id)).filter(c => c && top.includes(c)); }
         const pileB = top.filter(c => !pileA.includes(c));
         const val = pile => pile.reduce((a, c) => a + (c.def.cmc || 0) + (isLand(c) ? 1.5 : 0.5), 0);
-        const takeA = p.ai ? val(pileA) >= val(pileB) : yield { kind: 'yesno', player: p.idx, text: `${src.def.name}: take pile 1 (${pileA.map(c => c.def.name).join(', ') || 'nothing'})? "No" takes pile 2 (${pileB.map(c => c.def.name).join(', ') || 'nothing'})`, value: 'fof' };
+        let takeA; if (p.ai) takeA = val(pileA) >= val(pileB); else { const ans = yield { kind: 'piles', player: p.idx, text: `${src.def.name}: take one pile — the other goes to your graveyard`, piles: [{ cards: pileA.map(c => ({ id: c.id, name: c.def.name })) }, { cards: pileB.map(c => ({ id: c.id, name: c.def.name })) }] }; takeA = ans !== 1; }
         const take = takeA ? pileA : pileB, rest = takeA ? pileB : pileA;
         for (const c of take) this.moveTo(c, 'hand'); for (const c of rest) this.moveTo(c, 'graveyard');
         this.say(`${p.name} takes ${take.map(c => c.def.name).join(', ') || 'nothing'}.`);
@@ -1380,7 +1392,8 @@ export class Duel {
         break;
       }
       // Animate Dead: return the chosen creature card under your control and attach the Aura to it.
-      case 'animateDead': for (const s of subs) if (s.card && s.card.zone === 'graveyard') { const host = s.card; this.moveTo(host, 'battlefield', { controller: p.idx }); src.attachedTo = host; src.animatedOnce = true; this.say(`${host.def.name} returns to the battlefield under ${p.name}'s control, enchanted by ${src.def.name}.`); } break;
+      case 'animateDead': if (!subs.some(s => s.card && s.card.zone === 'graveyard') && src.zone === 'battlefield') { this.say(`${src.def.name} has no creature to animate and is put into the graveyard.`); this.moveTo(src, 'graveyard'); break; }
+      for (const s of subs) if (s.card && s.card.zone === 'graveyard') { const host = s.card; this.moveTo(host, 'battlefield', { controller: p.idx }); src.attachedTo = host; src.animatedOnce = true; this.say(`${host.def.name} returns to the battlefield under ${p.name}'s control, enchanted by ${src.def.name}.`); } break;
       case 'flag': for (const s of subs) if (s.card) { if (e.temp) s.card.temp.flags.push(e.flag); else s.card.flags.add(e.flag); } break;
       case 'loseTemp': for (const s of subs) if (s.card) s.card.temp.flags.push('lose:' + e.keyword); break;
       case 'removeFromCombat': for (const s of subs) if (s.card) { removeFrom(this.attackers, s.card.id); delete this.blocks[s.card.id]; for (const k of Object.keys(this.blocks)) this.blocks[k] = this.blocks[k].filter(id => id !== s.card.id); this.say(`${s.card.def.name} is removed from combat.`); } break;
@@ -1725,6 +1738,23 @@ export class Duel {
       else this.say(`${p.name} draws ${drawn.length === 1 ? 'a card' : drawn.length + ' cards'}.`);
     }
     return drawn;
+  }
+  // Cabal Therapy: the caster names a card blind. The pool is what a player can legitimately know — never the
+  // target's hidden hand: both graveyards and battlefields, exile, the stack, and the caster's own hand.
+  namePool(caster, target) {
+    const names = new Set();
+    for (const pl of this.players) for (const c of [...pl.battlefield, ...pl.graveyard, ...pl.exile]) names.add(c.def.name);
+    for (const c of caster.hand) names.add(c.def.name);
+    for (const it of this.stack) if (it.card) names.add(it.card.def.name);
+    return [...names].filter(Boolean).sort().map(n => ({ id: 'name:' + n, label: n }));
+  }
+  // The AI names blind: the card it most expects the target to be holding, from public information only.
+  nameBlind(caster, target) {
+    const count = {};
+    for (const c of target.graveyard) if (!isLand(c)) count[c.def.name] = (count[c.def.name] || 0) + 1;   // cards they've already cast — likely more in deck
+    let best = Object.entries(count).sort((a, b) => b[1] - a[1])[0]?.[0];
+    if (!best) { const bf = target.battlefield.find(c => !isLand(c)); best = bf?.def.name; }
+    return best || null;
   }
   discardCards(p, cards) { for (const c of cards) if (c && p.hand.includes(c)) { this.moveTo(c, 'graveyard'); this.say(`${p.name} discards ${c.def.name}.`); } }
   tap(c) { if (c.tapped) return; c.tapped = true; this.fireEvent({ type: 'tapped', card: c }); }

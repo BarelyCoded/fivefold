@@ -18,6 +18,7 @@ function drive(gen, targets = [], chooser = null, numFn = null) {
     const y = r.value;
     if (y.kind === 'target') r = gen.next(targets.shift());
     else if (y.kind === 'yesno') r = gen.next(true);
+    else if (y.kind === 'piles') r = gen.next(0);
     else if (y.kind === 'number') r = gen.next(numFn ? numFn(y) : (y.default ?? y.max ?? 0));
     else if (y.kind === 'choose') r = gen.next(chooser ? chooser(y) : y.options.slice(0, Math.max(y.min, 1)).map(o => o.id));
     else r = gen.next();
@@ -363,6 +364,46 @@ section('Daru Cavalier: on entry, fetch another copy to hand');
   const dc = place(d, D('Daru Cavalier'), 0);
   d.fireEvent({ type: 'etb', card: dc }); processAndResolve(d, [], y => y.options ? [y.options[0].id] : []);
   ok(d.card(lib1.id)?.zone === 'hand', `a second Daru Cavalier was fetched to hand (${d.card(lib1.id)?.zone})`); }
+
+section('Cabal Therapy: the caster names blind, discards every copy that matches');
+{ const d = newDuel(); mainPhase(d); pool(d, 0, { B:1 }); const ct = hand(d, D('Cabal Therapy'), 0);
+  const s1 = hand(d, D('Standstill'), 1), s2 = hand(d, D('Standstill'), 1), wr = hand(d, D('Wrath of God'), 1); gy(d, D('Standstill'), 1);
+  const namePool = d.namePool(d.players[0], d.players[1]);
+  ok(namePool.some(o => /Standstill/.test(o.label)) && !namePool.some(o => /Wrath of God/.test(o.label)), 'the name pool holds public cards (Standstill in gy) but not the hidden Wrath of God');
+  ok(d.cast(d.players[0], ct, { targets: [{ type: 'player', idx: 1 }] }), 'cast');
+  processAndResolve(d, [], y => y.options ? [y.options.find(o => /Standstill/.test(o.label)).id] : []);
+  ok(s1.zone === 'graveyard' && s2.zone === 'graveyard' && wr.zone === 'hand', `both Standstills discarded, Wrath kept (${s1.zone}/${s2.zone}/${wr.zone})`); }
+
+section('Cabal Therapy AI names from public info, not the hidden hand');
+{ const d = newDuel(); mainPhase(d); d.active = 1; d.priority = 1; pool(d, 1, { B:1 }); const ct = hand(d, D('Cabal Therapy'), 1);
+  const s1 = hand(d, D('Standstill'), 0); gy(d, D('Counterspell'), 0);   // the AI can only see the graveyard Counterspell
+  ok(d.cast(d.players[1], ct, { targets: [{ type: 'player', idx: 0 }] }), 'AI casts');
+  processAndResolve(d);
+  ok(s1.zone === 'hand', 'the AI named Counterspell (public) and missed the hidden Standstill'); }
+
+section('Animate Dead needs a creature in a graveyard to be cast');
+{ const d = newDuel(); mainPhase(d); pool(d, 0, { B:1, C:1 }); const ad = hand(d, D('Animate Dead'), 0);
+  ok(!d.canCast(d.players[0], ad, {}), 'not castable with no creature in any graveyard');
+  gy(d, D('Verdant Force'), 0);
+  ok(d.canCast(d.players[0], ad, {}), 'castable once a creature is in the graveyard');
+  ok(d.cast(d.players[0], ad, {}), 'cast'); processAndResolve(d, [{ type: 'card', id: d.players[0].graveyard.find(c => c.def.name === 'Verdant Force').id }]);
+  const vf = d.permanents().find(c => c.def.name === 'Verdant Force');
+  ok(vf && vf.zone === 'battlefield', `Verdant Force reanimated (${vf?.zone})`); }
+
+section('Fact or Fiction shows the taker two piles, then puts one in hand and one in the graveyard');
+{ const d = newDuel(); mainPhase(d); pool(d, 0, { U:4 }); const ff = hand(d, D('Fact or Fiction'), 0);
+  const cards = [D('Island'), bears(), D('Lightning Bolt'), D('Masticore'), D('Mountain')].map(x => lib(d, x, 0));
+  ok(d.cast(d.players[0], ff, { targets: [] }), 'cast');
+  // drive manually so we can inspect the piles request and take pile 1
+  let sawPiles = null; const gen = d.resolveTop(); let r = gen.next();
+  while (!r.done) { const y = r.value;
+    if (y.kind === 'piles') { sawPiles = y.piles; r = gen.next(0); }
+    else if (y.kind === 'choose') r = gen.next(y.options.slice(0, Math.max(y.min, 1)).map(o => o.id));
+    else r = gen.next(); }
+  ok(sawPiles && sawPiles.length === 2 && sawPiles.every(p => Array.isArray(p.cards)), `a two-pile request was shown with card lists (${sawPiles?.map(p => p.cards.map(c => c.name).join('+')).join(' | ')})`);
+  const total = sawPiles.reduce((a, p) => a + p.cards.length, 0); ok(total === 5, `all five cards split across the piles (${total})`);
+  const inHand = cards.filter(c => c.zone === 'hand'), inGy = cards.filter(c => c.zone === 'graveyard');
+  ok(inHand.length + inGy.length === 5 && inHand.length === sawPiles[0].cards.length, `pile 1 went to hand, the rest to the graveyard (${inHand.length}/${inGy.length})`); }
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -16,6 +16,7 @@ function drive(gen, targets = [], chooser = null) {
     const y = r.value;
     if (y.kind === 'target') r = gen.next(targets.shift());
     else if (y.kind === 'yesno') r = gen.next(true);
+    else if (y.kind === 'piles') r = gen.next(0);
     else if (y.kind === 'number') r = gen.next(y.default ?? y.min);
     else if (y.kind === 'choose') r = gen.next(chooser ? chooser(y) : y.options.slice(0, Math.max(y.min, 1)).map(o => o.id));
     else r = gen.next();

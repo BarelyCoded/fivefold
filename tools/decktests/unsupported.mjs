@@ -16,6 +16,7 @@ function drive(gen, targets = [], chooser = null) {
     const y = r.value;
     if (y.kind === 'target') r = gen.next(targets.shift());
     else if (y.kind === 'yesno') r = gen.next(true);
+    else if (y.kind === 'piles') r = gen.next(0);
     else if (y.kind === 'number') r = gen.next(y.default ?? y.min);
     else if (y.kind === 'choose') r = gen.next(chooser ? chooser(y) : y.options.slice(0, Math.max(y.min, 1)).map(o => o.id));
     else r = gen.next();
@@ -50,12 +51,14 @@ section('Tangle Wire taps the opponent down');
 section('Cabal Therapy, then flashback by sacrificing a creature');
 { const d = newDuel(); mainPhase(d); pool(d, 0, { B: 1 }); const ct = hand(d, D('Cabal Therapy'), 0); const gb = place(d, bears(), 0);
   const c1 = hand(d, D('Counterspell'), 1), c2 = hand(d, D('Counterspell'), 1), is = hand(d, D('Island'), 1);
-  ok(d.cast(d.players[0], ct, { targets: [{ type: 'player', idx: 1 }] }), 'cast'); resolveAll(d);
+  gy(d, D('Counterspell'), 1);   // a Counterspell in the opponent's graveyard: public info the caster may name (naming is now blind)
+  const nameCounter = y => (y.options.find(o => /Counterspell/.test(o.label))?.id ? [y.options.find(o => /Counterspell/.test(o.label)).id] : y.options.slice(0, Math.max(y.min, 1)).map(o => o.id));
+  ok(d.cast(d.players[0], ct, { targets: [{ type: 'player', idx: 1 }] }), 'cast'); resolveAll(d, [], nameCounter);
   ok(c1.zone === 'graveyard' && c2.zone === 'graveyard' && is.zone === 'hand', `both Counterspells discarded, Island kept (${c1.zone}/${c2.zone}/${is.zone})`);
   ok(ct.zone === 'graveyard', 'Therapy in the graveyard');
   const c3 = hand(d, D('Counterspell'), 1);
   ok(d.canCast(d.players[0], ct, { targets: [{ type: 'player', idx: 1 }], sacrifice: gb.id }), 'flashback castable with a creature to sacrifice');
-  ok(d.cast(d.players[0], ct, { targets: [{ type: 'player', idx: 1 }], sacrifice: gb.id }), 'flashback cast'); resolveAll(d);
+  ok(d.cast(d.players[0], ct, { targets: [{ type: 'player', idx: 1 }], sacrifice: gb.id }), 'flashback cast'); resolveAll(d, [], nameCounter);
   ok(gb.zone === 'graveyard' && c3.zone === 'graveyard' && ct.zone === 'exile', `Bears sacrificed, third Counterspell gone, Therapy exiled (${gb.zone}/${c3.zone}/${ct.zone})`); }
 
 section('Buried Alive puts three creatures in the graveyard');
