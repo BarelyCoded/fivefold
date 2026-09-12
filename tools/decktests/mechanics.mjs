@@ -187,5 +187,39 @@ section('Vendetta costs toughness in life');
   ok(d.cast(d.players[0], v, { targets: [{ type: 'perm', id: gb.id }] }), 'cast'); while (d.stack.length) drive(d.resolveTop());
   ok(gb.zone === 'graveyard' && d.players[0].life === 18, `Bears dead, lost 2 life (life=${d.players[0].life})`); }
 
+section('Recall: {X}{X}{U} discards X, returns that many from the graveyard, exiles itself');
+{ const d = newDuel(); mainPhase(d); const rc = hand(d, D('Recall'), 0); const b1 = hand(d, bears(), 0), b2 = hand(d, bears(), 0); const g1 = gy(d, D('Lightning Bolt'), 0), g2 = gy(d, D('Counterspell'), 0);
+  pool(d, 0, { U: 1 }); ok(!d.canCast(d.players[0], rc, { x: 1 }), 'X=1 needs three mana ({X}{X}{U}), one is not enough');
+  ok(d.canCast(d.players[0], rc, { x: 0 }), 'X=0 castable for {U}');
+  pool(d, 0, { U: 3 }); ok(d.canCast(d.players[0], rc, { x: 1 }), 'X=1 castable with three mana');
+  ok(!d.canCast(d.players[0], rc, { x: 2 }), 'X=2 needs five mana');
+  ok(d.cast(d.players[0], rc, { x: 1 }), 'cast with X=1');
+  ok(d.players[0].pool.U === 0, `all three mana paid (U=${d.players[0].pool.U})`);
+  const asked = []; processAndResolve(d, [], y => { asked.push(y.text); return y.text.startsWith('Discard') ? [b1.id] : [g2.id]; });
+  ok(asked.length === 2 && /Discard 1 card/.test(asked[0]) && /return 1 card/.test(asked[1]), `asked to discard, then to pick from the graveyard (${asked.join(' | ')})`);
+  ok(b1.zone === 'graveyard' && g2.zone === 'hand' && g1.zone === 'graveyard' && b2.zone === 'hand', `Bears discarded, Counterspell returned (${b1.zone}/${g2.zone})`);
+  ok(rc.zone === 'exile', `Recall exiled itself (zone=${rc.zone})`); }
+
+section('Recall with X=0 does nothing but exile itself');
+{ const d = newDuel(); mainPhase(d); const rc = hand(d, D('Recall'), 0); hand(d, bears(), 0); gy(d, bears(), 0); pool(d, 0, { U: 1 });
+  ok(d.cast(d.players[0], rc, { x: 0 }), 'cast for {U}'); let asked = 0; processAndResolve(d, [], y => { asked++; return []; });
+  ok(asked === 0 && d.players[0].hand.length === 1 && d.players[0].graveyard.length === 1 && rc.zone === 'exile', `nothing discarded or returned, Recall exiled (asked=${asked})`); }
+
+section('Frantic Search: draw two, discard two, untap up to three lands');
+{ const d = newDuel(); mainPhase(d); const fs_ = hand(d, D('Frantic Search'), 0); const l = [1, 2, 3, 4].map(() => place(d, D('Island'), 0)); for (const c of l) c.tapped = true;
+  for (let i = 0; i < 4; i++) lib(d, bears(), 0); pool(d, 0, { U: 3 });
+  ok(d.cast(d.players[0], fs_, {}), 'cast');
+  const asked = []; processAndResolve(d, [], y => { asked.push(y.text); return y.text.startsWith('Discard') ? y.options.slice(0, 2).map(o => o.id) : [l[0].id, l[1].id]; });
+  ok(asked.some(t => /Discard 2 cards/.test(t)) && asked.some(t => /untap up to 3 of your lands/.test(t)), `asked to discard two and untap up to three (${asked.join(' | ')})`);
+  ok(d.players[0].hand.length === 0 && d.players[0].graveyard.length === 3, `drew two, discarded two, Search in the graveyard (hand ${d.players[0].hand.length}, gy ${d.players[0].graveyard.length})`);
+  ok(!l[0].tapped && !l[1].tapped && l[2].tapped && l[3].tapped, 'the two chosen lands untapped, the others stay tapped'); }
+
+section('Cloud of Faeries untaps up to two lands as it enters');
+{ const d = newDuel(); mainPhase(d); const l = [1, 2, 3].map(() => place(d, D('Island'), 0)); for (const c of l) c.tapped = true; pool(d, 0, { U: 2 });
+  const cf = hand(d, D('Cloud of Faeries'), 0); ok(d.cast(d.players[0], cf, {}), 'cast');
+  const ch = y => /untap up to 2/.test(y.text) ? [l[2].id] : [];
+  processAndResolve(d, [], ch); processAndResolve(d, [], ch);   // the spell resolves, then its enters-the-battlefield trigger
+  ok(cf.zone === 'battlefield' && !l[2].tapped && l[0].tapped && l[1].tapped, `entered and untapped the chosen land only (${l.map(c => c.tapped ? 'T' : 'U').join('')})`); }
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

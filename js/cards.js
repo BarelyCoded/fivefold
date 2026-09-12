@@ -25,18 +25,18 @@ export function slug(name) {
 }
 
 export function parseCost(mc) {
-  const pips = []; let generic = 0, x = false;
+  const pips = []; let generic = 0, x = 0;   // x counts the X pips: {X}{X}{U} costs twice X
   for (const m of (mc || '').matchAll(/\{([^}]+)\}/g)) {
     const s = m[1];
     if (/^\d+$/.test(s)) generic += Number(s);
-    else if (s === 'X' || s === 'Y' || s === 'Z') x = true;
+    else if (s === 'X' || s === 'Y' || s === 'Z') x++;
     else if (s === 'C' || s === 'S') pips.push(['C']);
     else {
       const parts = s.split('/');
       const cols = parts.filter(t => COLORS.includes(t));
       if (parts[0] && /^\d+$/.test(parts[0])) generic += Number(parts[0]);
       else if (cols.length) pips.push(cols);
-      else x = true;
+      else x++;
     }
   }
   return { pips, generic, x };
@@ -44,7 +44,7 @@ export function parseCost(mc) {
 export function costString(cost) {
   if (!cost) return '';
   const parts = [];
-  if (cost.x) parts.push('X');
+  if (cost.x) parts.push('X'.repeat(cost.x));
   if (cost.generic) parts.push(String(cost.generic));
   for (const p of cost.pips || []) parts.push(p.join('/'));
   return parts.join('') || (cost.pips ? '0' : '');
@@ -53,7 +53,7 @@ export function costString(cost) {
 export function manaHtml(cost) {
   if (!cost) return '';
   const pips = [];
-  if (cost.x) pips.push(['X']);
+  for (let i = 0; i < (cost.x || 0); i++) pips.push(['X']);
   if (cost.generic) pips.push([String(cost.generic)]);
   for (const p of cost.pips || []) pips.push(p);
   if (!pips.length) return cost.pips ? '<i class="pip pip-c">0</i>' : '';
@@ -473,6 +473,8 @@ const rules = [
   [/^search your library for a card, put (?:it|that card) into your hand, then shuffle$/, () => [{ type: 'tutor', what: 'card', to: 'hand' }]],
   [/^search your library for a card and put (?:it|that card) into your hand\. then shuffle$/, () => [{ type: 'tutor', what: 'card', to: 'hand' }]],
   [/^tap (target .+)$/, m => tgt({ type: 'tap' }, m[1])],
+  [/^discard x cards, then return a card from your graveyard to your hand for each card discarded this way$/, () => [{ type: 'recall', sel: 'you', amount: 'X' }]],   // Recall
+  [new RegExp('^untap (up to )?' + AMT + ' (lands?|creatures?|artifacts?|permanents?|nonland permanents?)(?: you control)?$'), m => { const k = T('all ' + m[3]); return k ? [{ type: 'untapMany', sel: 'you', restrict: k.restrict, amount: amt(m[2]), upTo: !!m[1] }] : null; }],   // Frantic Search
   [/^untap (target .+)$/, m => tgt({ type: 'untap' }, m[1])],
   [/^tap or untap (target .+)$/, m => tgt({ type: 'tapOrUntap' }, m[1])],
   [/^tap all (.+?)$/, m => { const k = T('all ' + m[1]); return k ? [{ type: 'tapAll', restrict: k.restrict }] : null; }],

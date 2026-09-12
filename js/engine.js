@@ -581,7 +581,7 @@ export class Duel {
   // Returns a payment plan {pool:{...}, taps:[{src,color}]} or null
   planPayment(p, cost, x = 0, poolOnly = false) {
     const pips = (cost.pips || []).slice().sort((a, b) => a.length - b.length);
-    let generic = (cost.generic || 0) + (cost.x ? x : 0);
+    let generic = (cost.generic || 0) + (cost.x ? x * cost.x : 0);   // cost.x counts the X pips
     const pool = { ...p.pool };
     const usePool = {};
     const rem = [];
@@ -1406,6 +1406,30 @@ export class Duel {
       case 'tutor': yield* this.tutor(p, e); break;
       case 'tap': for (const s of subs) if (s.card) this.tap(s.card); break;
       case 'untap': for (const s of subs) if (s.card) s.card.tapped = false; break;
+      // Untap (up to) N of your permanents of a kind, your choice (Frantic Search: untap up to three lands).
+      case 'untapMany': for (const s of subs) if (s.player) {
+        const pl = s.player; const k = this.amount(e.amount, ctx, s); if (k <= 0) continue;
+        const opts = pl.battlefield.filter(c => c.tapped && this.matchesRestrict(c, e.restrict, pl)); if (!opts.length) continue;
+        const nn = Math.min(k, opts.length); let picks;
+        if (pl.ai) picks = opts.slice().sort((a, b) => (b.def.cmc || 0) - (a.def.cmc || 0)).slice(0, nn);
+        else { const ids = yield { kind: 'choose', player: pl.idx, text: `${src.def.name}: untap ${e.upTo ? 'up to ' : ''}${nn} of your ${e.restrict?.types?.[0] ? e.restrict.types[0] + 's' : 'permanents'}`, options: opts.map(c => ({ id: c.id, label: c.def.name })), min: e.upTo ? 0 : nn, max: nn }; picks = (ids || []).map(id => this.card(id)).filter(c => c && opts.includes(c)).slice(0, nn); }
+        for (const c of picks) c.tapped = false;
+        if (picks.length) this.say(`${pl.name} untaps ${picks.map(c => c.def.name).join(', ')}.`);
+      } break;
+      // Recall: discard X cards, then return that many cards of your choice from your graveyard to your hand.
+      case 'recall': for (const s of subs) if (s.player) {
+        const pl = s.player; const k = Math.min(this.amount(e.amount, ctx, s), pl.hand.length); if (k <= 0) { this.say(`${pl.name} discards nothing.`); continue; }
+        const before = pl.graveyard.length;
+        if (pl.ai) this.discardCards(pl, pl.hand.slice().sort((a, b) => (isLand(a) ? 0 : a.def.cmc || 0) - (isLand(b) ? 0 : b.def.cmc || 0)).slice(0, k));
+        else yield* this.discardChoice(pl, k, false, src);
+        const n = Math.min(pl.graveyard.length - before, pl.graveyard.length); if (n <= 0) continue;
+        const opts = pl.graveyard.filter(c => c !== src);
+        let picks;
+        if (pl.ai) picks = opts.slice().sort((a, b) => (b.def.cmc || 0) - (a.def.cmc || 0)).slice(0, n);
+        else { const ids = yield { kind: 'choose', player: pl.idx, text: `${src.def.name}: return ${n} card${n > 1 ? 's' : ''} from your graveyard to your hand`, options: opts.map(c => ({ id: c.id, label: c.def.name })), min: Math.min(n, opts.length), max: Math.min(n, opts.length) }; picks = (ids || []).map(id => this.card(id)).filter(c => c && opts.includes(c)).slice(0, n); }
+        for (const c of picks) this.moveTo(c, 'hand');
+        if (picks.length) this.say(`${pl.name} returns ${picks.map(c => c.def.name).join(', ')} to hand.`);
+      } break;
       case 'tapOrUntap': for (const s of subs) if (s.card) { if (s.card.tapped) s.card.tapped = false; else this.tap(s.card); } break;
       case 'tapAll': for (const pl of this.players) for (const c of pl.battlefield) if (this.matchesRestrict(c, e.restrict, p)) this.tap(c); break;
       case 'untapAll': for (const pl of this.players) for (const c of pl.battlefield) if (this.matchesRestrict(c, e.restrict, p)) c.tapped = false; break;
@@ -2041,7 +2065,7 @@ export function describeTarget(e) {
 }
 export function costText(c) {
   const parts = [];
-  if (c.mana && (c.mana.pips.length || c.mana.generic || c.mana.x)) { if (c.mana.x) parts.push('X'); if (c.mana.generic) parts.push(String(c.mana.generic)); parts.push(...c.mana.pips.map(p => p.join('/'))); }
+  if (c.mana && (c.mana.pips.length || c.mana.generic || c.mana.x)) { if (c.mana.x) parts.push('X'.repeat(c.mana.x)); if (c.mana.generic) parts.push(String(c.mana.generic)); parts.push(...c.mana.pips.map(p => p.join('/'))); }
   const s = parts.join('');
   const extra = [];
   if (c.tap) extra.push('T'); if (c.sacSelf) extra.push('sacrifice'); if (c.sacrifice) extra.push('sacrifice a ' + c.sacrifice); if (c.discard) extra.push('discard ' + c.discard); if (c.life) extra.push(c.life + ' life');
