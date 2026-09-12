@@ -1063,6 +1063,7 @@ export class Duel {
   *runEffects(effects, ctx, optionalAll) {
     if (optionalAll && !ctx.p.ai) { const yes = yield { kind: 'yesno', player: ctx.p.idx, text: `${ctx.source.def.name}: apply the effect?`, value: 'optional' }; if (!yes) return; }
     for (const e of effects) {
+      if (e.ifDid && ctx.did === false) continue;   // "sacrifice ~. If you do, …" when the sacrifice could not happen
       yield* this.applyEffect(e, ctx);
       this.sba();
       if (this.winner !== null) return;
@@ -1105,6 +1106,7 @@ export class Duel {
       case 'enchanted': return ctx.source.attachedTo ? [{ card: ctx.source.attachedTo }] : [];
       case 'fixed': return ctx.item?.fixed ? [{ card: ctx.item.fixed }] : [];
       case 'thatPlayer': return ctx.thatPlayer !== undefined ? [{ player: this.players[ctx.thatPlayer] }] : [];
+      case 'thatOpp': return ctx.thatPlayer !== undefined ? [{ player: this.opponentOf(this.players[ctx.thatPlayer]) }] : [];   // "each of that player's opponents"
       case 'castSpell': { const cc = ctx.item?.ev?.card; const it = cc && this.stack.find(x => x.card === cc); return it ? [{ item: it }] : []; }
       case 'sacrificed': return ctx.item?.sacrificed ? [{ card: ctx.item.sacrificed }] : [];
       case 'prevController': { const s = ctx.prev ? this.deref(ctx.prev) : ctx.item?.fixed ? { card: ctx.item.fixed } : null; return s?.card ? [{ player: this.players[s.card.controller] }] : []; }
@@ -1284,7 +1286,12 @@ export class Duel {
       case 'cursedScroll': {
         if (!p.hand.length) { this.say(`${p.name} has no cards in hand.`); break; }
         const counts = {}; for (const c of p.hand) counts[c.def.name] = (counts[c.def.name] || 0) + 1;
-        const name = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+        let name = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];   // the AI names its most-held card
+        if (!p.ai) {   // one entry per distinct name in hand; the pick is a name, so any card of that name stands for it
+          const seen = new Set(); const opts = p.hand.filter(c => !seen.has(c.def.name) && seen.add(c.def.name)).map(c => ({ id: c.id, label: `${c.def.name}${counts[c.def.name] > 1 ? ` (×${counts[c.def.name]})` : ''}` }));
+          const ids = yield { kind: 'choose', player: p.idx, text: `${src.def.name}: name a card (a random card from your hand is revealed; a match deals ${n} damage)`, options: opts, min: 1, max: 1, secret: true };
+          const chosen = this.card((ids || [])[0]); if (chosen) name = chosen.def.name;
+        }
         const rc = p.hand[Math.floor(this.rng() * p.hand.length)];
         this.say(`${p.name} names ${name} and reveals ${rc.def.name}.`);
         if (rc.def.name === name) { for (const s of subs) { if (s.card) this.dealDamage(src, s.card, n); else if (s.player) this.dealDamage(src, s.player, n); } }
@@ -1436,7 +1443,16 @@ export class Duel {
       case 'freeze': for (const s of subs) if (s.card) s.card.flags.add('frozen'); break;
       case 'sacrifice': for (const s of subs) if (s.player) { const did = yield* this.sacrificeChoice(s.player, e.what, e.other ? src : null); if (!did && e.orElse) yield* this.runEffects(e.orElse, ctx, false); } break;
       case 'sacrificeAll': for (const s of subs) if (s.player) for (const c of s.player.battlefield.filter(c => this.matchesRestrict(c, e.restrict, s.player))) this.sacrifice(c); break;
-      case 'sacrificeSelf': if (src.zone === 'battlefield') this.sacrifice(src); break;
+      case 'sacrificeSelf': ctx.did = src.zone === 'battlefield'; if (ctx.did) this.sacrifice(src); break;
+      // Shuffle N cards from your hand into your library (Lat-Nam's Legacy); nothing to shuffle means "if you do" fails.
+      case 'shuffleIn': for (const s of subs) if (s.player) {
+        const pl = s.player; const k = Math.min(this.amount(e.amount, ctx, s), pl.hand.length); if (k <= 0) { ctx.did = false; continue; }
+        let picks;
+        if (pl.ai) picks = pl.hand.slice().sort((a, b) => (a.def.cmc || 0) - (b.def.cmc || 0)).slice(0, k);
+        else { const ids = yield { kind: 'choose', player: pl.idx, text: `${src.def.name}: shuffle ${k} card${k > 1 ? 's' : ''} from your hand into your library`, options: pl.hand.map(c => ({ id: c.id, label: c.def.name })), min: k, max: k, secret: true }; picks = (ids || []).map(id => this.card(id)).filter(c => c && pl.hand.includes(c)).slice(0, k); }
+        for (const c of picks) this.moveTo(c, 'library');
+        shuffle(pl.library, this.rng); ctx.did = picks.length > 0; this.say(`${pl.name} shuffles ${picks.length} card${picks.length === 1 ? '' : 's'} into their library.`);
+      } break;
       // Masticore: "sacrifice ~ unless you discard a card" — discard to keep it, otherwise the inner effect happens.
       case 'unlessDiscard': {
         let keep = false;

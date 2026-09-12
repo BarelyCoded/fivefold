@@ -221,5 +221,37 @@ section('Cloud of Faeries untaps up to two lands as it enters');
   processAndResolve(d, [], ch); processAndResolve(d, [], ch);   // the spell resolves, then its enters-the-battlefield trigger
   ok(cf.zone === 'battlefield' && !l[2].tapped && l[0].tapped && l[1].tapped, `entered and untapped the chosen land only (${l.map(c => c.tapped ? 'T' : 'U').join('')})`); }
 
+section('Standstill: whoever casts, their opponent draws three');
+{ const d = newDuel(); mainPhase(d); const ss = place(d, D('Standstill'), 1); for (let i = 0; i < 5; i++) { lib(d, bears(), 0); lib(d, bears(), 1); }
+  const bolt = hand(d, D('Lightning Bolt'), 0); pool(d, 0, { R: 1 });
+  ok(d.cast(d.players[0], bolt, { targets: [{ type: 'player', idx: 1 }] }), 'the opponent of Standstill\'s controller casts a spell');
+  drive(d.processEvents()); ok(d.stack.some(it => it.card === ss), 'Standstill triggers');
+  const h0 = d.players[0].hand.length, h1 = d.players[1].hand.length;
+  drive(d.resolveTop());   // the trigger resolves first (on top of the Bolt)
+  ok(ss.zone === 'graveyard', `Standstill sacrificed (zone=${ss.zone})`);
+  ok(d.players[1].hand.length === h1 + 3 && d.players[0].hand.length === h0, `the caster's opponent (Standstill's controller) drew three (${d.players[1].hand.length - h1}/${d.players[0].hand.length - h0})`);
+  // and the other way round: its controller casts, the other player draws
+  const d2 = newDuel(); mainPhase(d2); d2.active = 1; d2.priority = 1; const ss2 = place(d2, D('Standstill'), 1); for (let i = 0; i < 5; i++) { lib(d2, bears(), 0); lib(d2, bears(), 1); }
+  const keg = hand(d2, D('Powder Keg'), 1); pool(d2, 1, { U: 2 }); ok(d2.cast(d2.players[1], keg, {}), 'Standstill\'s controller casts');
+  drive(d2.processEvents()); const g0 = d2.players[0].hand.length; drive(d2.resolveTop());
+  ok(ss2.zone === 'graveyard' && d2.players[0].hand.length === g0 + 3, `sacrificed and the other player drew three (${d2.players[0].hand.length - g0})`); }
+
+section('Cursed Scroll: the player names the card');
+{ const d = newDuel(); mainPhase(d); const cs = place(d, D('Cursed Scroll'), 0); pool(d, 0, { R: 3 }); const a = hand(d, D('Lightning Bolt'), 0), b = hand(d, D('Lightning Bolt'), 0);
+  const i = abIdx(cs.def, x => x.type === 'activated'); ok(d.activate(d.players[0], cs, i, { targets: [{ type: 'player', idx: 1 }] }), 'activated');
+  const asked = []; processAndResolve(d, [], y => { asked.push(y); return [a.id]; });
+  ok(asked.length === 1 && /name a card/.test(asked[0].text) && asked[0].options.length === 1 && /Lightning Bolt \(×2\)/.test(asked[0].options[0].label), `asked for a name, one option per distinct name (${asked[0]?.options.map(o => o.label).join(', ')})`);
+  ok(d.players[1].life === 18, `two Bolts in hand, Bolt named: a guaranteed hit (life ${d.players[1].life})`); }
+
+section("Lat-Nam's Legacy: shuffle a card in, draw two at the next upkeep");
+{ const d = newDuel(); mainPhase(d); const ll = hand(d, D("Lat-Nam's Legacy"), 0); const b = hand(d, bears(), 0); for (let i = 0; i < 4; i++) lib(d, D('Island'), 0); pool(d, 0, { U: 2 });
+  ok(d.cast(d.players[0], ll, {}), 'cast');
+  processAndResolve(d, [], y => /shuffle 1 card/.test(y.text) ? [b.id] : []);
+  ok(b.zone === 'library' && d.players[0].hand.length === 0, `Bears shuffled into the library (zone=${b.zone})`);
+  ok(d.delayed.some(x => x.type === 'draw' && x.amount === 2 && x.player === 0), 'a two-card draw is scheduled for the next upkeep');
+  const d2 = newDuel(); mainPhase(d2); const l2 = hand(d2, D("Lat-Nam's Legacy"), 0); for (let i = 0; i < 4; i++) lib(d2, D('Island'), 0); pool(d2, 0, { U: 2 });
+  d2.cast(d2.players[0], l2, {}); processAndResolve(d2);
+  ok(!d2.delayed.length && d2.players[0].hand.length === 0, `with no card to shuffle in, "if you do" fails and no draw is scheduled (${d2.delayed.length})`); }
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

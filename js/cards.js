@@ -427,6 +427,8 @@ const rules = [
   [/^target player skips their next draw step$/, () => [{ type: 'skipDrawStep', sel: 'player' }]],
   [/^any number of target opponents each discard their hands, then draw (\S+) cards?$/, m => [{ type: 'discard', all: true, sel: 'each', restrict: { players: 'opp' } }, { type: 'draw', amount: amt(m[1]), sel: 'each', restrict: { players: 'opp' } }]],
   // variable draw: "draw a card for each attacking creature" and "for each <perm> you control"
+  [/^shuffle a card from your hand into your library$/, () => [{ type: 'shuffleIn', sel: 'you', amount: 1 }]],   // Lat-Nam's Legacy
+  [/^each of that player's opponents draws? (\S+) cards?$/, m => [{ type: 'draw', amount: amt(m[1]), sel: 'thatOpp' }]],   // Standstill
   [/^(?:you )?draw an additional card$/, () => [{ type: 'draw', amount: 1, sel: 'you' }]],
   [/^draw a card and reveal it$/, () => [{ type: 'draw', amount: 1, sel: 'you', note: 'the reveal and discard-if-nonland are not enforced' }]],
   [/^(target player|you) draws? cards? equal to the number of cards in (?:their|your) hand, then discards? that many cards?$/, m => { const k = m[1] === 'you' ? { sel: 'you' } : T(m[1]); return k ? [{ type: 'drawDiscardHand', ...k }] : null; }],
@@ -627,7 +629,11 @@ export function parseEffects(text) {
   const sentences = body.split(/(?<=\.)\s+(?=[A-Z~"])/i).map(s => s.trim()).filter(Boolean);
   for (let i = 0; i < sentences.length; i++) {
     let s = sentences[i];
-    if (/^if you do,/i.test(s)) { if (!out.optional) continue; s = s.replace(/^if you do, /i, ''); }
+    let ifDid = false;
+    if (/^if you do,/i.test(s)) {   // mandatory "sacrifice ~. If you do, …": runs only if the previous effect happened
+      if (out.notes.length && /^Ignored: /.test(out.notes[out.notes.length - 1]) && !out.optional) { out.notes.push('Ignored: ' + s.slice(0, 80)); continue; }   // its condition was not understood either
+      s = s.replace(/^if you do, /i, ''); if (!out.optional) ifDid = true;
+    }
     if (/^flip a coin\.?$/.test(s)) {
       const branch = {};
       while (i + 1 < sentences.length) {
@@ -652,7 +658,7 @@ export function parseEffects(text) {
     if (last && last.type === 'peek' && /^you may have that player shuffle$/i.test(s.replace(/\.$/, ''))) { last.mayShuffle = true; continue; }
     if (last && last.type === 'dmgRep' && /^you gain life equal to the damage prevented(?: this way)?$/i.test(s.replace(/\.$/, ''))) { last.gainLife = true; continue; }
     const e = parseSentence(s);
-    if (e) { out.effects.push(...e); for (const x of e) if (x.note) out.notes.push('Approximated: ' + x.note); }
+    if (e) { if (ifDid) for (const x of e) x.ifDid = true; out.effects.push(...e); for (const x of e) if (x.note) out.notes.push('Approximated: ' + x.note); }
     else out.notes.push('Ignored: ' + s.slice(0, 80));
   }
   return out;
