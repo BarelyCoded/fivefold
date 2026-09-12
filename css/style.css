@@ -616,9 +616,10 @@ svg.arrows { position: absolute; left: 0; top: 0; pointer-events: none; z-index:
 .adm-ev .flag { color: var(--gold); }
 
 /* ---- in-match problem report ---- */
-.modal.report { max-width: 520px; }
-.modal.report label { display: block; margin: 8px 0 4px; font-size: 13px; }
-.modal.report select, .modal.report textarea, .modal.report input { width: 100%; box-sizing: border-box; margin-top: 4px; }
+.modal.repform { max-width: 560px; max-height: 92vh; overflow: auto; }   /* not ".report": that's the adventure summary panel */
+.modal.repform label { display: block; margin: 10px 0 4px; font-size: 13px; }
+.modal.repform select, .modal.repform textarea, .modal.repform input { width: 100%; box-sizing: border-box; margin-top: 4px; }
+.modal.repform textarea { min-height: 150px; font-family: inherit; font-size: 14px; line-height: 1.4; }
 .rep-kinds { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; margin: 8px 0; }
 .rep-kinds .radio { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; }
 @media (max-width: 520px) { .rep-kinds { grid-template-columns: 1fr; } }

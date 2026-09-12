@@ -30,7 +30,7 @@ const partial = await p.evaluate(()=>JSON.parse(localStorage.getItem('ff.gamelog
 ok(partial && partial.mode==='playtest' && partial.meta.opponentDeck==='Sligh' && partial.meta.playerDeck && partial.players.length===2 && Object.keys(partial.players[0].deck).length>3, `in-progress record saved (mode=${partial?.mode}, vs ${partial?.meta?.opponentDeck}, my deck ${partial?.meta?.playerDeck})`);
 ok(partial.events.some(e=>e.k==='log'), `engine lines captured (${partial.events.length} events so far)`);
 // flag an issue
-await p.click('#b-flag'); await p.waitForSelector('.modal.report',{timeout:3000});
+await p.click('#b-flag'); await p.waitForSelector('.modal.repform',{timeout:3000});
 ok(await p.$('#rep-send[disabled]'), 'send is disabled until something is written');
 await p.check('input[name="rep-kind"][value="mechanic"]');
 const cardOpts = await p.$$eval('#rep-card option', os=>os.map(o=>o.value)); ok(cardOpts.length>2, `card picker lists cards on the table (${cardOpts.length})`);

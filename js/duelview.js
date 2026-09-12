@@ -505,13 +505,13 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
   }
   function reportHtml() {
     const r = ui.report;
-    return `<div class="overlay"><div class="modal report">
+    return `<div class="overlay"><div class="modal repform">
       <h3>⚑ Report a problem</h3>
       <p class="small">Turn ${duel.turn}, ${esc(STEP_NAME[duel.step] || duel.step)}. The board, stack and recent log are saved with your note so it can be reproduced.</p>
       <div class="rep-kinds">${REPORT_KINDS.map(([k, l]) => `<label class="radio"><input type="radio" name="rep-kind" value="${k}" ${r.category === k ? 'checked' : ''}> ${l}</label>`).join('')}</div>
       <label>Card involved <select id="rep-card"><option value="">— none / not sure —</option>${reportCards().map(n => `<option value="${esc(n)}" ${r.card === n ? 'selected' : ''}>${esc(n)}</option>`).join('')}<option value="__other" ${r.card === '__other' ? 'selected' : ''}>A card not listed…</option></select></label>
       ${r.card === '__other' ? `<label>Card name <input id="rep-cardname" value="${esc(r.cardName || '')}" placeholder="Card name"></label>` : ''}
-      <label>What happened, and what should have happened? <textarea id="rep-text" rows="4" placeholder="e.g. Goblin Piledriver attacked with two other Goblins but stayed 1/2.">${esc(r.text || '')}</textarea></label>
+      <label>What happened, and what should have happened? <textarea id="rep-text" rows="7" placeholder="e.g. Goblin Piledriver attacked with two other Goblins but stayed 1/2.">${esc(r.text || '')}</textarea></label>
       <div class="mbtns"><button class="btn primary" id="rep-send" ${(r.text || '').trim() ? '' : 'disabled'}>Send report</button><button class="btn" id="rep-cancel">Cancel</button></div>
     </div></div>`;
   }
