@@ -30,6 +30,7 @@ export const abilitiesOf = c => c.cur?.flags?.has('noAbilities') ? [] : (c.cur?.
 export class Duel {
   constructor({ player, ai, rng = Math.random, hooks = null, rules = {} }) {
     this.rng = rng; this.hooks = hooks; this.rules = rules;
+    this.logViewer = rules.viewer ?? null;   // whose drawn cards are named in the log (others show only a count); null = name the sole human's
     this.players = [this.makePlayer(player, 0), this.makePlayer(ai, 1)];
     this.turn = 0; this.active = 0; this.priority = 0; this.passes = 0; this.step = 'setup'; this.stepIndex = -1;
     this.stack = []; this.jobs = []; this.events = []; this.pending = null; this.winner = null;
@@ -72,7 +73,7 @@ export class Duel {
 
   // ---- lifecycle -------------------------------------------------------------
   start() {
-    for (const p of this.players) this.drawCards(p, p.idx === 0 ? (this.rules.handSize || 7) : 7);
+    for (const p of this.players) this.drawCards(p, p.idx === 0 ? (this.rules.handSize || 7) : 7, { silent: true });
     // The AI takes the same mulligan the human is offered: redraw a hand of one land or none (bounded retries).
     // A remote (human) opponent is offered the mulligan through the UI instead, so don't auto-mulligan them.
     for (let tries = 0; this.players[1].ai && tries < 3 && this.players[1].hand.filter(isLand).length <= 1; tries++) this.mulligan(1);
@@ -90,7 +91,7 @@ export class Duel {
     const p = this.players[idx];
     for (const c of p.hand.slice()) this.moveTo(c, 'library');
     shuffle(p.library, this.rng);
-    this.drawCards(p, idx === 0 ? (this.rules.handSize || 7) : 7);
+    this.drawCards(p, idx === 0 ? (this.rules.handSize || 7) : 7, { silent: true });
     this.say(`${p.name} takes a mulligan.`);
     this.refresh(); this.emit();
   }
@@ -288,7 +289,7 @@ export class Duel {
         }
         case 'upkeep': {
           this.say(`Turn ${this.turn}: ${ap.name}.`);
-          for (const d of this.delayed.splice(0)) if (d.type === 'draw') { const k = d.amount || 1; this.drawCards(this.players[d.player], k); this.say(`${this.players[d.player].name} draws ${k > 1 ? k + ' cards' : 'a card'}.`); }
+          for (const d of this.delayed.splice(0)) if (d.type === 'draw') { this.drawCards(this.players[d.player], d.amount || 1); }
           if (this.rules.upkeepDamage && ap.idx === 0 && this.turn > 1) { ap.life -= this.rules.upkeepDamage; this.say(`The miasma drains ${this.rules.upkeepDamage} life from ${ap.name}.`); }
           this.fireEvent({ type: 'upkeep', player: ap.idx });
           yield* this.upkeepCosts(ap);
@@ -572,7 +573,7 @@ export class Duel {
         if (amount <= 0) return;
         const produces = ma.reflect ? this.reflectProduces(p, c) : ma.produces;   // Reflecting Pool mirrors your other lands
         if (!produces.length) return;
-        out.push({ card: c, index: i, produces, amount });
+        out.push({ card: c, index: i, produces, amount, taps: !!ma.cost.tap });   // taps: a card with two tap abilities (Llanowar Wastes: {C} vs {B}/{G}) can still only be tapped once
       });
     }
     return out;
@@ -589,6 +590,9 @@ export class Duel {
     const sources = poolOnly ? [] : this.manaSources(p);   // poolOnly: pay from the pool the player tapped, never auto-tap
     const used = new Array(sources.length).fill(null); // color chosen
     const left = sources.map(s => s.amount);
+    // A tap-cost source is unavailable if another mana ability of the same card is already tapped in this plan
+    // (Llanowar Wastes has two tap abilities but only one tap): one tap per card.
+    const tapBlocked = (s) => sources[s].taps && sources.some((o, t) => t !== s && o.taps && o.card === sources[s].card && used[t]);
     const assign = (i) => {
       if (i === rem.length) return true;
       for (let s = 0; s < sources.length; s++) {
@@ -596,6 +600,7 @@ export class Duel {
         if (!col) continue;
         if (used[s] && used[s] !== col) continue;
         if (left[s] <= 0) continue;
+        if (!used[s] && tapBlocked(s)) continue;
         const prev = used[s]; used[s] = col; left[s]--;
         if (assign(i + 1)) return true;
         used[s] = prev; left[s]++;
@@ -603,12 +608,16 @@ export class Duel {
       return false;
     };
     if (!assign(0)) return null;
-    let genericAvail = Object.values(pool).reduce((a, b) => a + b, 0) + left.reduce((a, b) => a + b, 0);
+    // Leftover mana available for generic: a card with two untapped tap abilities can only contribute once, so
+    // count each untapped source but skip a tap ability whose card already contributes an untapped tap ability.
+    let genericAvail = Object.values(pool).reduce((a, b) => a + b, 0);
+    const seenTap = new Set();
+    for (let s = 0; s < sources.length; s++) { if (left[s] <= 0) continue; if (sources[s].taps && !used[s]) { if (seenTap.has(sources[s].card) || tapBlocked(s)) continue; seenTap.add(sources[s].card); } genericAvail += left[s]; }
     if (genericAvail < generic) return null;
     // consume generic: pool first, then leftover units on already-tapped sources, then new sources (fewest colours first)
     for (const col of ['C', 'W', 'U', 'B', 'R', 'G']) while (generic > 0 && pool[col] > 0) { pool[col]--; usePool[col] = (usePool[col] || 0) + 1; generic--; }
     const order = sources.map((s, i) => i).sort((a, b) => (used[a] ? -1 : 0) - (used[b] ? -1 : 0) || sources[a].produces.length - sources[b].produces.length || (isLand(sources[a].card) ? -1 : 1) - (isLand(sources[b].card) ? -1 : 1));
-    for (const i of order) { while (generic > 0 && left[i] > 0) { if (!used[i]) used[i] = sources[i].produces[0]; left[i]--; generic--; } if (generic <= 0) break; }
+    for (const i of order) { if (!used[i] && tapBlocked(i)) continue; while (generic > 0 && left[i] > 0) { if (!used[i]) used[i] = sources[i].produces[0]; left[i]--; generic--; } if (generic <= 0) break; }
     const taps = sources.map((s, i) => used[i] ? { src: s, color: used[i], spare: left[i] } : null).filter(Boolean);
     return { usePool, taps };
   }
@@ -1364,14 +1373,14 @@ export class Duel {
       case 'flag': for (const s of subs) if (s.card) { if (e.temp) s.card.temp.flags.push(e.flag); else s.card.flags.add(e.flag); } break;
       case 'loseTemp': for (const s of subs) if (s.card) s.card.temp.flags.push('lose:' + e.keyword); break;
       case 'removeFromCombat': for (const s of subs) if (s.card) { removeFrom(this.attackers, s.card.id); delete this.blocks[s.card.id]; for (const k of Object.keys(this.blocks)) this.blocks[k] = this.blocks[k].filter(id => id !== s.card.id); this.say(`${s.card.def.name} is removed from combat.`); } break;
-      case 'draw': for (const s of subs) if (s.player) { const k = this.amount(e.amount, ctx, s); this.drawCards(s.player, k); this.say(`${s.player.name} draws ${k}.`); } break;
-      case 'drawDiscardHand': for (const sb of subs) if (sb.player) { const k = sb.player.hand.length; this.drawCards(sb.player, k); this.say(`${sb.player.name} draws ${k}.`); yield* this.discardChoice(sb.player, k, false, p); } break;
+      case 'draw': for (const s of subs) if (s.player) this.drawCards(s.player, this.amount(e.amount, ctx, s)); break;
+      case 'drawDiscardHand': for (const sb of subs) if (sb.player) { const k = sb.player.hand.length; this.drawCards(sb.player, k); yield* this.discardChoice(sb.player, k, false, p); } break;
       case 'discardDownTo': for (const sb of subs) if (sb.player) { const keep = this.amount(e.amount, ctx) || 0; const nn = Math.max(0, sb.player.hand.length - keep); if (nn > 0) yield* this.discardChoice(sb.player, nn, false, p); } break;
-      case 'discardDraw': for (const s of subs) if (s.player) { const k = s.player.hand.length; this.discardCards(s.player, s.player.hand.slice()); this.drawCards(s.player, k); this.say(`${s.player.name} discards ${k} and draws ${k}.`); } break;
+      case 'discardDraw': for (const s of subs) if (s.player) { const k = s.player.hand.length; this.discardCards(s.player, s.player.hand.slice()); this.drawCards(s.player, k); } break;
       case 'skipDrawStep': for (const sb of subs) if (sb.player) { sb.player.skipDraw = (sb.player.skipDraw || 0) + 1; this.say(`${sb.player.name} will skip their next draw step.`); } break;
       case 'fluxDiscard': for (const pl of this.players) { const opts = pl.hand.map(c => ({ id: c.id, label: c.def.name })); let ids = []; if (pl.ai) ids = []; else ids = (yield { kind: 'choose', player: pl.idx, text: `Discard any number of cards, then draw that many`, options: opts, min: 0, max: pl.hand.length, secret: true }) || []; const cs = ids.map(id => this.card(id)).filter(c => c && pl.hand.includes(c)); this.discardCards(pl, cs); this.drawCards(pl, cs.length); this.say(`${pl.name} discards ${cs.length} and draws ${cs.length}.`); } break;
-      case 'shuffleHandDraw': { const k = p.hand.length; for (const c of p.hand.slice()) this.moveTo(c, 'library'); shuffle(p.library, this.rng); this.drawCards(p, k); this.say(`${p.name} shuffles ${k} card${k === 1 ? '' : 's'} from hand into their library and draws ${k}.`); break; }
-      case 'windfall': { const counts = this.players.map(pl => pl.hand.length); const max = Math.max(0, ...counts); for (const pl of this.players) { this.discardCards(pl, pl.hand.slice()); } for (const pl of this.players) this.drawCards(pl, max); this.say(`Each player discards their hand and draws ${max}.`); break; }
+      case 'shuffleHandDraw': { const k = p.hand.length; for (const c of p.hand.slice()) this.moveTo(c, 'library'); shuffle(p.library, this.rng); this.say(`${p.name} shuffles ${k} card${k === 1 ? '' : 's'} from hand into their library.`); this.drawCards(p, k); break; }
+      case 'windfall': { const counts = this.players.map(pl => pl.hand.length); const max = Math.max(0, ...counts); for (const pl of this.players) { this.discardCards(pl, pl.hand.slice()); } this.say('Each player discards their hand.'); for (const pl of this.players) this.drawCards(pl, max); break; }
       case 'putBottom': { const k = Math.min(this.amount(e.amount, ctx) || 0, p.hand.length); if (k > 0) { const ids = p.ai ? p.hand.slice(0, k).map(c => c.id) : (yield { kind: 'choose', player: p.idx, text: `Put ${k} card${k > 1 ? 's' : ''} from your hand on the bottom of your library`, options: p.hand.map(c => ({ id: c.id, label: c.def.name })), min: k, max: k, secret: true }) || []; const chosen = ids.map(id => this.card(id)).filter(c => c && p.hand.includes(c)); for (const c of chosen) { removeFrom(p.hand, c); c.zone = 'library'; p.library.unshift(c); } this.say(`${p.name} puts ${chosen.length} card${chosen.length === 1 ? '' : 's'} on the bottom of their library.`); } break; }
       case 'discard': for (const s of subs) if (s.player) { if (e.filter === 'nonland') { const cs = s.player.hand.filter(c => !isLand(c)); this.say(`${s.player.name} reveals their hand.`); this.discardCards(s.player, cs); } else yield* this.discardChoice(s.player, e.all ? s.player.hand.length : n, e.random, p); } break;
       case 'gain': for (const s of subs) if (s.player) { const k = this.amount(e.amount, ctx, s); if (this.gainLife(s.player, k)) this.say(`${s.player.name} gains ${k} life.`); } break;
@@ -1392,7 +1401,7 @@ export class Duel {
         }
         this.say('Balance evens out lands, hands and creatures.'); break;
       }
-      case 'windsOfChange': for (const pl of this.players) { const k = pl.hand.length; for (const c of pl.hand.slice()) this.moveTo(c, 'library'); shuffle(pl.library, this.rng); this.drawCards(pl, k); this.say(`${pl.name} shuffles their hand away and draws ${k}.`); } break;
+      case 'windsOfChange': for (const pl of this.players) { const k = pl.hand.length; for (const c of pl.hand.slice()) this.moveTo(c, 'library'); shuffle(pl.library, this.rng); this.say(`${pl.name} shuffles their hand away.`); this.drawCards(pl, k); } break;
       case 'shuffleGraveyard': { const pls = subs.filter(s => s.player).map(s => s.player); for (const pl of (pls.length ? pls : [p])) { for (const c of pl.graveyard.slice()) this.moveTo(c, 'library'); shuffle(pl.library, this.rng); this.say(`${pl.name} shuffles their graveyard into their library.`); } break; }
       case 'graveyardTopToBottom': { const c = p.graveyard[p.graveyard.length - 1]; if (c) { this.moveTo(c, 'library'); removeFrom(p.library, c); p.library.unshift(c); this.say(`${c.def.name} goes to the bottom of ${p.name}'s library.`); } break; }
       case 'lookHand': for (const s of subs) if (s.player) { const cards = e.random ? [s.player.hand[Math.floor(this.rng() * s.player.hand.length)]].filter(Boolean) : s.player.hand; if (!p.ai) yield { kind: 'look', player: p.idx, text: `${s.player.name}'s hand${e.random ? ' (one card at random)' : ''}`, options: cards.map(c => ({ id: c.id, label: c.def.name })), secret: true }; else this.say(`${p.name} looks at ${s.player.name}'s hand.`); } break;
@@ -1500,7 +1509,7 @@ export class Duel {
         for (const pl of this.players) {
           for (const c of [...pl.hand, ...pl.graveyard]) { if (c === src) continue; this.moveTo(c, 'library'); }
           shuffle(pl.library, this.rng);
-          this.drawCards(pl, 7);
+          this.drawCards(pl, 7, { silent: true });
           this.say(`${pl.name} shuffles and draws seven.`);
         }
         break;
@@ -1679,12 +1688,21 @@ export class Duel {
     this.moveTo(c, 'battlefield', { controller: p.idx });
     this.say(`${p.name} creates a ${e.p}/${e.t} ${e.subtypes.join(' ')} token.`);
   }
-  drawCards(p, n) {
+  // Cards a draw names in the log: the viewer's own (others show only a count, so a hand stays hidden). With no
+  // explicit viewer set, name the sole human's draws — the common single-player / playtest case.
+  namesDrawFor(p) { return this.logViewer != null ? p.idx === this.logViewer : (!p.ai && this.players.filter(x => !x.ai).length === 1); }
+  drawCards(p, n, { silent = false } = {}) {
+    const drawn = [];
     for (let i = 0; i < n; i++) {
-      if (!p.library.length) { p.drewFromEmpty = true; return; }
-      const c = p.library.pop(); c.zone = 'hand'; p.hand.push(c);
+      if (!p.library.length) { p.drewFromEmpty = true; break; }
+      const c = p.library.pop(); c.zone = 'hand'; p.hand.push(c); drawn.push(c);
       this.fireEvent({ type: 'draws', player: p.idx });
     }
+    if (!silent && drawn.length) {
+      if (this.namesDrawFor(p)) this.say(`${p.name} draws ${drawn.map(c => c.def?.name || 'a card').join(', ')}.`);
+      else this.say(`${p.name} draws ${drawn.length === 1 ? 'a card' : drawn.length + ' cards'}.`);
+    }
+    return drawn;
   }
   discardCards(p, cards) { for (const c of cards) if (c && p.hand.includes(c)) { this.moveTo(c, 'graveyard'); this.say(`${p.name} discards ${c.def.name}.`); } }
   tap(c) { if (c.tapped) return; c.tapped = true; this.fireEvent({ type: 'tapped', card: c }); }

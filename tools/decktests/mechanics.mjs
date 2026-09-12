@@ -253,5 +253,27 @@ section("Lat-Nam's Legacy: shuffle a card in, draw two at the next upkeep");
   d2.cast(d2.players[0], l2, {}); processAndResolve(d2);
   ok(!d2.delayed.length && d2.players[0].hand.length === 0, `with no card to shuffle in, "if you do" fails and no draw is scheduled (${d2.delayed.length})`); }
 
+section('Llanowar Wastes taps only once: one mana per activation, not two');
+{ const d = newDuel(); mainPhase(d); const lw = place(d, D('Llanowar Wastes'), 0); lw.sick = false;
+  const surv = hand(d, D('Survival of the Fittest'), 0);   // {1}{G}
+  ok(!d.canCast(d.players[0], surv, {}), 'one Llanowar Wastes cannot pay {1}{G} (two mana from one tap)');
+  const lw2 = place(d, D('Llanowar Wastes'), 0); lw2.sick = false;
+  ok(d.canCast(d.players[0], surv, {}), 'two Llanowar Wastes can pay {1}{G}');
+  const before = d.players[0].life; ok(d.cast(d.players[0], surv, {}), 'cast'); processAndResolve(d);
+  ok(lw.tapped && lw2.tapped, 'both lands are tapped');
+  ok(Object.values(d.players[0].pool).reduce((a, b) => a + b, 0) === 0, `no mana left floating (${JSON.stringify(d.players[0].pool)})`);
+  ok(d.players[0].life <= before - 1, `at least one point of pain-land damage taken (life ${before} -> ${d.players[0].life})`); }
+
+section('Llanowar Wastes hand-activated: pick one colour, one mana');
+{ const d = newDuel(); mainPhase(d); const lw = place(d, D('Llanowar Wastes'), 0); lw.sick = false;
+  const i = lw.def.manaAbilities.findIndex(m => m.produces.includes('B') && m.produces.includes('G'));
+  ok(d.activateMana(d.players[0], lw, i, 'G'), 'tap for green');
+  ok(d.players[0].pool.G === 1 && d.players[0].pool.B === 0 && lw.tapped, `exactly one green added (${JSON.stringify(d.players[0].pool)})`); }
+
+section('Draws are logged: the viewer sees card names, the opponent only a count');
+{ const d = newDuel(); mainPhase(d); d.logViewer = 0; lib(d, D('Lightning Bolt'), 0); lib(d, D('Counterspell'), 1);
+  d.drawCards(d.players[0], 1); ok(d.log.some(l => /A draws Counterspell|A draws Lightning Bolt/.test(l)), `the viewer's draw is named (${d.log.slice(-1)})`);
+  d.drawCards(d.players[1], 1); ok(d.log.some(l => /B draws a card/.test(l)) && !d.log.some(l => /B draws (Lightning Bolt|Counterspell)/.test(l)), `the opponent's draw is a count only (${d.log.slice(-1)})`); }
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
