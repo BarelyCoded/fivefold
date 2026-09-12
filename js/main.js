@@ -1,6 +1,6 @@
 // Fivefold app controller: screens, world loop, persistence.
 import { parseList, importNames, defOf, forgetDefs, loadArtIndex, artFor, artCount, hasOwnArt, hasServer } from './collection.js';
-import { attachGameLog, closeGameLog, flagIssue, recoverPartial, listGameLogs, exportGameLogs, clearGameLogs, currentGameLog } from './gamelog.js';
+import { attachGameLog, closeGameLog, flagIssue, recoverPartial, listGameLogs, exportGameLogs, clearGameLogs, currentGameLog, retryUnsent, unsentCount } from './gamelog.js';
 import { premodernLegality, BASIC_LANDS } from './format.js';
 import { fetchCards, cacheSize, cached as cachedCard, allCached } from './scryfall.js';
 import { COLORS, COLOR_NAME, manaHtml, statusLabel } from './cards.js';
@@ -1090,7 +1090,7 @@ function title() {
       <div><h2>New to Magic?</h2><p>Eight short lessons cover everything a duel needs: lands, mana, creatures, combat and spells. Then fight a practice duel with hints that read the table and tell you what to do next.</p></div>
       <div class="btnrow"><button class="btn primary" data-go="tutorial">Learn to play</button><button class="btn" id="b-practice">Practice duel</button><button class="btn" id="b-multiplayer">Multiplayer (1v1)</button></div>
         <div class="btnrow"><button class="btn" data-go="brew">Premodern deck builder</button></div>
-        <p class="small gamelogs">Game logs: <b>${listGameLogs().length}</b> recorded in this browser${hasServer() ? ' (also saved to <code>logs/games.jsonl</code> by the server)' : ''}. <button class="btn tiny" id="b-logs-export" ${listGameLogs().length ? '' : 'disabled'}>Export</button> <button class="btn tiny ghost" id="b-logs-clear" ${listGameLogs().length ? '' : 'disabled'}>Clear</button></p>
+        <p class="small gamelogs">Games are logged to improve the rules engine (your plays and the engine's log — nothing personal). <b>${listGameLogs().length}</b> kept in this browser${unsentCount() ? `, ${unsentCount()} waiting to send` : ''}${hasServer() ? '; the server also writes <code>logs/games.jsonl</code>' : ''}. <button class="btn tiny" id="b-logs-export" ${listGameLogs().length ? '' : 'disabled'}>Export</button> <button class="btn tiny ghost" id="b-logs-clear" ${listGameLogs().length ? '' : 'disabled'}>Clear</button></p>
     </div>
     <div class="cols">
       <form id="newgame" class="box">
@@ -1882,6 +1882,7 @@ document.addEventListener('click', ev => {
   if (ev.target.id === 'b-logs-clear') { if (confirm('Delete the game logs stored in this browser?')) { clearGameLogs(); render(); } }
 });
 recoverPartial();
+retryUnsent().then(n => { if (n) render(); });
 document.addEventListener('keydown', ev => { if (ev.target.id === 'bw-deckname' && ev.key === 'Enter') { ev.preventDefault(); brewSaveDeck(ev.target.value); } });
 document.addEventListener('click', ev => {
   const el = ev.target.closest('[data-brewadd],[data-brewsb],[data-brewadd-deck],[data-brewsub-deck],[data-brewadd-side],[data-brewsub-side],[data-brewcol],[data-brewcmc],[data-brewtype],[data-brewbad],[data-brewclear],[data-deckload],[data-deckplay],[data-deckrename],[data-deckdel],[data-presetload],[data-presetplay],#bw-issues,#bw-import,#bw-export,#bw-playtest,#bw-clear,#bw-imp-go,#bw-imp-cancel,#bw-decks,#bw-deck-save');

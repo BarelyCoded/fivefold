@@ -12,3 +12,8 @@ services:
     startCommand: node relay.js  # Render injects PORT, which relay.js already honors
     healthCheckPath: /
     autoDeploy: true
+    envVars:
+      - key: LOG_TOKEN        # needed to read the game logs back: node tools/gamelogs.mjs --pull <url> --token <this>
+        generateValue: true
+    # The free plan's disk is wiped on each deploy/restart. To keep game logs across restarts, attach a disk
+    # (Render: Disks -> mount at /data) and set LOG_DIR=/data; until then, --pull them regularly.

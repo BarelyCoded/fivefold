@@ -41,14 +41,24 @@ http.createServer((req, res) => {
 
   if (p === '/api/art') return send(res, 200, JSON.stringify(listArt()), MIME['.json']);
 
+  // Game logs (js/gamelog.js). Any origin may POST — the GitHub Pages build reports to the hosted relay —
+  // and reading them back needs LOG_TOKEN. LOG_DIR moves the file onto a persistent disk.
+  const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, GET, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization' };
+  const logFile = () => { const dir = process.env.LOG_DIR || path.join(ROOT, 'logs'); fs.mkdirSync(dir, { recursive: true }); return path.join(dir, 'games.jsonl'); };
+  if (p === '/api/log' && req.method === 'OPTIONS') { res.writeHead(204, CORS); return res.end(); }
+  if (p === '/api/logs' && req.method === 'GET') {
+    const token = process.env.LOG_TOKEN; const given = url.searchParams.get('token') || (req.headers.authorization || '').replace(/^Bearer /, '');
+    if (!token || given !== token) { res.writeHead(403, CORS); return res.end('LOG_TOKEN required'); }
+    const f = logFile(); res.writeHead(200, { ...CORS, 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-store' });
+    return fs.existsSync(f) ? fs.createReadStream(f).pipe(res) : res.end('');
+  }
   if (p === '/api/log' && req.method === 'POST') {   // one game record per line, appended by js/gamelog.js
     let body = ''; let size = 0;
     req.on('data', chunk => { size += chunk.length; if (size > 8e6) { req.destroy(); return; } body += chunk; });
     req.on('end', () => {
       let rec; try { rec = JSON.parse(body); } catch { return send(res, 400, 'bad json'); }
-      const dir = path.join(ROOT, 'logs'); fs.mkdirSync(dir, { recursive: true });
       const line = JSON.stringify({ ...rec, receivedAt: new Date().toISOString() }) + '\n';
-      fs.appendFile(path.join(dir, 'games.jsonl'), line, err => err ? send(res, 500, 'could not write log') : send(res, 200, JSON.stringify({ ok: true }), MIME['.json']));
+      fs.appendFile(logFile(), line, err => { res.writeHead(err ? 500 : 200, { ...CORS, 'Content-Type': MIME['.json'], 'Cache-Control': 'no-store' }); res.end(err ? '{"ok":false}' : '{"ok":true}'); });
     });
     return;
   }

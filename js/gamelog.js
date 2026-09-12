@@ -8,7 +8,16 @@ import { hasServer } from './collection.js';
 
 const KEY = 'ff.gamelogs.v1';           // finished games kept in this browser
 const PARTIAL = 'ff.gamelog.partial.v1'; // the game in progress, so a crash or reload still leaves a record
-const KEEP = 40, MAX_EVENTS = 6000;
+const UNSENT = 'ff.gamelog.unsent.v1';    // records the collector hasn't accepted yet, retried on the next load
+const KEEP = 40, MAX_EVENTS = 6000, KEEP_UNSENT = 40;
+// content/config.json names the collector every build reports to; a page served by server.js/relay.js also
+// keeps its own copy. Loaded once, lazily; a missing file just means "same origin only".
+let configP = null;
+const config = () => configP ||= fetch('content/config.json').then(r => r.ok ? r.json() : {}).catch(() => ({}));
+// The collector is what must accept a record; the page's own server (if any) gets a best-effort copy — on the
+// static site that POST just 404s.
+async function targets() { const c = await config(); const ep = (c.logEndpoint || '').trim(); const sameOrigin = 'api/log'; return { primary: ep || sameOrigin, all: [...new Set([ep, sameOrigin].filter(Boolean))] }; }
+async function post(url, rec) { try { const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rec) }); return r.ok; } catch { return false; } }
 let current = null, unlisten = null, sinceSave = 0;
 const now = () => Date.now();
 const store = { get(k) { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }, del(k) { try { localStorage.removeItem(k); } catch {} } };
@@ -42,9 +51,19 @@ function savePartial() { if (!current) return; sinceSave = 0; store.set(PARTIAL,
 async function flush(rec) {
   const list = store.get(KEY) || []; list.push(rec); while (list.length > KEEP) list.shift(); store.set(KEY, list);
   store.del(PARTIAL);
-  // Try the server whether or not it has announced itself: on the static site this 404s harmlessly.
-  try { const r = await fetch('api/log', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rec) }); if (!r.ok && hasServer()) console.warn('game log not stored by the server', r.status); } catch (e) { if (hasServer()) console.warn('game log not sent', e); }
+  const t = await targets();
+  let accepted = false;
+  for (const url of t.all) { const ok = await post(url, rec); if (url === t.primary) accepted = ok; }
+  if (!accepted) { const q = store.get(UNSENT) || []; q.push(rec); while (q.length > KEEP_UNSENT) q.shift(); store.set(UNSENT, q); }
 }
+// Send whatever the collector didn't accept last time (offline, spun-down free tier, first visit).
+export async function retryUnsent() {
+  const q = store.get(UNSENT) || []; if (!q.length) return 0;
+  const t = await targets(); let sent = 0; const left = [];
+  for (const rec of q) { if (await post(t.primary, rec)) sent++; else left.push(rec); }
+  store.set(UNSENT, left); return sent;
+}
+export const unsentCount = () => (store.get(UNSENT) || []).length;
 
 // A game left unfinished by the last session (crash, reload) becomes a record marked abandoned.
 export function recoverPartial() { const rec = store.get(PARTIAL); if (rec) { rec.result = rec.result || { abandoned: true }; rec.endedAt = rec.endedAt || now(); flush(rec); } }

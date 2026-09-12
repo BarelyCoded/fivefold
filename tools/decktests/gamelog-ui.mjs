@@ -20,7 +20,7 @@ await p.goto(BASE); await p.waitForFunction(()=>window.ff&&window.ff.S,{timeout:
 await p.evaluate(()=>{try{localStorage.clear()}catch{}}); await p.reload(); await p.waitForFunction(()=>window.ff&&window.ff.S&&window.ff.S.ready!==undefined,{timeout:30000});
 await p.waitForTimeout(500);
 const titleTxt = await p.evaluate(()=>document.querySelector('.gamelogs')?.innerText||'');
-ok(/Game logs: 0/.test(titleTxt), `title panel shows 0 logs + server note (${titleTxt.slice(0,70)})`);
+ok(/logged to improve the rules engine/.test(titleTxt) && /\b0\b kept in this browser/.test(titleTxt), `title panel shows the notice and 0 logs (${titleTxt.slice(0,70)})`);
 await p.evaluate(()=>{window.ff.S.screen='brew'; window.ff.render();}); await p.waitForSelector('.brewscreen',{timeout:20000}); await p.waitForFunction(()=>window.ff.S.aiDecks!==undefined,{timeout:20000});
 await p.click('#bw-decks'); await p.waitForSelector('[data-presetload="Goblins"]'); await p.click('[data-presetload="Goblins"]'); await p.waitForTimeout(150);
 await p.selectOption('#bw-opp','Sligh'); await p.click('#bw-playtest'); await p.waitForFunction(()=>window.ff.S.screen==='duel'&&window.ff.S.duel?.duel,{timeout:30000});
@@ -53,7 +53,7 @@ ok(srvRec && srvRec.id===rec.id && srvRec.receivedAt, `server record matches (${
 await p.waitForFunction(()=>window.ff.S.screen!=='duel',{timeout:10000}).catch(()=>{});
 await p.evaluate(()=>{window.ff.S.screen='title'; window.ff.render();}); await p.waitForTimeout(200);
 const t2 = await p.evaluate(()=>({ txt: document.querySelector('.gamelogs')?.innerText||'', disabled: document.querySelector('#b-logs-export')?.disabled }));
-ok(/Game logs: 1/.test(t2.txt) && t2.disabled===false, `title shows 1 log, export enabled`);
+ok(/\b1\b kept in this browser/.test(t2.txt) && t2.disabled===false, `title shows 1 log, export enabled`);
 console.log(`\n${pass} passed, ${fail} failed`);
 }catch(e){console.log('THREW',e.message.split('\n')[0]);fail++;}finally{try{await b.close()}catch{}try{relay.kill('SIGKILL')}catch{}}
 process.exit(fail?1:0);

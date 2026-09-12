@@ -48,8 +48,9 @@ const req = await p.evaluate(()=>{const d=window.ff.S.duel.duel; return { kind: 
 ok(req.kind==='target' && /target/.test(req.hint), `target request shown (${req.kind}: ${req.hint.slice(0,60)})`);
 ok(await p.$(`.pill[data-name="City of Brass"].targetable`) , 'City of Brass pill is marked targetable');
 await p.click(`.pill[data-name="City of Brass"]`); await p.waitForTimeout(600);
-const after = await p.evaluate(({id})=>{const d=window.ff.S.duel.duel; return { zone: d.card(id)?.zone, log: d.log.slice(-4) };}, {id: inj.city});
-ok(after.zone==='graveyard', `City of Brass destroyed by my choice (zone=${after.zone}; log: ${after.log.join(' / ')})`);
+// the opponent's deck may hold its own City of Brass; the grouped pill targets whichever copy is legal first, so check the name, not the id
+const after = await p.evaluate(()=>{const d=window.ff.S.duel.duel; return { dead: d.players[1].graveyard.filter(c=>c.def.name==='City of Brass').length, log: d.log.slice(-4) };});
+ok(after.dead>=1 && /City of Brass #\d+ is destroyed/.test(after.log.join(' ')), `a City of Brass of the opponent's was destroyed by my click (${after.dead} in graveyard; log: ${after.log.join(' / ')})`);
 // cycling confirmation: Decree of Justice with only cycling affordable
 for (let i=0;i<80 && !(await atMain());i++){ await p.waitForTimeout(250); const mine = await p.evaluate(()=>{const d=window.ff.S.duel.duel; return d.pending?.type==='priority'&&d.priority===0&&!d.stack.length;}); if (mine && !(await atMain()) && await p.$('#b-pass')) await p.click('#b-pass').catch(()=>{}); }
 if (!(await atMain())) await p.evaluate(()=>{const d=window.ff.S.duel.duel; d.jobs.length=0; d.stack.length=0; d.events.length=0; d.active=0; d.priority=0; d.step='main1'; d.pending={type:'priority'}; d.emit();});

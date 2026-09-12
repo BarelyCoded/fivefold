@@ -1,0 +1,4 @@
+{
+  "logEndpoint": "https://fivefold-relay.onrender.com/api/log",
+  "_": "Where finished games are sent for improving the rules engine (no personal data: player name, decks, plays, engine log). Empty string disables sending; a page served by server.js/relay.js also keeps its own logs/games.jsonl."
+}

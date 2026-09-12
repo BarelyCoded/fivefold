@@ -3,6 +3,18 @@
 //   node tools/gamelogs.mjs [file.jsonl] [--flags] [--errors] [--game <id>]
 import fs from 'node:fs';
 const args = process.argv.slice(2);
+// --pull <relay url> --token <LOG_TOKEN>: fetch the hosted relay's log into logs/games.jsonl (new games only).
+const pi = args.indexOf('--pull');
+if (pi >= 0) {
+  const base = (args[pi + 1] || '').replace(/\/$/, ''); const ti = args.indexOf('--token'); const token = ti >= 0 ? args[ti + 1] : process.env.LOG_TOKEN;
+  if (!base || !token) { console.log('usage: node tools/gamelogs.mjs --pull https://your-relay.onrender.com --token <LOG_TOKEN>'); process.exit(1); }
+  const res = await fetch(`${base}/api/logs?token=${encodeURIComponent(token)}`); if (!res.ok) { console.log('pull failed:', res.status, await res.text()); process.exit(1); }
+  const dest = new URL('../logs/games.jsonl', import.meta.url).pathname; fs.mkdirSync(new URL('../logs', import.meta.url).pathname, { recursive: true });
+  const have = new Set(fs.existsSync(dest) ? fs.readFileSync(dest, 'utf8').split('\n').filter(Boolean).map(l => { try { return JSON.parse(l).id; } catch { return null; } }) : []);
+  const lines = (await res.text()).split('\n').filter(Boolean); let added = 0;
+  for (const l of lines) { let id = null; try { id = JSON.parse(l).id; } catch { continue; } if (have.has(id)) continue; fs.appendFileSync(dest, l + '\n'); have.add(id); added++; }
+  console.log(`pulled ${lines.length} records, ${added} new -> ${dest}`); process.exit(0);
+}
 const gi = args.indexOf('--game');
 const file = args.find((a, i) => !a.startsWith('--') && i !== gi + 1) || new URL('../logs/games.jsonl', import.meta.url).pathname;
 if (!fs.existsSync(file)) { console.log(`No log file at ${file}. Play a game with node server.js (or relay.js) running, or export from the title screen.`); process.exit(0); }
