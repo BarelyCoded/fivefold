@@ -572,7 +572,7 @@ export class Duel {
         if (typeof amount === 'object') amount = this.amount(amount, { p, source: c });
         if (ma.cost.removeCounter?.n === 'all') { const removed = c.counters[ma.cost.removeCounter.kind] || 0; amount = (ma.plus === 'counters' ? 1 : 0) + removed; if (!removed) return; }
         if (amount <= 0) return;
-        const produces = ma.reflect ? this.reflectProduces(p, c) : ma.produces;   // Reflecting Pool mirrors your other lands
+        const produces = ma.chosen ? (c.chosenColor ? [c.chosenColor] : ma.produces) : (ma.reflect ? this.reflectProduces(p, c) : ma.produces);   // Reflecting Pool mirrors your other lands; a chosen-colour source produces its chosen colour
         if (!produces.length) return;
         out.push({ card: c, index: i, produces, amount, taps: !!ma.cost.tap });   // taps: a card with two tap abilities (Llanowar Wastes: {C} vs {B}/{G}) can still only be tapped once
       });
@@ -697,7 +697,7 @@ export class Duel {
     if (ma.counter) card.counters[ma.counter] = (card.counters[ma.counter] || 0) + 1;
     if (ma.bounceOnUntap) card.flags.add('bounceOnUntap');
     if (ma.noUntapNext) card.flags.add('noUntapNext');   // Cinder Marsh & kin stay tapped through the next untap step
-    const prod = ma.reflect ? this.reflectProduces(p, card) : ma.produces;
+    const prod = ma.chosen ? (card.chosenColor ? [card.chosenColor] : ma.produces) : (ma.reflect ? this.reflectProduces(p, card) : ma.produces);
     const col = prod.includes(color) ? color : prod[0];
     if (!col) return false;
     p.pool[col] += amount;
@@ -1346,6 +1346,7 @@ export class Duel {
         this.moveTo(pick, 'library'); this.say(`${pl.name} puts a card from hand on top of their library.`);
       } break;
       // Engineered Plague: pick a creature type (from types in play, in graveyards, or in your own hand).
+      case 'chooseColorSelf': for (const s of subs.length ? subs : [{ card: src }]) { const c = s.card || src; let col; if (p.ai) col = (c.def.colors && c.def.colors[0]) || 'G'; else col = yield { kind: 'color', player: p.idx, text: `${c.def.name}: choose a color` }; c.chosenColor = col || 'C'; this.say(`${p.name} chooses ${({ W: 'white', U: 'blue', B: 'black', R: 'red', G: 'green', C: 'colorless' }[c.chosenColor] || c.chosenColor)} for ${c.def.name}.`); this.refresh(); } break;
       case 'chooseType': {
         const types = new Set();
         for (const pl of this.players) for (const c of [...pl.battlefield, ...pl.graveyard, ...(pl === p ? pl.hand : [])]) if (isCreatureDef(c)) for (const st of c.def.subtypes) types.add(st);
@@ -1422,6 +1423,7 @@ export class Duel {
       case 'gainEqualPrev': { const s = e.of === 'sacrificed' ? (ctx.item?.sacrificed ? { card: ctx.item.sacrificed } : null) : (this.prevCard(ctx) ? { card: this.prevCard(ctx) } : null); const k = s?.card ? (e.stat === 'toughness' ? toughness(s.card) : e.stat === 'cmc' ? s.card.def.cmc : power(s.card)) : (ctx.lastDamage || 0); if (k && this.gainLife(p, k)) this.say(`${p.name} gains ${k} life.`); break; }
       case 'mill': for (const s of subs) if (s.player) { const k = this.amount(e.amount, ctx, s); for (let i = 0; i < k; i++) { const c = s.player.library.pop(); if (c) this.moveTo(c, 'graveyard'); } } break;
       case 'counter': for (const s of subs) if (s.item) {
+        if (s.item.card?.def.uncounterable) { this.say(`${s.item.card.def.name} can't be countered.`); continue; }
         if (e.toTop) s.item._toTop = true;
         const ctrl = this.players[s.item.controller];
         if (e.unlessPay) { const pay = this.amount(e.unlessPay, ctx); const cost = { pips: [], generic: pay, x: false }; if (this.canPay(ctrl, cost)) { const yes = yield { kind: 'yesno', player: ctrl.idx, text: `Pay {${pay}} to stop ${s.item.card.def.name} from being countered?`, value: 'pay' }; if (yes) { this.payMana(ctrl, this.planPayment(ctrl, cost)); this.say(`${ctrl.name} pays ${pay}.`); continue; } } }
@@ -1429,6 +1431,15 @@ export class Duel {
         this.counterItem(s.item);
       } break;
       case 'tutor': yield* this.tutor(p, e); break;
+      // Amplify N: reveal any number of hand cards sharing a creature type with ~, enter with N counters per card.
+      case 'amplify': { const self = src; const mine = (self.def.subtypes || []).filter(Boolean);
+        const opts = p.hand.filter(c => isCreatureDef(c) && (c.def.subtypes || []).some(t => mine.includes(t)));
+        if (!opts.length) break;
+        let picks;
+        if (p.ai) picks = opts;   // the AI reveals all it can — amplify has no downside
+        else { const ids = yield { kind: 'choose', player: p.idx, text: `Amplify ${e.n}: reveal any number of cards sharing a type with ${self.def.name}`, options: opts.map(c => ({ id: c.id, label: c.def.name })), min: 0, max: opts.length, secret: true }; picks = (ids || []).map(id => this.card(id)).filter(c => c && opts.includes(c)); }
+        const add = e.n * picks.length; if (add > 0) { self.counters['+1/+1'] = (self.counters['+1/+1'] || 0) + add; this.refresh(); this.say(`${self.def.name} reveals ${picks.length} card${picks.length === 1 ? '' : 's'} and enters with ${add} +1/+1 counter${add === 1 ? '' : 's'}.`); }
+      } break;
       case 'tap': for (const s of subs) if (s.card) this.tap(s.card); break;
       case 'untap': for (const s of subs) if (s.card) s.card.tapped = false; break;
       // Untap (up to) N of your permanents of a kind, your choice (Frantic Search: untap up to three lands).
@@ -1555,7 +1566,7 @@ export class Duel {
   }
   *tutor(p, e) {
     const what = e.what.replace(/ cards?$/, '');
-    const opts = p.library.filter(c => matchCardWhat(c, what));
+    const opts = p.library.filter(c => matchCardWhat(c, what) && (e.maxMv == null || (c.def.cmc ?? 0) <= e.maxMv));
     if (!opts.length) { this.say(`${p.name} finds nothing.`); shuffle(p.library, this.rng); return; }
     const max = Math.min(e.n || 1, opts.length);
     const ids = yield { kind: 'choose', player: p.idx, text: `Search your library for ${max > 1 ? `up to ${max} ${what} cards` : `a ${what}`}`, options: opts.map(c => ({ id: c.id, label: c.def.name })), min: 0, max, secret: true };

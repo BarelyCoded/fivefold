@@ -15,7 +15,7 @@ export const KEYWORDS = new Set(['Flying', 'First strike', 'Double strike', 'Tra
 const IGNORED_KW = new Set(['Banding', 'Phasing', 'Bushido', 'Provoke', 'Soulshift', 'Ninjutsu', 'Convoke', 'Affinity',
   'Split second', 'Madness', 'Fading', 'Vanishing', 'Devoid', 'Ingest', 'Cohort', 'Skulk', 'Renown', 'Outlast', 'Dash', 'Delve', 'Awaken',
   'Rebound', 'Battle cry', 'Living weapon', 'Totem armor', 'Annihilator', 'Level up', 'Unearth', 'Retrace', 'Exert', 'Afflict', 'Embalm',
-  'Eternalize', 'Improvise', 'Fabricate', 'Partner', 'Melee', 'Escalate', 'Emerge', 'Escape', 'Mutate', 'Companion', 'Landfall', 'Hellbent', 'Threshold']);
+  'Eternalize', 'Improvise', 'Fabricate', 'Partner', 'Melee', 'Escalate', 'Emerge', 'Escape', 'Mutate', 'Companion', 'Landfall', 'Hellbent', 'Threshold', 'Amplify', 'Modular']);
 // Keywords that break the game if ignored.
 const UNSUPPORTED_KW = new Set(['Storm', 'Suspend', 'Morph', 'Megamorph', 'Cascade', 'Dredge', 'Transmute', 'Ripple', 'Epic', 'Haunt',
   'Forecast', 'Graft', 'Hideaway', 'Champion', 'Evoke', 'Conspire', 'Devour', 'Crew', 'Amass', 'Adapt', 'Riot', 'Spectacle']);
@@ -364,6 +364,9 @@ const rules = [
   [/^(target player) puts a card from their hand on top of their library$/, m => tgt({ type: 'handToTop' }, m[1])],
   // Engineered Plague / Evacuation / Hibernation / Flaring Pain / Gerrard's Wisdom.
   [/^choose a creature type$/, () => [{ type: 'chooseType' }]],
+  [/^choose a color$/, () => [{ type: 'chooseColorSelf' }]],
+  [/^~ becomes the color of your choice until end of turn$/, () => [{ type: 'chooseColorSelf', temp: true }]],
+  [/^~ becomes the creature type of your choice until end of turn$/, () => [{ type: 'chooseType', temp: true }]],
   [/^return all (.+?) to their owners' hands$/, m => { const k = T('all ' + m[1]); return k ? [{ type: 'bounceAllPerms', restrict: k.restrict }] : null; }],
   [/^damage can't be prevented this turn$/, () => [{ type: 'noPrevent' }]],
   [/^you gain (\d+) life for each card in your hand$/, m => [{ type: 'gain', amount: { calc: 'hand', base: 0, sign: 1, mult: Number(m[1]) }, sel: 'you' }]],
@@ -472,6 +475,8 @@ const rules = [
     const what = m[1].replace(/ or /g, '|'); const to = m[2].startsWith('into') ? 'hand' : m[2].startsWith('on top') ? 'top' : 'battlefield';
     return [{ type: 'tutor', what, to, tapped: !!m[3] }];
   }],
+  // Mercenary / Rebel chains: "Search your library for a Mercenary permanent card with mana value N or less, put it onto the battlefield, then shuffle."
+  [/^search your library for (?:a|an) (.+?) permanent card with mana value (\d+) or less, put it onto the battlefield, then shuffle$/, m => [{ type: 'tutor', what: m[1].replace(/ or /g, '|'), maxMv: Number(m[2]), to: 'battlefield' }]],
   [/^search your library for a card, put (?:it|that card) into your hand, then shuffle$/, () => [{ type: 'tutor', what: 'card', to: 'hand' }]],
   [/^search your library for a card and put (?:it|that card) into your hand\. then shuffle$/, () => [{ type: 'tutor', what: 'card', to: 'hand' }]],
   [/^tap (target .+)$/, m => tgt({ type: 'tap' }, m[1])],
@@ -713,6 +718,7 @@ function parseKeywordLine(line, def) {
     else if (IGNORED_KW.has(p) || (m = p.match(/^(Rampage|Bushido|Annihilator|Fading|Vanishing|Soulshift|Amplify|Modular) (\d+)$/)) && IGNORED_KW.has(m?.[1] || p)) {
       if (m && m[1] === 'Rampage') found.push({ k: 'Rampage', n: Number(m[2]) });
       else if (m && m[1] === 'Fading') found.push({ k: 'Fading', n: Number(m[2]) });   // Blastoderm, Tangle Wire
+      else if (m && m[1] === 'Amplify') def._amplify = Number(m[2]);   // enters with N counters per revealed card sharing a creature type
       else def.notes.push(`${p} ignored`);
     }
     else if ((m = p.match(/^Rampage (\d+)$/))) found.push({ k: 'Rampage', n: Number(m[1]) });
@@ -750,6 +756,10 @@ function parseStatic(t) {
   t = t.replace(/\s*this effect can't reduce the mana in that cost to less than one mana\.?$/, '');
   // Threshold statics lead with the condition: "Threshold — As long as seven or more cards are in your graveyard, ~ gets +1/+1 and has flying."
   if ((m = t.match(/^(?:threshold — )?as long as (?:there are )?seven or more cards (?:are )?in your graveyard, (.+)$/))) { const inner = parseStatic(m[1]); if (!inner) return null; for (const o of inner) o.condition = { ...(o.condition || {}), threshold: true }; return inner; }
+  // Effect-first threshold wording: "~ gets +2/+2 as long as there are seven or more cards in your graveyard." (Nimble Mongoose, Werebear, Krosan Beast).
+  if ((m = t.match(/^(?:threshold — )?(.+?) as long as (?:there are )?seven or more cards (?:are )?in your graveyard$/))) { const inner = parseStatic(m[1]); if (!inner) return null; for (const o of inner) o.condition = { ...(o.condition || {}), threshold: true }; return inner; }
+  // "~ can't be countered" / "this spell can't be countered": a cast-time flag, harmless as a static on a permanent.
+  if (/^(?:~|this spell|this creature) can't be countered(?: by spells or abilities)?$/.test(t)) return [{ type: 'static', kind: 'uncounterable', scope: { who: 'self' } }];
   // "~ gets +1/+1 and can't block" (Putrid Imp): a P/T change riding with a combat restriction.
   if ((m = t.match(/^(.+?) and can't (block|attack|attack or block)$/))) { const inner = parseStatic(m[1]); if (!inner) return null; return [...inner, { type: 'static', kind: { block: 'cantBlock', attack: 'cantAttack', 'attack or block': 'cantAttackOrBlock' }[m[2]], scope: inner[0].scope }]; }
   // Crumbling Sanctuary: damage to a player exiles that many cards from their library instead.
@@ -810,7 +820,7 @@ function parseStatic(t) {
   if ((m = t.match(/^(~|enchanted creature) can't be the target of spells(?: and can't be enchanted by other auras)?$/))) return [{ type: 'static', kind: 'keyword', keyword: 'Shroud', scope: parseScope(m[1]), note: 'abilities cannot target it either' }];
   if ((m = t.match(/^if ~ would enter, sacrifice (?:a|an) (untapped )?(plains|island|swamp|mountain|forest) instead\. if you do, put ~ onto the battlefield\. if you don't, put it into its owner's graveyard$/))) return [{ type: 'static', kind: 'entersSacrifice', land: cap(m[2]), untapped: !!m[1], scope: { who: 'self' } }];
   if (/^as ~ enters, choose an opponent$/.test(t)) return [{ type: 'static', kind: 'noop', scope: { who: 'self' } }];
-  if (/^as ~ enters, choose a color$/.test(t)) return [{ type: 'static', kind: 'noop', scope: { who: 'self' }, note: 'the colour is chosen each time instead of once' }];
+  if (/^as ~ enters, choose a color$/.test(t)) return [{ type: 'triggered', event: 'etb', effects: [{ type: 'chooseColorSelf' }], optional: false, text: 'as ~ enters, choose a color' }];
   if ((m = t.match(/^(enchanted wall|enchanted creature) can attack as though it didn't have defender$/))) return [{ type: 'static', kind: 'canAttackWithDefender', scope: { who: 'enchanted' } }];
   if ((m = t.match(/^whenever enchanted land is tapped for mana, its controller adds an additional \{([wubrg])\}$/))) return [{ type: 'static', kind: 'manaBonus', mana: m[1].toUpperCase(), scope: { who: 'enchanted' } }];
   if (/^whenever a player taps a land for mana, that player adds one mana of any type that land produced$/.test(t)) return [{ type: 'static', kind: 'manaBonus', mana: 'same', scope: { who: 'all', types: ['land'] } }];
@@ -948,7 +958,9 @@ function parseAbilityLine(line, ctx) {
     body = body.replace(/\.?\s*(?:~|this land|this permanent) doesn't untap during your next untap step\.?$/i, () => { noUntapNext = true; return ''; });
     // Volrath's Dungeon: "Any player may activate this ability but only during their turn" — only the controller can here.
     let anyPlayerNote = null;
+    body = body.replace(/\.?\s*any player may activate this ability but only during (?:their|its owner's) upkeep\.?$/i, () => { timing = 'upkeep'; anyPlayerNote = 'only its controller can activate it (any player may, in the real rules)'; return ''; });
     body = body.replace(/\.?\s*any player may activate this ability but only during their turn\.?$/i, () => { timing = 'yourTurn'; anyPlayerNote = 'only its controller can activate it (any player may, in the real rules)'; return ''; });
+    body = body.replace(/\.?\s*any player may activate this ability\.?$/i, () => { anyPlayerNote = 'only its controller can activate it (any player may, in the real rules)'; return ''; });
     const manaExtra = { ...(limit ? { limit } : {}), ...(sacWhenEmpty ? { sacWhenEmpty } : {}), ...(bounceOnUntap ? { bounceOnUntap: true } : {}), ...(noUntapNext ? { noUntapNext: true } : {}) };
     // Metalworker: "{T}: Reveal any number of artifact cards in your hand. Add {C}{C} for each card revealed this way."
     let mw;
@@ -965,7 +977,7 @@ function parseAbilityLine(line, ctx) {
     if ((mm = body.match(/^add (\S+) mana of any one color\.?$/))) return { type: 'mana', cost, produces: COLORS.slice(), amount: amt(mm[1]), sameColor: true };
     if (/^add one mana of any color\.?$/.test(body)) return { type: 'mana', cost, produces: COLORS.slice(), amount: 1, ...manaExtra };
     if (/^add one mana of any type that a land you control could produce\.?$/.test(body)) return { type: 'mana', cost, produces: [], reflect: true, amount: 1 };   // Reflecting Pool
-    if (/^add one mana of the chosen color\.?$/.test(body)) return { type: 'mana', cost, produces: COLORS.slice(), amount: 1 };
+    if (/^add one mana of the chosen color\.?$/.test(body)) return { type: 'mana', cost, produces: COLORS.slice(), chosen: true, amount: 1, ...manaExtra };
     if (/^add \{c\}\{c\}\.?$/.test(body)) return { type: 'mana', cost, produces: ['C'], amount: 2 };
     if ((mm = body.match(/^add (\{[wubrgc]\}), then add an additional \1 for each (\w+) counter removed this way\.?$/)) && cost.removeCounter?.n === 'all') return { type: 'mana', cost, produces: [mm[1][1].toUpperCase()], amount: 1, plus: 'counters' };
     if ((mm = body.match(/^add ((?:\{[wubrgc]\})+|\{[wubrgc]\}(?: or \{[wubrgc]\})+)\. ~ deals (\d+) damage to you\.?$/))) { const cols = [...mm[1].matchAll(/\{(\w)\}/g)].map(x => x[1].toUpperCase()); return { type: 'mana', cost, produces: [...new Set(cols)], amount: mm[1].includes(' or ') ? 1 : cols.length, damage: Number(mm[2]) }; }
@@ -1224,6 +1236,7 @@ export function compile(c) {
     if (parseKeywordLine(line, def)) continue;
     if (def.unsupportedReason) break;
     // Instant / sorcery text is spell effects; permanents have abilities.
+    if (/^(?:this spell|~) can't be countered(?: by spells or abilities)?\.?$/i.test(lower)) { def.uncounterable = true; continue; }   // Blurred Mongoose, Kavu Chameleon, Vexing Beetle, …
     if (def.kind === 'instant' || def.kind === 'sorcery') {
       // "When you cycle ~, ..." / "When ~ is put into your graveyard from your library, ..." on a spell are
       // triggered abilities of the card, not part of the spell's effect.
@@ -1257,6 +1270,8 @@ export function compile(c) {
     if (intrinsic.length) def.manaAbilities.unshift({ type: 'mana', cost: { mana: { pips: [], generic: 0, x: false }, tap: true }, produces: intrinsic, amount: 1, intrinsic: true });
   }
   for (const ma of def.manaAbilities) for (const col of ma.produces) if (!def.produces.includes(col)) def.produces.push(col);
+  // Amplify N: as this creature enters, reveal any number of cards sharing a creature type with it and enter with N counters each.
+  if (def._amplify) { def.abilities.push({ type: 'triggered', event: 'etb', effects: [{ type: 'amplify', n: def._amplify }], optional: false, text: `amplify ${def._amplify}` }); delete def._amplify; }
   def.entersTapped = def.abilities.some(a => a.type === 'static' && a.kind === 'entersTapped');
   const es = def.abilities.find(a => a.type === 'static' && a.kind === 'entersSacrifice');
   if (es) def.entersSacrifice = { land: es.land, untapped: es.untapped };

@@ -32,7 +32,7 @@ const mainPhase = d => { d.active = 0; d.priority = 0; d.step = 'main1'; d.turn 
 const pool = (d, i, o) => { d.players[i].pool = { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0, ...o }; };
 const bears = () => D('Grizzly Bears'), pile = () => D('Goblin Piledriver');
 const abIdx = (def, pred) => def.abilities.findIndex(pred);
-const processAndResolve = (d, targets = [], chooser = null, numFn = null) => { drive(d.processEvents(), targets, chooser, numFn); while (d.stack.length) drive(d.resolveTop(), targets, chooser, numFn); };
+const processAndResolve = (d, targets = [], chooser = null, numFn = null) => { for (let i = 0; i < 40; i++) { drive(d.processEvents(), targets, chooser, numFn); if (d.stack.length) { drive(d.resolveTop(), targets, chooser, numFn); continue; } if (!d.events.length) break; } };
 
 section('Squee returns from the graveyard at upkeep');
 { const d = newDuel(); mainPhase(d); const sq = gy(d, D('Squee, Goblin Nabob'), 0);
@@ -296,6 +296,35 @@ section('Cinder Marsh: makes B or R, and stays tapped through the next untap ste
   ok(d.activateMana(d.players[0], cm, ii, 'R'), 'tap for red');
   ok(d.players[0].pool.R === 1 && d.players[0].pool.B === 0 && cm.tapped, `one red added, land tapped (${JSON.stringify({R:d.players[0].pool.R,B:d.players[0].pool.B})})`);
   ok(cm.flags.has('noUntapNext'), 'flagged to skip its next untap step'); }
+
+section('Threshold: creature grows once seven cards are in the graveyard');
+{ const d = newDuel(); mainPhase(d); const w = place(d, D('Werebear'), 0);
+  ok(power(w) === 1 && toughness(w) === 1, `1/1 below threshold (${power(w)}/${toughness(w)})`);
+  for (let i = 0; i < 7; i++) gy(d, bears(), 0); d.refresh();
+  ok(power(w) === 4 && toughness(w) === 4, `4/4 with threshold (${power(w)}/${toughness(w)})`); }
+
+section("Blurred Mongoose can't be countered");
+{ const d = newDuel(); mainPhase(d); d.players[1].pool = { W:0,U:2,B:0,R:0,G:0,C:0 }; const bm = hand(d, D('Blurred Mongoose'), 0); pool(d, 0, { G:1, C:1 });
+  ok(d.cast(d.players[0], bm, {}), 'cast the Mongoose'); const item = d.stack[d.stack.length - 1];
+  const cs = hand(d, D('Counterspell'), 1); d.priority = 1;
+  ok(d.cast(d.players[1], cs, { targets: [{ type: 'spell', id: item.id }] }), 'opponent casts Counterspell at it');
+  while (d.stack.length) drive(d.resolveTop());
+  ok(d.card(bm.id)?.zone === 'battlefield', `the Mongoose resolved despite the counter (zone=${d.card(bm.id)?.zone})`); }
+
+section('Amplify: enters with a counter per revealed sharing card');
+{ const d = newDuel(); mainPhase(d); const h1 = hand(d, D('Aven Warhawk'), 0); const h2 = hand(d, D('Aven Warhawk'), 0); pool(d, 0, { W:1, C:4 });
+  ok(d.cast(d.players[0], h1, {}), 'cast one Warhawk (another shares Bird/Soldier in hand)');
+  processAndResolve(d, [], y => y.options ? y.options.map(o => o.id) : []);   // reveal all
+  const warhawk = d.players[0].battlefield.find(c => c.def.name === 'Aven Warhawk');
+  ok((warhawk.counters['+1/+1'] || 0) === 1, `entered with 1 +1/+1 counter from the revealed Warhawk (${warhawk.counters['+1/+1']})`); }
+
+section('Rebel search: fetch a Rebel of low mana value to the battlefield');
+{ const d = newDuel(); mainPhase(d); pool(d, 0, { C:3 }); const rs = place(d, D('Ramosian Sergeant'), 0); rs.sick = false;
+  const small = lib(d, D('Ramosian Lieutenant'), 0);   // a Rebel; MV check handled by the engine
+  const i = abIdx(rs.def, a => a.type === 'activated');
+  if (i >= 0 && d.activate(d.players[0], rs, i, {})) { processAndResolve(d, [], y => y.options ? [y.options[0].id] : []);
+    ok(d.players[0].battlefield.some(c => c.def.subtypes.includes('Rebel') && c !== rs), 'a Rebel was put onto the battlefield'); }
+  else ok(false, 'could not activate the Rebel search'); }
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
