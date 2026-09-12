@@ -621,8 +621,8 @@ export class Duel {
       if (!ma || ma.cost.tap) this.tap(t.src.card);
       if (t.spare > 0) p.pool[t.color] += t.spare;
       if (ma?.cost.removeCounter?.n === 'all') t.src.card.counters[ma.cost.removeCounter.kind] = 0;
-      else if (ma?.cost.removeCounter) t.src.card.counters[ma.cost.removeCounter.kind] = Math.max(0, (t.src.card.counters[ma.cost.removeCounter.kind] || 0) - ma.cost.removeCounter.n);
-      if (ma?.cost.addCounter) { const k = ma.cost.addCounter.kind; t.src.card.counters[k] = (t.src.card.counters[k] || 0) + ma.cost.addCounter.n; }   // Wall of Roots
+      else if (ma?.cost.removeCounter) { const k = ma.cost.removeCounter.kind; t.src.card.counters[k] = Math.max(0, (t.src.card.counters[k] || 0) - ma.cost.removeCounter.n); this.say(`${t.src.card.def.name} loses a ${k} counter (${t.src.card.counters[k]} left).`); }
+      if (ma?.cost.addCounter) { const k = ma.cost.addCounter.kind; t.src.card.counters[k] = (t.src.card.counters[k] || 0) + ma.cost.addCounter.n; this.say(`${t.src.card.def.name} gets a ${k} counter (${t.src.card.counters[k]} now).`); }   // Wall of Roots
       if (ma?.limit) { const c = t.src.card; if (c.uses.turn !== this.turn) c.uses = { turn: this.turn, n: {} }; c.uses.n['m' + t.src.index] = (c.uses.n['m' + t.src.index] || 0) + 1; }
       if (ma?.counter) t.src.card.counters[ma.counter] = (t.src.card.counters[ma.counter] || 0) + 1;
       if (ma?.bounceOnUntap) t.src.card.flags.add('bounceOnUntap');   // Undiscovered Paradise
@@ -681,8 +681,8 @@ export class Duel {
     if (ma.limit) { if (card.uses.turn === this.turn && (card.uses.n['m' + i] || 0) >= ma.limit) return false; if (card.uses.turn !== this.turn) card.uses = { turn: this.turn, n: {} }; card.uses.n['m' + i] = (card.uses.n['m' + i] || 0) + 1; }
     let amount = ma.amount || 1;
     if (typeof amount === 'object') amount = this.amount(amount, { p, source: card });
-    if (ma.cost.removeCounter) { const k = ma.cost.removeCounter.kind; const have = card.counters[k] || 0; if (ma.cost.removeCounter.n === 'all') { if (!have) return false; amount = (ma.plus === 'counters' ? 1 : 0) + have; card.counters[k] = 0; } else { if (have < ma.cost.removeCounter.n) return false; card.counters[k] = have - ma.cost.removeCounter.n; } }
-    if (ma.cost.addCounter) { const k = ma.cost.addCounter.kind; card.counters[k] = (card.counters[k] || 0) + ma.cost.addCounter.n; }
+    if (ma.cost.removeCounter) { const k = ma.cost.removeCounter.kind; const have = card.counters[k] || 0; if (ma.cost.removeCounter.n === 'all') { if (!have) return false; amount = (ma.plus === 'counters' ? 1 : 0) + have; card.counters[k] = 0; } else { if (have < ma.cost.removeCounter.n) return false; card.counters[k] = have - ma.cost.removeCounter.n; this.say(`${card.def.name} loses a ${k} counter (${card.counters[k]} left).`); } }
+    if (ma.cost.addCounter) { const k = ma.cost.addCounter.kind; card.counters[k] = (card.counters[k] || 0) + ma.cost.addCounter.n; this.say(`${card.def.name} gets a ${k} counter (${card.counters[k]} now).`); }
     if (ma.counter) card.counters[ma.counter] = (card.counters[ma.counter] || 0) + 1;
     if (ma.bounceOnUntap) card.flags.add('bounceOnUntap');
     const prod = ma.reflect ? this.reflectProduces(p, card) : ma.produces;

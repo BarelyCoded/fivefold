@@ -623,3 +623,6 @@ svg.arrows { position: absolute; left: 0; top: 0; pointer-events: none; z-index:
 .rep-kinds .radio { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; }
 @media (max-width: 520px) { .rep-kinds { grid-template-columns: 1fr; } }
 .adm-cat { font-size: 11px; padding: 1px 6px; border-radius: 10px; background: color-mix(in srgb, var(--gold) 25%, transparent); color: var(--gold); }
+
+.pill-counters { font-size: 11px; padding: 0 5px; border-radius: 8px; background: rgba(0,0,0,.35); color: #ffd27a; }
+#bigcard .bc-counters { padding: 4px 14px 6px; font-size: 12px; color: #ffd27a; }

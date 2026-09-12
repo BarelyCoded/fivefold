@@ -47,6 +47,7 @@ function show(def, host, ev) {
       <div class="bc-type">${esc(def.typeLine)}</div>
       <div class="bc-oracle">${esc(def.oracle).replace(/\n/g, '<br>')}</div>
       ${pt || kws ? `<div class="bc-pt">${esc(pt)}${kws ? (pt ? ' · ' : '') + esc(kws) : ''}</div>` : ''}
+      ${host.dataset.counters ? `<div class="bc-counters">Counters: ${esc(host.dataset.counters)}</div>` : ''}
     </div>` : ''}
     ${def.notes?.length ? `<div class="bc-notes">Engine: ${def.notes.map(esc).join('; ')}</div>` : ''}`;
   el.hidden = false;

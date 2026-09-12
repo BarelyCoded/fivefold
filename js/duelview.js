@@ -30,7 +30,7 @@ export function cardHtml(def, opts = {}) {
   cls.push(colorClass);
   const style = art ? ` style="background-image:url('${art}')"` : '';
   const pt = opts.pt ?? (def.kind === 'creature' ? `${def.power}/${def.toughness}` : '');
-  return `<div class="${cls.join(' ')}"${style} data-id="${opts.id ?? ''}" data-zone="${opts.zone ?? ''}" data-name="${esc(def.name)}" title="${esc(def.name)}">
+  return `<div class="${cls.join(' ')}"${style} data-id="${opts.id ?? ''}" data-zone="${opts.zone ?? ''}" data-name="${esc(def.name)}" title="${esc(def.name)}"${opts.counters ? ` data-counters="${esc(opts.counters)}"` : ''}>
     <div class="card-top"><span class="card-name">${esc(def.name)}</span>${def.kind !== 'land' ? `<span class="card-cost">${manaHtml(def.cost)}</span>` : ''}</div>
     ${!art ? `<div class="card-body"><span class="card-type">${esc(def.typeLine)}</span></div>` : ''}
     ${hasOwnArt(def) ? '<span class="card-own" title="Your art">★</span>' : ''}
@@ -204,8 +204,8 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     const badge = kws.length ? kws.map(KW_ABBR).join(' ') : '';
     const badgeTitle = kws.length ? kws.map(kwFull).join(', ') : '';   // hover shows the keywords spelled out
     let extra = '';
-    const counters = Object.entries(c.counters).filter(([k, v]) => v > 0 && k !== 'age').map(([k, v]) => `${v}×${k}`);
-    if (counters.length) extra += `<div class="card-counters">${esc(counters.join(' '))}</div>`;
+    const counters = counterText(c);
+    if (counters) extra += `<div class="card-counters" title="Counters">${esc(counters)}</div>`;
     if (c.regen) extra += `<div class="card-regen">regen</div>`;
     if (c.shield) extra += `<div class="card-shield">shield ${c.shield}</div>`;
     const attached = duel.permanents().filter(a => a.attachedTo === c);
@@ -213,7 +213,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     if (c.attachedTo) extra += `<div class="card-attachedto">on ${esc(c.attachedTo.def.name)}</div>`;
     const blockedBy = ui.blocks[c.id] || duel.blocks[c.id];
     if (blockedBy && blockedBy.length) extra += `<div class="card-blocked">blocked</div>`;
-    return cardHtml(c.def, { id: c.id, zone: 'bf', classes, pt, ptClass, badge, badgeTitle, extra });
+    return cardHtml(c.def, { id: c.id, zone: 'bf', counters, classes, pt, ptClass, badge, badgeTitle, extra });
   }
   function handCard(c) {
     const classes = [];
@@ -250,11 +250,14 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     // frames of different sizes resized the portrait box and shifted the duel layout.
     return `<div class="portrait" data-portrait="${p.idx}" style="${spriteStyle(pr.frames[0], pr.scale || 2)}"></div>`;
   }
+  // Counters as players read them: "3 mining", "2×+1/+1"; the age counter is cumulative upkeep's own bookkeeping.
+  function counterText(c) { return Object.entries(c.counters || {}).filter(([k, v]) => v > 0 && k !== 'age').map(([k, v]) => /\//.test(k) ? `${v}×${k}` : `${v} ${k}`).join(', '); }
   function landStack(p) {
     const groups = new Map();
     // A land that is currently a creature (an animated manland like Mishra's Factory) shows in the
     // creature row instead, so it can be declared as an attacker/blocker — not twice here as well.
-    for (const c of p.battlefield.filter(c => isLand(c) && !isCreature(c))) { const g = groups.get(c.def.name) || { name: c.def.name, def: c.def, all: [] }; g.all.push(c); groups.set(c.def.name, g); }
+    // Copies with different counters (Gemstone Mine at 3 vs 1 mining) get their own pill, so the count is always visible.
+    for (const c of p.battlefield.filter(c => isLand(c) && !isCreature(c))) { const sig = counterText(c); const key = c.def.name + (sig ? '|' + sig : ''); const g = groups.get(key) || { name: c.def.name, def: c.def, all: [], counters: sig }; g.all.push(c); groups.set(key, g); }
     const items = [...groups.values()].map(g => {
       const untapped = g.all.filter(c => !c.tapped);
       const first = untapped[0] || g.all[0];
@@ -264,7 +267,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
       const target = targeting() ? (g.all.find(c => isLegal({ type: 'perm', id: c.id })) || first) : first;
       if (p === me && duel.pending?.type === 'priority' && untapped.length) cls.push('usable');
       if (ui.paying && p === me && untapped.length && g.def.manaAbilities.length) cls.push('pay-source');
-      return `<div class="${cls.join(' ')}" data-id="${target.id}" data-zone="bf" data-name="${esc(g.name)}" data-preview="${esc(g.name)}"><i></i>${esc(g.name)}<b>${untapped.length}/${g.all.length}</b></div>`;
+      return `<div class="${cls.join(' ')}" data-id="${target.id}" data-zone="bf" data-name="${esc(g.name)}" data-preview="${esc(g.name)}"${g.counters ? ` data-counters="${esc(g.counters)}"` : ''}><i></i>${esc(g.name)}<b>${untapped.length}/${g.all.length}</b>${g.counters ? `<span class="pill-counters" title="Counters on this land">${esc(g.counters)}</span>` : ''}</div>`;
     });
     return `<div class="lands"><div class="lands-title">Lands</div>${items.join('') || '<div class="small">none</div>'}</div>`;
   }
