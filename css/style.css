@@ -618,7 +618,8 @@ svg.arrows { position: absolute; left: 0; top: 0; pointer-events: none; z-index:
 /* ---- in-match problem report ---- */
 .modal.repform { max-width: 560px; max-height: 92vh; overflow: auto; }   /* not ".report": that's the adventure summary panel */
 .modal.repform label { display: block; margin: 10px 0 4px; font-size: 13px; }
-.modal.repform select, .modal.repform textarea, .modal.repform input { width: 100%; box-sizing: border-box; margin-top: 4px; }
+.modal.repform select, .modal.repform textarea, .modal.repform input:not([type=radio]) { width: 100%; box-sizing: border-box; margin-top: 4px; }
+.rep-kinds .radio input { width: auto; margin: 0; }
 .modal.repform textarea { min-height: 150px; font-family: inherit; font-size: 14px; line-height: 1.4; }
 .rep-kinds { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; margin: 8px 0; }
 .rep-kinds .radio { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; }
