@@ -39,10 +39,16 @@ section('Survival digs for removal against a threat, a beater otherwise');
   d.players[0].battlefield.length = 0; d.refresh();
   ok(aiHooks.choose(d, req).map(id => d.card(id).def.name)[0] === 'Verdant Force', 'fetches the biggest threat when nothing is pressing'); }
 
-section('Every preset plan names cards that exist in the sets');
-{ for (const name of ['Recurring Survival']) { const plan = planFor(name); const names = [...(plan.priority||[]), ...(plan.ramp||[]), ...(plan.disruption||[]), ...(plan.fodder||[]), ...(plan.engines||[]), ...(plan.toolbox||[]).flatMap(t => t.cards)];
-  const missing = names.filter(n => !all.has(n));
-  ok(!missing.length, `${name}: all named cards exist (${missing.join(', ') || 'ok'})`); } }
+section('Every preset plan matches a deck and names only cards that deck runs');
+{ const { PLANS } = await import(new URL('../js/ai-plans.js', import.meta.url).href);
+  const decks = Object.fromEntries(JSON.parse(fs.readFileSync(new URL('../content/ai-decks.json', import.meta.url).pathname, 'utf8')).decks.map(d => [d.name, d]));
+  for (const [name, plan] of Object.entries(PLANS)) {
+    const deck = decks[name]; ok(!!deck, `${name}: a preset deck by that name exists`); if (!deck) continue;
+    const inDeck = new Set([...Object.keys(deck.deck), ...Object.keys(deck.side || {})]);
+    const names = [...(plan.priority||[]), ...(plan.ramp||[]), ...(plan.disruption||[]), ...(plan.fodder||[]), ...(plan.engines||[]), ...(plan.reanimate||[]), ...(plan.toolbox||[]).flatMap(t => t.cards)];
+    const missing = [...new Set(names)].filter(n => !inDeck.has(n));
+    ok(!missing.length, `${name}: every named card is in the deck (${missing.join(', ') || 'ok'})`);
+  } }
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

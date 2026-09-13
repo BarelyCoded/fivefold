@@ -628,7 +628,15 @@ export const aiHooks = {
         const cards = req.options.map(o => ({ o, c: duel.card(o.id) })).filter(t => t.c);
         const text = req.text.toLowerCase();
         if (text.startsWith('untap')) return cards.sort((a, b) => value(b.c) - value(a.c)).slice(0, req.min).map(t => t.o.id);
-        if (text.startsWith('discard') || text.startsWith('put ')) { const lands = p.battlefield.filter(isLand).length; const sorted = cards.sort((a, b) => ((isLand(a.c) && lands >= 5) ? -1 : 0) - ((isLand(b.c) && lands >= 5) ? -1 : 0) || cardValue(a.c) - cardValue(b.c)); return sorted.slice(0, req.min).map(t => t.o.id); }
+        if (text.startsWith('discard') || text.startsWith('put ')) {
+          const plan = planOf(p);
+          // Reanimator: happily pitch the fat reanimation targets into the graveyard when we can bring them back.
+          if (plan?.reanimate && text.startsWith('discard')) {
+            const canReanimate = [...p.hand, ...p.battlefield].some(x => plan.priority?.includes(x.def.name)) || p.graveyard.some(x => plan.priority?.includes(x.def.name)) || p.battlefield.some(x => x.def.name === 'Putrid Imp');
+            if (canReanimate) { const fatties = cards.filter(t => plan.reanimate.includes(t.c.def.name)).sort((a, b) => cardValue(b.c) - cardValue(a.c)); const rest = cards.filter(t => !plan.reanimate.includes(t.c.def.name)).sort((a, b) => cardValue(a.c) - cardValue(b.c)); return [...fatties, ...rest].slice(0, req.min).map(t => t.o.id); }
+          }
+          const lands = p.battlefield.filter(isLand).length; const sorted = cards.sort((a, b) => ((isLand(a.c) && lands >= 5) ? -1 : 0) - ((isLand(b.c) && lands >= 5) ? -1 : 0) || cardValue(a.c) - cardValue(b.c)); return sorted.slice(0, req.min).map(t => t.o.id);
+        }
         if (text.startsWith('sacrifice')) return cards.sort((a, b) => value(a.c) - value(b.c)).slice(0, req.min).map(t => t.o.id);
         if (text.startsWith('search')) {
           const plan = planOf(p);
