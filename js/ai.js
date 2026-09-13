@@ -1,6 +1,32 @@
 // Opponent AI for the rules core: priority decisions and choice answers. Greedy, no lookahead.
 import { has, power, toughness, isCreature, isLand, isType, has0, isCreatureDef, abilitiesOf } from './engine.js';
 import { needsTarget } from './cards.js';
+import { planFor } from './ai-plans.js';
+
+// The deck plan for player p (cached on the player). Keyed by the AI player's deck name.
+function planOf(p) { if (p._plan === undefined) p._plan = planFor(p.name); return p._plan; }
+// Which situational needs the deck should tutor for right now, most urgent first.
+function assessNeeds(duel, p) {
+  const opp = duel.opponentOf(p); const needs = [];
+  const threats = opp.battlefield.filter(isCreature);
+  const bigThreat = threats.some(c => power(c) >= 4) || threats.reduce((a, c) => a + power(c), 0) >= p.life - 4;
+  if (bigThreat) needs.push('removal');
+  if (opp.graveyard.filter(isCreatureDef).length >= 3 || opp.graveyard.some(c => /Nightmare|Reanimate|Exhume|Zombify|Recurring/.test(c.def.name))) needs.push('graveyardHate');
+  if (p.life <= 8) needs.push('lifegain');
+  needs.push('threat');
+  return needs;
+}
+// From a set of candidate cards, the toolbox pick the plan wants given the board, else null.
+function toolboxPick(duel, p, plan, cards) {
+  if (!plan?.toolbox) return null;
+  const byName = new Map(cards.map(c => [c.def.name, c]));
+  for (const need of assessNeeds(duel, p)) {
+    const row = plan.toolbox.find(t => t.need === need); if (!row) continue;
+    for (const name of row.cards) if (byName.has(name)) return byName.get(name);
+  }
+  return null;
+}
+const isFodder = (plan, c) => plan?.fodder?.includes(c.def.name);
 
 const value = c => power(c) + toughness(c) + (has(c, 'Flying') ? 1.5 : 0) + (has(c, 'First strike') ? 1 : 0) + (has(c, 'Trample') ? 0.5 : 0) + c.def.cmc * 0.25 + (c.def.abilities.length ? 0.75 : 0);
 const cardValue = c => (isCreatureDef(c) ? c.def.power + c.def.toughness + 1 : 2) + c.def.cmc * 0.3;
@@ -126,9 +152,70 @@ function worth(duel, p, card, opts) {
   }
 }
 
+// Casting priority from the plan: ramp early, engine pieces and disruption ahead of generic plays.
+function planCastBonus(plan, c, duel, p) {
+  if (!plan) return 0;
+  const n = c.def.name; const turn = duel.turn; let b = 0;
+  if (plan.priority?.includes(n)) b += 6;
+  if (plan.ramp?.includes(n)) b += (turn <= 2 ? 8 : 3);
+  if (plan.disruption?.includes(n)) b += (turn <= 3 ? 5 : 1);
+  return b;
+}
+// High-priority engine plays that ADD to the board — run before generic casts. Recurring Nightmare reanimates
+// a clearly better creature by sacrificing fodder; that's card-and-board advantage, so do it eagerly.
+function planEngineAction(duel, p, plan) {
+  if (!plan?.engines?.length) return null;
+  const creatures = p.battlefield.filter(isCreature);
+  const gyCreatures = p.graveyard.filter(isCreatureDef);
+  for (const c of p.battlefield) {
+    if (!plan.engines.includes(c.def.name)) continue;
+    const abils = abilitiesOf(c);
+    for (let i = 0; i < abils.length; i++) {
+      const ab = abils[i]; if (ab.type !== 'activated' || ab.effects[0]?.type !== 'fromGraveyard' || !ab.cost.sacrifice) continue;
+      if (!creatures.length || !gyCreatures.length) continue;
+      const sac = creatures.slice().sort((a, b) => sacRank(plan, a) - sacRank(plan, b))[0];
+      const best = gyCreatures.slice().sort((a, b) => cardValue(b) - cardValue(a))[0];
+      if (!sac || !best || cardValue(best) <= cardValue(sac) + 1.5) continue;   // only a real upgrade, and never sac the only blocker under pressure
+      const pressure = duel.opponentOf(p).battlefield.filter(isCreature).reduce((s, x) => s + power(x), 0) >= p.life - 2;
+      if (pressure && creatures.length <= 1) continue;
+      const opts = { targets: [{ type: 'card', id: best.id }], sacrifice: sac.id };
+      if (duel.canActivate(p, c, i, opts)) return { type: 'activate', card: c, index: i, opts };
+    }
+  }
+  return null;
+}
+// Low-priority "dig" engines (Survival of the Fittest) — considered only when nothing better is on the table.
+// Pitch fodder to find an answer the board demands, or a threat when the hand has no creature to deploy.
+function planDigAction(duel, p, plan) {
+  if (!plan?.engines?.length) return null;
+  const needs = assessNeeds(duel, p);
+  const urgentNeed = needs[0] !== 'threat';
+  const answerInHand = urgentNeed && toolboxPick(duel, p, plan, p.hand.filter(isCreatureDef));
+  const noCreatureToCast = !p.hand.some(c => isCreatureDef(c) && duel.canCast(p, c));
+  if (!urgentNeed && !noCreatureToCast) return null;   // develop the board before spinning Survival
+  if (answerInHand) return null;                         // already holding the answer
+  for (const c of p.battlefield) {
+    if (!plan.engines.includes(c.def.name)) continue;
+    const abils = abilitiesOf(c);
+    for (let i = 0; i < abils.length; i++) {
+      const ab = abils[i]; if (ab.type !== 'activated' || ab.effects[0]?.type !== 'tutor' || !ab.cost.discard) continue;
+      const fodder = p.hand.filter(isCreatureDef).sort((a, b) => sacRank(plan, a) - sacRank(plan, b))[0];
+      if (!fodder || (!isFodder(plan, fodder) && !urgentNeed)) continue;   // don't pitch a real creature just to dig
+      const opts = { targets: [], discard: [fodder.id] };
+      if (duel.canActivate(p, c, i, opts)) return { type: 'activate', card: c, index: i, opts };
+    }
+  }
+  return null;
+}
+// How willing the AI is to lose a creature to a cost: fodder and cheap dorks first, real threats last.
+function sacRank(plan, c) { return (isFodder(plan, c) ? -5 : 0) + cardValue(c) + (c.tapped ? -0.2 : 0); }
+
 function mainPhaseAction(duel, p) {
+  const plan = planOf(p);
   const land = chooseLand(p);
   if (land && duel.canCast(p, land)) return { type: 'cast', card: land };
+  // Deck-specific engines (Recurring Nightmare, Survival of the Fittest): run them before generic plays.
+  if (plan) { const eng = planEngineAction(duel, p, plan); if (eng) return eng; }
   const cands = [];
   for (const c of [...p.hand, ...p.graveyard]) {
     if (c.def.kind === 'land' || c.def.kind === 'unsupported') continue;
@@ -139,10 +226,13 @@ function mainPhaseAction(duel, p) {
     if (!worth(duel, p, c, opts)) continue;
     let score = c.def.cmc + (c.def.kind === 'creature' ? 2 : 0) + (opts.kicked ? 1 : 0) + (opts.x || 0);
     if (c.def.aura) score += 1;
+    score += planCastBonus(plan, c, duel, p);   // the deck's engine pieces, ramp and disruption jump the queue
     cands.push({ c, opts, score });
   }
   cands.sort((a, b) => b.score - a.score);
   if (cands.length) return { type: 'cast', card: cands[0].c, opts: cands[0].opts };
+  // deck dig engines (Survival of the Fittest) — only now that there's nothing better to deploy
+  if (plan) { const dig = planDigAction(duel, p, plan); if (dig) return dig; }
   // sorcery-speed abilities: equip, tutor-ish, token makers
   for (const c of p.battlefield) abilitiesOf(c).forEach((ab, i) => { if (cands.length) return; if (ab.type !== 'activated') return; if (!['token', 'tutor', 'draw', 'counters'].includes(ab.effects[0]?.type)) return; if (ab.cost.sacSelf || ab.cost.sacrifice) return; if (!duel.canActivate(p, c, i)) return; const o = abilityOpts(duel, p, c, i); if (o) cands.push({ act: { type: 'activate', card: c, index: i, opts: o } }); });
   // Graveyard recursion you can activate (Ashen Ghoul): always worth it.
@@ -540,7 +630,12 @@ export const aiHooks = {
         if (text.startsWith('untap')) return cards.sort((a, b) => value(b.c) - value(a.c)).slice(0, req.min).map(t => t.o.id);
         if (text.startsWith('discard') || text.startsWith('put ')) { const lands = p.battlefield.filter(isLand).length; const sorted = cards.sort((a, b) => ((isLand(a.c) && lands >= 5) ? -1 : 0) - ((isLand(b.c) && lands >= 5) ? -1 : 0) || cardValue(a.c) - cardValue(b.c)); return sorted.slice(0, req.min).map(t => t.o.id); }
         if (text.startsWith('sacrifice')) return cards.sort((a, b) => value(a.c) - value(b.c)).slice(0, req.min).map(t => t.o.id);
-        if (text.startsWith('search')) { const lands = p.battlefield.filter(isLand).length; const pick = cards.sort((a, b) => ((isLand(a.c) && lands < 5) ? -1 : 0) - ((isLand(b.c) && lands < 5) ? -1 : 0) || cardValue(b.c) - cardValue(a.c))[0]; return pick ? [pick.o.id] : []; }
+        if (text.startsWith('search')) {
+          const plan = planOf(p);
+          const tb = plan ? toolboxPick(duel, p, plan, cards.map(t => t.c)) : null;   // deck toolbox: fetch the answer the board wants
+          if (tb) return [tb.id];
+          const lands = p.battlefield.filter(isLand).length; const pick = cards.sort((a, b) => ((isLand(a.c) && lands < 5) ? -1 : 0) - ((isLand(b.c) && lands < 5) ? -1 : 0) || cardValue(b.c) - cardValue(a.c))[0]; return pick ? [pick.o.id] : [];
+        }
         if (text.startsWith('scry')) { const lands = p.battlefield.filter(isLand).length; return cards.filter(t => isLand(t.c) && lands >= 5).map(t => t.o.id); }
         return cards.slice(0, Math.max(req.min, 0)).map(t => t.o.id);
       }
