@@ -152,5 +152,120 @@ section('Aquamoeba switches power and toughness (twice = back)');
   d.activate(d.players[0], aq, i, {}); processAndResolve(d); d.refresh(); ok(power(aq) === 3 && toughness(aq) === 1, `3/1 after one switch (${power(aq)}/${toughness(aq)})`);
   d.activate(d.players[0], aq, i, {}); processAndResolve(d); d.refresh(); ok(power(aq) === 1 && toughness(aq) === 3, `1/3 after two (${power(aq)}/${toughness(aq)})`); }
 
+section('Replenish returns enchantments; Auras need a host');
+{ const d = newDuel(); mainPhase(d); const b = place(d, bears(), 0); const w = gy(d, D('Worship'), 0); const r = gy(d, D('Rancor'), 0); gy(d, bears(), 0);
+  const rp = hand(d, D('Replenish'), 0); pool(d, 0, { W: 1, C: 3 });
+  ok(d.cast(d.players[0], rp, {}), 'cast Replenish'); processAndResolve(d);
+  ok(w.zone === 'battlefield' && r.zone === 'battlefield' && r.attachedTo === b, `Worship returns, Rancor enchants the Bears (${w.zone}, ${r.zone}, ${r.attachedTo?.def.name})`);
+  ok(d.players[0].graveyard.some(c => c.def.name === 'Grizzly Bears'), 'creature cards stay'); }
+
+section('Show and Tell: each player may put a permanent onto the battlefield');
+{ const d = newDuel(); mainPhase(d); const big = hand(d, D('Verdant Force'), 0); const theirs = hand(d, D('Hill Giant'), 1); const st = hand(d, D('Show and Tell'), 0); pool(d, 0, { U: 1, C: 2 });
+  ok(d.cast(d.players[0], st, {}), 'cast Show and Tell'); processAndResolve(d, [], y => y.options.filter(o => o.label === 'Verdant Force').map(o => o.id));
+  ok(big.zone === 'battlefield', `Verdant Force in play (${big.zone})`); ok(theirs.zone === 'battlefield', `AI put Hill Giant in (${theirs.zone})`); }
+
+section('Pox: a third of everything, rounded up');
+{ const d = newDuel(); mainPhase(d); for (let k = 0; k < 4; k++) place(d, bears(), 0); for (let k = 0; k < 5; k++) place(d, D('Swamp'), 0); for (let k = 0; k < 2; k++) hand(d, bears(), 0);
+  place(d, bears(), 1); for (let k = 0; k < 3; k++) place(d, D('Forest'), 1); hand(d, bears(), 1);
+  const px = hand(d, D('Pox'), 0); pool(d, 0, { B: 3 }); ok(d.cast(d.players[0], px, {}), 'cast Pox'); processAndResolve(d);
+  const cnt = (i, f) => d.players[i].battlefield.filter(f).length;
+  ok(d.players[0].life === 13 && d.players[1].life === 13, `each lost 7 (${d.players[0].life}/${d.players[1].life})`);
+  ok(d.players[0].hand.length === 1 && d.players[1].hand.length === 0, `hands: 2->1, 1->0 (${d.players[0].hand.length}/${d.players[1].hand.length})`);
+  ok(cnt(0, c => c.def.name === 'Grizzly Bears') === 2 && cnt(1, c => c.def.name === 'Grizzly Bears') === 0, 'creatures: 4->2, 1->0');
+  ok(cnt(0, c => c.def.name === 'Swamp') === 3 && cnt(1, c => c.def.name === 'Forest') === 2, 'lands: 5->3, 3->2'); }
+
+section('Hermit Druid digs to a basic land, bins the rest');
+{ const d = newDuel(); mainPhase(d); const hd = place(d, D('Hermit Druid'), 0); lib(d, D('Forest'), 0); lib(d, bears(), 0); lib(d, D('Wasteland'), 0); lib(d, bears(), 0); pool(d, 0, { G: 1 });
+  ok(d.activate(d.players[0], hd, abIdx(hd.def, a => a.type === 'activated'), {}), 'activate'); processAndResolve(d);
+  ok(d.players[0].hand.some(c => c.def.name === 'Forest') && d.players[0].graveyard.length === 3, `Forest to hand, 3 milled (${d.players[0].graveyard.length})`); }
+
+section('Oath of Druids: fewer creatures -> dig a creature into play');
+{ const d = newDuel(); mainPhase(d); place(d, D('Oath of Druids'), 0); place(d, bears(), 1); lib(d, D('Verdant Force'), 0); lib(d, D('Island'), 0); lib(d, D('Island'), 0);
+  d.fireEvent({ type: 'upkeep', player: 0 }); processAndResolve(d);
+  ok(d.players[0].battlefield.some(c => c.def.name === 'Verdant Force') && d.players[0].graveyard.length === 2, 'Verdant Force enters, two Islands milled');
+  const d2 = newDuel(); mainPhase(d2); place(d2, D('Oath of Druids'), 0); lib(d2, D('Verdant Force'), 1); d2.fireEvent({ type: 'upkeep', player: 1 }); processAndResolve(d2);
+  ok(!d2.players[1].battlefield.some(c => c.def.name === 'Verdant Force'), 'no trigger payoff when the opponent has no more creatures'); }
+
+section('Oath of Ghouls: more creature cards in the yard -> return one');
+{ const d = newDuel(); mainPhase(d); place(d, D('Oath of Ghouls'), 0); const g1 = gy(d, bears(), 0); gy(d, bears(), 0); gy(d, bears(), 1);
+  d.fireEvent({ type: 'upkeep', player: 0 }); processAndResolve(d, [], y => y.options.slice(0, 1).map(o => o.id));
+  ok(d.players[0].hand.length === 1, `returned a creature card (${d.players[0].hand.length})`); }
+
+section('Sylvan Library: draw two extra, pay 4 life or put back');
+{ const d = newDuel(); mainPhase(d); d.step = 'draw'; place(d, D('Sylvan Library'), 0); for (let k = 0; k < 5; k++) lib(d, bears(), 0); d.turn = 3;
+  d.drawCards(d.players[0], 1); d.fireEvent({ type: 'drawstep', player: 0 });
+  let asked = 0; processAndResolve(d, [], y => y.options.slice(0, 2).map(o => o.id));   // yes/no answers default to yes: pay 4 life for both
+  ok(d.players[0].hand.length === 3 && d.players[0].life === 12, `kept all three for 8 life (${d.players[0].hand.length}, ${d.players[0].life})`);
+  const d2 = newDuel(); mainPhase(d2); d2.turn = 3; place(d2, D('Sylvan Library'), 1); for (let k = 0; k < 5; k++) lib(d2, bears(), 1); d2.players[1].life = 10;
+  d2.drawCards(d2.players[1], 1); d2.fireEvent({ type: 'drawstep', player: 1 }); processAndResolve(d2);
+  ok(d2.players[1].hand.length === 1 && d2.players[1].library.length === 4 && d2.players[1].life === 10, `AI at 10 life puts two back (${d2.players[1].hand.length}, lib ${d2.players[1].library.length})`); }
+
+section('Energy Field / Solitary Confinement prevent damage to you');
+{ const d = newDuel(); mainPhase(d); const ef = place(d, D('Energy Field'), 0); const bolt = hand(d, D('Lightning Bolt'), 1); d.priority = 1; pool(d, 1, { R: 1 });
+  d.cast(d.players[1], bolt, { targets: [{ type: 'player', idx: 0 }] }); processAndResolve(d);
+  ok(d.players[0].life === 20, `Bolt prevented (${d.players[0].life})`); ok(ef.zone === 'battlefield', `the Bolt went to its caster's graveyard: Energy Field stays (${ef.zone})`);
+  const d2 = newDuel(); mainPhase(d2); place(d2, D('Solitary Confinement'), 0); const b2 = hand(d2, D('Lightning Bolt'), 1); d2.priority = 1; pool(d2, 1, { R: 1 });
+  d2.cast(d2.players[1], b2, { targets: [{ type: 'player', idx: 0 }] }); processAndResolve(d2); ok(d2.players[0].life === 20, 'Solitary Confinement prevents it too'); }
+
+section('Energy Field is sacrificed when a card goes to my graveyard');
+{ const d = newDuel(); mainPhase(d); const ef = place(d, D('Energy Field'), 0); const b = place(d, bears(), 0); d.destroy(b); processAndResolve(d);
+  ok(ef.zone === 'graveyard', `Energy Field gone (${ef.zone})`); }
+
+section('Opalescence animates other enchantments');
+{ const d = newDuel(); mainPhase(d); place(d, D('Opalescence'), 0); const w = place(d, D('Worship'), 0); d.refresh();
+  ok(isCreature(w) && power(w) === 4 && toughness(w) === 4, `Worship is a 4/4 creature (${power(w)}/${toughness(w)})`); }
+
+section('Aluren: free creature spells at instant speed');
+{ const d = newDuel(); mainPhase(d); place(d, D('Aluren'), 1); const b = hand(d, bears(), 0); const big = hand(d, D('Hill Giant'), 0); pool(d, 0, {});
+  ok(d.canCast(d.players[0], b, { aluren: true }), 'Bears castable for free'); ok(!d.canCast(d.players[0], big, { aluren: true }), 'a 4-drop is not');
+  d.step = 'end'; d.active = 1; ok(d.canCast(d.players[0], b, { aluren: true }), 'and at instant speed'); d.cast(d.players[0], b, { aluren: true }); processAndResolve(d); ok(b.zone === 'battlefield', 'Bears resolve'); }
+
+section('Recoup gives a sorcery flashback for the turn');
+{ const d = newDuel(); mainPhase(d); const ss = gy(d, D('Stone Rain'), 0); const t = place(d, D('Forest'), 1); const rc = hand(d, D('Recoup'), 0); pool(d, 0, { R: 2, C: 3 });
+  ok(!d.canCast(d.players[0], ss, { targets: [{ type: 'perm', id: t.id }] }), 'no flashback before Recoup');
+  ok(d.cast(d.players[0], rc, { targets: [{ type: 'card', id: ss.id }] }), 'cast Recoup'); processAndResolve(d);
+  ok(d.cast(d.players[0], ss, { targets: [{ type: 'perm', id: t.id }] }), 'Stone Rain cast from the graveyard'); processAndResolve(d);
+  ok(t.zone === 'graveyard' && ss.zone === 'exile', `land destroyed, Stone Rain exiled (${t.zone}, ${ss.zone})`); }
+
+section('Rogue Elephant, Cavern Harpy, Goblin Tinkerer');
+{ const d = newDuel(); mainPhase(d); const re = hand(d, D('Rogue Elephant'), 0); pool(d, 0, { G: 1 }); d.cast(d.players[0], re, {}); processAndResolve(d);
+  ok(re.zone === 'graveyard', `no Forest: Rogue Elephant is sacrificed (${re.zone})`);
+  const d2 = newDuel(); mainPhase(d2); const f = place(d2, D('Forest'), 0); const re2 = hand(d2, D('Rogue Elephant'), 0); pool(d2, 0, { G: 1 }); d2.cast(d2.players[0], re2, {}); processAndResolve(d2, [], y => y.options.map(o => o.id).slice(0, 1));
+  ok(re2.zone === 'battlefield' && f.zone === 'graveyard', `sacrificed the Forest to keep it (${re2.zone}, ${f.zone})`);
+  const d3 = newDuel(); mainPhase(d3); const nb = place(d3, D('Nekrataal'), 0); const ch = hand(d3, D('Cavern Harpy'), 0); pool(d3, 0, { U: 1, B: 1 }); d3.cast(d3.players[0], ch, {}); processAndResolve(d3, [], y => y.options.filter(o => o.label === 'Nekrataal').map(o => o.id));
+  ok(nb.zone === 'hand' && ch.zone === 'battlefield', `Harpy returned Nekrataal (${nb.zone})`);
+  const d4 = newDuel(); mainPhase(d4); const gt = place(d4, D('Goblin Tinkerer'), 0); const art = place(d4, D('Cursed Scroll'), 1); pool(d4, 0, { R: 1 });
+  d4.activate(d4.players[0], gt, abIdx(gt.def, a => a.type === 'activated'), { targets: [{ type: 'perm', id: art.id }] }); processAndResolve(d4);
+  ok(art.zone === 'graveyard' && gt.zone === 'battlefield' && gt.damage === 1, `Cursed Scroll destroyed, Tinkerer takes 1 (${gt.damage})`); }
+
+section('Nether Spirit / Genesis / Sarcomancy upkeep triggers');
+{ const d = newDuel(); mainPhase(d); const ns = gy(d, D('Nether Spirit'), 0); d.fireEvent({ type: 'upkeep', player: 0 }); processAndResolve(d);
+  ok(ns.zone === 'battlefield', `Nether Spirit returns alone (${ns.zone})`);
+  const d2 = newDuel(); mainPhase(d2); const ns2 = gy(d2, D('Nether Spirit'), 0); gy(d2, bears(), 0); d2.fireEvent({ type: 'upkeep', player: 0 }); processAndResolve(d2);
+  ok(ns2.zone === 'graveyard', 'not with another creature card');
+  const d3 = newDuel(); mainPhase(d3); gy(d3, D('Genesis'), 0); const b = gy(d3, bears(), 0); pool(d3, 0, { G: 1, C: 2 }); d3.fireEvent({ type: 'upkeep', player: 0 }); processAndResolve(d3, [{ type: 'card', id: b.id }]);
+  ok(b.zone === 'hand', `Genesis returned the Bears (${b.zone})`);
+  const d4 = newDuel(); mainPhase(d4); place(d4, D('Sarcomancy'), 0); d4.fireEvent({ type: 'upkeep', player: 0 }); processAndResolve(d4); ok(d4.players[0].life === 19, `no Zombies: 1 damage (${d4.players[0].life})`); }
+
+section('Graveborn Muse, Wirewood Savage');
+{ const d = newDuel(); mainPhase(d); place(d, D('Graveborn Muse'), 0); place(d, D('Gravedigger'), 0); for (let k = 0; k < 4; k++) lib(d, bears(), 0);
+  d.fireEvent({ type: 'upkeep', player: 0 }); processAndResolve(d); ok(d.players[0].hand.length === 2 && d.players[0].life === 18, `Muse + Gravedigger: draw 2, lose 2 (${d.players[0].hand.length}, ${d.players[0].life})`);
+  const d2 = newDuel(); mainPhase(d2); place(d2, D('Wirewood Savage'), 0); lib(d2, bears(), 0); const krosan = hand(d2, D('Krosan Tusker'), 0); pool(d2, 0, { G: 2, C: 5 }); d2.cast(d2.players[0], krosan, {}); processAndResolve(d2);
+  ok(d2.players[0].hand.length === 1, `a Beast entered: drew (${d2.players[0].hand.length})`); }
+
+section('Emerald Charm: creature loses flying');
+{ const d = newDuel(); mainPhase(d); const bird = place(d, D('Birds of Paradise'), 1); const ec = hand(d, D('Emerald Charm'), 0); pool(d, 0, { G: 1 });
+  const m = ec.def.spell.modes.findIndex(x => /flying/.test(x.text)); ok(m >= 0, 'has the flying mode');
+  d.cast(d.players[0], ec, { modes: [m], targets: [{ type: 'perm', id: bird.id }] }); processAndResolve(d); d.refresh(); ok(!has(bird, 'Flying'), 'Birds lost flying'); }
+
+section('Recycle: skip draw, draw per card played, hand size two');
+{ const d = newDuel(); mainPhase(d); place(d, D('Recycle'), 0); for (let k = 0; k < 5; k++) lib(d, bears(), 0); const f = hand(d, D('Forest'), 0);
+  d.cast(d.players[0], f); processAndResolve(d); ok(d.players[0].hand.length === 1, `playing a land drew a card (${d.players[0].hand.length})`);
+  const b = d.players[0].hand[0]; pool(d, 0, { G: 2 }); d.cast(d.players[0], b, {}); processAndResolve(d); ok(d.players[0].hand.length === 1, `casting a spell drew a card (${d.players[0].hand.length})`); }
+
+section('Elvish Vanguard counts only other Elves');
+{ const d = newDuel(); mainPhase(d); const ev = hand(d, D('Elvish Vanguard'), 0); pool(d, 0, { G: 2 }); d.cast(d.players[0], ev, {}); processAndResolve(d);
+  ok(!(ev.counters['+1/+1'] > 0), 'no counter for itself'); const le = hand(d, D('Llanowar Elves'), 0); pool(d, 0, { G: 1 }); d.cast(d.players[0], le, {}); processAndResolve(d); ok(ev.counters['+1/+1'] === 1, 'counter for another Elf'); }
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

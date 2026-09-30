@@ -93,6 +93,7 @@ function buildCastOpts(duel, p, card) {
   if (info.sacLands && !duel.canPay(p, d.cost) && duel.canCast(p, card, { sacLands: true })) opts.sacLands = true;   // Fireblast for free
   if (info.bounceLands && !duel.canPay(p, d.cost) && duel.canCast(p, card, { bounceLands: true })) opts.bounceLands = true;   // Daze / Gush for free
   if (info.discardAlt && !duel.canPay(p, d.cost) && duel.canCast(p, card, { discardAlt: true })) opts.discardAlt = true;   // Foil for free
+  if (info.aluren && duel.canCast(p, card, { aluren: true })) opts.aluren = true;   // Aluren: creatures for free
   if (info.lifeAlt && !duel.canPay(p, d.cost) && p.life > 8 && duel.canCast(p, card, { lifeAlt: true })) opts.lifeAlt = true;   // Snuff Out for free
   if (info.lifeX) {   // Hatred / Necrologia: X is paid in life — spend what can safely be spared
     const spend = Math.min(6, p.life - 8);
@@ -227,8 +228,8 @@ function mainPhaseAction(duel, p) {
   const cands = [];
   for (const c of [...p.hand, ...p.graveyard]) {
     if (c.def.kind === 'land' || c.def.kind === 'unsupported') continue;
-    if (c.zone === 'graveyard' && !c.def.keywords.some(k => k.k === 'Flashback')) continue;
-    if (!duel.canCast(p, c)) continue;
+    if (c.zone === 'graveyard' && !c.def.keywords.some(k => k.k === 'Flashback') && c.tempFlashback !== duel.turn) continue;
+    if (!duel.canCast(p, c) && !(duel.alurenOk(c) && duel.canCast(p, c, { aluren: true }))) continue;
     const opts = buildCastOpts(duel, p, c); if (!opts) continue;
     if (!duel.canCast(p, c, opts)) continue;
     if (!worth(duel, p, c, opts)) continue;

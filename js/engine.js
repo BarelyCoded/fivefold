@@ -299,6 +299,7 @@ export class Duel {
         }
         case 'draw': {
           if (ap.skipDraw > 0) { ap.skipDraw--; this.say(`${ap.name} skips their draw step.`); }
+          else if (ap.battlefield.some(k => k.def.abilities.some(ab => ab.type === 'static' && ab.kind === 'skipDraw'))) this.say(`${ap.name} skips their draw step.`);   // Solitary Confinement
           else if (!(this.turn === 1)) this.drawCards(ap, 1);
           this.fireEvent({ type: 'drawstep', player: ap.idx });
           break;
@@ -368,7 +369,8 @@ export class Duel {
           break;
         }
         case 'cleanup': {
-          const maxHand = ap.battlefield.some(c => c.def.abilities.some(ab => ab.type === 'static' && ab.kind === 'noMaxHand')) ? Infinity : 7;
+          const caps = ap.battlefield.flatMap(c => c.def.abilities.filter(ab => ab.type === 'static' && ab.kind === 'maxHand').map(ab => ab.n));
+          const maxHand = ap.battlefield.some(c => c.def.abilities.some(ab => ab.type === 'static' && ab.kind === 'noMaxHand')) ? Infinity : caps.length ? Math.min(...caps) : 7;
           if (ap.hand.length > maxHand) {
             const n = ap.hand.length - 7;
             const ids = yield { kind: 'choose', player: ap.idx, text: `Discard down to seven: choose ${n} card${n > 1 ? 's' : ''}`, options: ap.hand.map(c => ({ id: c.id, label: c.def.name })), min: n, max: n };
@@ -491,6 +493,7 @@ export class Duel {
       case 'anyDies': return ev.type === 'dies' && ev.card !== c && this.matchesRestrict(ev.card, ab.restrict, this.players[c.controller]) && !(ab.notSacrificed && ev.sacrificed);
       case 'dealtDamage': return ev.type === 'damage' && ev.target === c;
       case 'endCombat': return ev.type === 'endCombat';
+      case 'youPlayCard': return (ev.type === 'cast' && ev.player === c.controller) || (ev.type === 'playedLand' && ev.player === c.controller);
       case 'youPlayLand': return ev.type === 'etb' && isLand(ev.card) && ev.card.controller === c.controller && !(ab.other && ev.card === c);
       case 'anyLandEtb': return ev.type === 'etb' && isLand(ev.card);
       case 'oppDraws': return ev.type === 'draws' && ev.player !== c.controller;
@@ -505,7 +508,8 @@ export class Duel {
       case 'targeted': return ev.type === 'targeted' && ev.card === c;
       case 'anyCreatureDies': return ev.type === 'dies' && isCreatureDef(ev.card) && (!ab.other || ev.card !== c);
       case 'damagedByDies': return ev.type === 'dies' && !!ev.damaged && ev.damaged.has(c.id);
-      case 'anyCreatureEtb': return ev.type === 'etb' && isCreatureDef(ev.card) && (!ab.yours || ev.card.controller === c.controller) && (!ab.other || ev.card !== c);
+      case 'anyCreatureEtb': return ev.type === 'etb' && (ab.subtype ? hasSubtype(ev.card, ab.subtype) : isCreatureDef(ev.card)) && (!ab.yours || ev.card.controller === c.controller) && (!ab.other || ev.card !== c);
+      case 'toYourGraveyard': return ev.type === 'toGraveyard' && ev.player === c.controller;   // Energy Field
       case 'enchantedDealsDamage': return ev.type === 'damage' && ev.source === c.attachedTo && !!c.attachedTo && (!ab.toYou || ev.target === this.players[c.controller]);
       case 'enchantedDies': return false; // fired directly from moveTo (see enchantedGone)
       case 'enchantedAttacks': return ev.type === 'attacks' && ev.card === c.attachedTo;
@@ -714,16 +718,18 @@ export class Duel {
     if (this.winner !== null || this.priority !== p.idx) return false;
     const d = card.def;
     if (d.kind === 'unsupported') return false;
-    const fromGrave = card.zone === 'graveyard' && d.keywords.some(k => k.k === 'Flashback');
+    const fromGrave = card.zone === 'graveyard' && (d.keywords.some(k => k.k === 'Flashback') || card.tempFlashback === this.turn);   // Recoup grants flashback for a turn
     if (!(card.zone === 'hand' && p.hand.includes(card)) && !(fromGrave && p.graveyard.includes(card))) return false;
     if (opts.cycling) { const cy = d.keywords.find(k => k.k === 'Cycling'); return !!cy && card.zone === 'hand' && this.canPay(p, cy.cost); }
     if (d.kind === 'land') return this.sorcerySpeed(p) && p.landPlayed < this.landLimit(p);
     if (d.animateDead && !this.players.some(pl => pl.graveyard.some(c => isCreatureDef(c)))) return false;   // needs a creature in a graveyard to target
     if (this.active !== p.idx && this.ownTurnOnly()) return false;   // City of Solitude
     if (d.castWhen && ((d.castWhen.turn === 'you' && this.active !== p.idx) || (d.castWhen.turn === 'opp' && this.active === p.idx) || (d.castWhen.steps && !d.castWhen.steps.includes(this.step)))) return false;   // Necrologia, combat tricks
-    const instantSpeed = d.kind === 'instant' || has0(d, 'Flash');
+    const aluren = opts.aluren && this.alurenOk(card);
+    if (opts.aluren && !aluren) return false;
+    const instantSpeed = d.kind === 'instant' || has0(d, 'Flash') || aluren;
     if (!instantSpeed && !this.sorcerySpeed(p)) return false;
-    let cost = fromGrave ? d.keywords.find(k => k.k === 'Flashback').cost : d.cost;
+    let cost = fromGrave ? (d.keywords.find(k => k.k === 'Flashback')?.cost || d.cost) : d.cost;
     if (opts.kicked) { const k = d.keywords.find(k => k.k === 'Kicker'); if (!k) return false; cost = addCosts(cost, k.cost); }
     if (opts.buyback) { const k = d.keywords.find(k => k.k === 'Buyback'); if (!k) return false; cost = addCosts(cost, k.cost); }
     cost = this.modifiedCost(p, card, cost);
@@ -738,7 +744,8 @@ export class Duel {
       if (!hand.some(c => hasSubtype(c, alt.land)) || hand.length < 1 + alt.others) return false;
     } else if (opts.lifeAlt && d.spell?.alternativeCost?.lifeAlt) {
       const alt = d.spell.alternativeCost.lifeAlt; if (p.life < alt.life || !p.battlefield.some(l => hasSubtype(l, alt.land))) return false;   // Snuff Out
-    } else if (!this.canPay(p, cost, opts.x || 0, opts.poolOnly)) return false;
+    } else if (aluren) { /* Aluren: free */ }
+    else if (!this.canPay(p, cost, opts.x || 0, opts.poolOnly)) return false;
     const fbSac = fromGrave ? d.keywords.find(k => k.k === 'Flashback')?.sacrifice : null;   // Cabal Therapy's flashback
     const add = (fbSac ? { sacrifice: fbSac } : null) || d.spell?.additionalCost || d.additionalCost;
     if (add) {
@@ -754,6 +761,11 @@ export class Duel {
       if (d.spell.modes && !opts.modes && !this.availableModes(p, card).length) return false;
     }
     return true;
+  }
+  // Aluren: creature spells with mana value 3 or less cost nothing and have flash, for every player.
+  alurenOk(card) {
+    if (!isCreatureDef(card) || card.zone !== 'hand') return false;
+    return this.permanents().some(a => a.def.abilities.some(ab => ab.type === 'static' && ab.kind === 'aluren' && (card.def.cmc ?? 0) <= ab.maxMv) && !a.cur?.flags.has('noAbilities'));
   }
   // Feroz's Ban, Gloom, Planar Gate, Stone Calendar: generic cost changes from statics on the battlefield.
   modifiedCost(p, card, cost) {
@@ -793,7 +805,7 @@ export class Duel {
   castOptions(p, card) {
     const d = card.def;
     const lifeX = !!(d.spell?.additionalCost || d.additionalCost)?.lifeX;
-    const out = { targets: [], x: !!d.cost.x || lifeX, lifeX, kicker: d.keywords.find(k => k.k === 'Kicker')?.cost || null, buyback: d.keywords.find(k => k.k === 'Buyback')?.cost || null, modes: null, additional: d.spell?.additionalCost || d.additionalCost || null, pitch: d.spell?.alternativeCost?.pitch || null, sacLands: d.spell?.alternativeCost?.sacLands || null, bounceLands: d.spell?.alternativeCost?.bounceLands || null, discardAlt: d.spell?.alternativeCost?.discardAlt || null, lifeAlt: d.spell?.alternativeCost?.lifeAlt || null, flashback: card.zone === 'graveyard', cycling: d.keywords.find(k => k.k === 'Cycling')?.cost || null };
+    const out = { targets: [], x: !!d.cost.x || lifeX, lifeX, kicker: d.keywords.find(k => k.k === 'Kicker')?.cost || null, buyback: d.keywords.find(k => k.k === 'Buyback')?.cost || null, modes: null, additional: d.spell?.additionalCost || d.additionalCost || null, pitch: d.spell?.alternativeCost?.pitch || null, sacLands: d.spell?.alternativeCost?.sacLands || null, bounceLands: d.spell?.alternativeCost?.bounceLands || null, discardAlt: d.spell?.alternativeCost?.discardAlt || null, lifeAlt: d.spell?.alternativeCost?.lifeAlt || null, aluren: this.alurenOk(card), flashback: card.zone === 'graveyard', cycling: d.keywords.find(k => k.k === 'Cycling')?.cost || null };
     if (d.spell?.modes) out.modes = { pick: d.spell.modal === 'one' ? 1 : 2, options: this.availableModes(p, card) };
     if (d.aura) out.targets.push({ text: `Enchant ${d.aura}`, options: this.legalTargets(p, { sel: 'permanent', restrict: auraRestrict(d.aura) }, card) });
     return out;
@@ -815,7 +827,7 @@ export class Duel {
       this.passes = 0; this.priority = p.idx; this.emit(); return true;
     }
     if (d.kind === 'land') {
-      p.landPlayed++; this.moveTo(card, 'battlefield'); this.say(`${p.name} plays ${d.name}.`);
+      p.landPlayed++; this.moveTo(card, 'battlefield'); this.say(`${p.name} plays ${d.name}.`); this.fireEvent({ type: 'playedLand', player: p.idx, card });
       this.fx.push({ type: 'land', id: card.id, controller: p.idx });
       this.passes = 0; this.priority = p.idx; this.emit(); return true;
     }
@@ -826,7 +838,7 @@ export class Duel {
       if (!targets[i] || !legal.some(l => sameRef(l, targets[i]))) return false;
     }
     const fromGrave = card.zone === 'graveyard';
-    let cost = fromGrave ? d.keywords.find(k => k.k === 'Flashback').cost : d.cost;
+    let cost = fromGrave ? (d.keywords.find(k => k.k === 'Flashback')?.cost || d.cost) : d.cost;
     if (opts.kicked) cost = addCosts(cost, d.keywords.find(k => k.k === 'Kicker').cost);
     if (opts.buyback) cost = addCosts(cost, d.keywords.find(k => k.k === 'Buyback').cost);
     cost = this.modifiedCost(p, card, cost);
@@ -859,6 +871,7 @@ export class Duel {
       this.say(`${p.name} discards ${chosen.map(c => c.def.name).join(' and ')} to cast ${d.name}.`);
     }
     else if (opts.lifeAlt && d.spell?.alternativeCost?.lifeAlt) { const k = d.spell.alternativeCost.lifeAlt.life; p.life -= k; this.say(`${p.name} pays ${k} life to cast ${d.name}.`); }
+    else if (opts.aluren && this.alurenOk(card)) this.say(`${p.name} casts ${d.name} without paying its mana cost (Aluren).`);
     else this.payMana(p, this.planPayment(p, cost, opts.x || 0, opts.poolOnly));
     if (fromGrave) { const fl = d.keywords.find(k => k.k === 'Flashback')?.life; if (fl) { p.life -= fl; this.say(`${p.name} pays ${fl} life for flashback.`); } }
     const fbSac = fromGrave ? d.keywords.find(k => k.k === 'Flashback')?.sacrifice : null;
@@ -1503,6 +1516,116 @@ export class Duel {
         this.counterItem(s.item);
       } break;
       // Misdirection: change the single target of the targeted spell to a new legal target that I choose.
+      // Replenish: every matching card in your graveyard returns at once; an Aura needs something to enchant.
+      case 'massReturn': {
+        const cards = p.graveyard.filter(c => matchCardWhat(c, e.what) && c.def.kind !== 'unsupported');
+        const plain = cards.filter(c => !c.def.aura), auras = cards.filter(c => c.def.aura);
+        for (const c of plain) this.moveTo(c, 'battlefield', { controller: p.idx });
+        for (const a of auras) {
+          const hosts = this.permanents().filter(h => this.matchesRestrict(h, auraRestrict(a.def.aura), p) && !this.protectedFrom(h, a) && (a.def.aura !== 'creature' || isCreature(h)));
+          if (!hosts.length) continue;
+          const hostile = a.def.abilities.some(ab => ab.kind === 'pt' ? ab.p < 0 : ['cantAttack', 'cantBlock', 'cantAttackOrBlock', 'doesntUntap', 'control'].includes(ab.kind));
+          let h;
+          if (p.ai) h = hosts.find(x => (x.controller === p.idx) !== hostile) || hosts[0];
+          else { const ids = yield { kind: 'choose', player: p.idx, text: `${a.def.name}: choose what it enchants`, options: hosts.map(x => ({ id: x.id, label: x.def.name })), min: 1, max: 1 }; h = this.card((ids || [])[0]); if (!h || !hosts.includes(h)) h = hosts[0]; }
+          this.moveTo(a, 'battlefield', { controller: p.idx, attachTo: h });
+        }
+        this.say(`${p.name} returns ${cards.filter(c => c.zone === 'battlefield').map(c => c.def.name).join(', ') || 'nothing'} to the battlefield.`);
+        break;
+      }
+      // Show and Tell: each player (active first) may put an artifact, creature, enchantment or land card onto the battlefield, all at once.
+      case 'showAndTell': {
+        const picks = [];
+        for (const pl of [this.activePlayer, this.opponentOf(this.activePlayer)]) {
+          const opts = pl.hand.filter(c => c.def.isPermanent && c.def.kind !== 'unsupported' && ['artifact', 'creature', 'enchantment', 'land'].some(t => isType(c, t) || (t === 'creature' && isCreatureDef(c))));
+          if (!opts.length) continue;
+          let pick = null;
+          if (pl.ai) pick = opts.filter(c => !isLand(c)).sort((a, b) => (b.def.cmc || 0) - (a.def.cmc || 0))[0] || opts[0];
+          else { const ids = yield { kind: 'choose', player: pl.idx, text: `${src.def.name}: you may put an artifact, creature, enchantment or land card from your hand onto the battlefield`, options: opts.map(c => ({ id: c.id, label: c.def.name })), min: 0, max: 1, secret: true }; pick = this.card((ids || [])[0]); if (pick && !opts.includes(pick)) pick = null; }
+          if (pick) picks.push({ pl, pick });
+        }
+        for (const { pl, pick } of picks) { this.moveTo(pick, 'battlefield', { controller: pl.idx }); this.say(`${pl.name} puts ${pick.def.name} onto the battlefield.`); }
+        if (!picks.length) this.say('Nobody puts anything onto the battlefield.');
+        break;
+      }
+      // Pox: each player loses a third of their life, discards a third of their hand, then sacrifices a third of their creatures and lands (rounded up).
+      case 'pox': {
+        const order = [this.activePlayer, this.opponentOf(this.activePlayer)];
+        for (const pl of order) { const k = Math.ceil(pl.life / 3); if (k > 0) { pl.life -= k; this.say(`${pl.name} loses ${k} life.`); } }
+        for (const pl of order) yield* this.discardChoice(pl, Math.ceil(pl.hand.length / 3), false, pl);
+        for (const kind of ['creature', 'land']) for (const pl of order) {
+          const k = Math.ceil(pl.battlefield.filter(c => kind === 'creature' ? isCreature(c) : isLand(c)).length / 3);
+          for (let i = 0; i < k; i++) yield* this.sacrificeChoice(pl, kind);
+        }
+        break;
+      }
+      // Hermit Druid: reveal until a matching card; it goes to hand (or the battlefield), everything else to the graveyard.
+      case 'digUntil': { yield* this.digUntil(p, e.what, e.hit, src); break; }
+      // Recoup: the target sorcery card may be cast from the graveyard this turn for its mana cost.
+      case 'grantFlashback': for (const s of subs) if (s.card && s.card.zone === 'graveyard') { s.card.tempFlashback = this.turn; this.say(`${s.card.def.name} gains flashback until end of turn.`); } break;
+      // Rogue Elephant: sacrifice it unless you sacrifice a Forest.
+      case 'unlessSacrifice': {
+        const opts = p.battlefield.filter(c => c !== src && this.sacMatches(c, e.what));
+        let keep = false;
+        if (opts.length) keep = p.ai ? true : yield { kind: 'yesno', player: p.idx, text: `${src.def.name}: sacrifice a ${cap(e.what)} to keep it?`, card: src.id, value: 'unlessSacrifice' };
+        if (keep) { const c = p.ai ? opts.sort((a, b) => (a.tapped ? 0 : 1) - (b.tapped ? 0 : 1))[0] : (this.card(((yield { kind: 'choose', player: p.idx, text: `Sacrifice a ${cap(e.what)}`, options: opts.map(c => ({ id: c.id, label: c.def.name })), min: 1, max: 1 }) || [])[0]) || opts[0]); this.sacrifice(c); }
+        else yield* this.runEffects(e.effects, ctx, false);
+        break;
+      }
+      // Cavern Harpy: return a matching creature you control (itself allowed) to its owner's hand — not targeted.
+      case 'returnOwn': {
+        const opts = p.battlefield.filter(c => this.matchesRestrict(c, e.restrict, p));
+        if (!opts.length) break;
+        let c;
+        if (p.ai) c = opts.filter(x => x !== src).sort((a, b) => (b.def.abilities.some(ab => ab.event === 'etb') ? 1 : 0) - (a.def.abilities.some(ab => ab.event === 'etb') ? 1 : 0) || (a.def.cmc || 0) - (b.def.cmc || 0))[0] || opts[0];
+        else { const ids = yield { kind: 'choose', player: p.idx, text: `${src.def.name}: return a creature you control to its owner's hand`, options: opts.map(x => ({ id: x.id, label: x.def.name })), min: 1, max: 1 }; c = this.card((ids || [])[0]); if (!c || !opts.includes(c)) c = opts[0]; }
+        this.moveTo(c, 'hand'); this.say(`${p.name} returns ${c.def.name} to hand.`);
+        break;
+      }
+      // Goblin Tinkerer: the destroyed artifact deals damage equal to its mana value to the Tinkerer.
+      case 'prevDealsCmcToSelf': { const a = this.prevCard(ctx); if (a && src.zone === 'battlefield' && (a.def.cmc || 0) > 0) this.dealDamage(a, src, a.def.cmc); break; }
+      // Rising Waters: the upkeep player untaps one land.
+      case 'untapOneLand': for (const s of subs) if (s.player) { const l = s.player.battlefield.filter(x => isLand(x) && x.tapped).sort((a, b) => (b.def.produces?.length || 0) - (a.def.produces?.length || 0))[0]; if (l) { l.tapped = false; this.say(`${s.player.name} untaps ${l.def.name}.`); } } break;
+      // Sylvan Library: draw two more, then for two cards drawn this turn pay 4 life each or put them back on top.
+      case 'sylvanLibrary': {
+        const yes = yield { kind: 'yesno', player: p.idx, text: `${src.def.name}: draw two additional cards?`, card: src.id, value: 'sylvan' };
+        if (!yes) break;
+        this.drawCards(p, 2);
+        const drawn = (p.drawnTurn === this.turn ? p.drawnThisTurn : []).map(id => this.card(id)).filter(c => c && p.hand.includes(c));
+        if (!drawn.length) break;
+        const k = Math.min(2, drawn.length);
+        let two;
+        if (p.ai) two = drawn.slice().sort((a, b) => cardWorth(a) - cardWorth(b)).slice(0, k);
+        else { const ids = yield { kind: 'choose', player: p.idx, text: `${src.def.name}: choose ${k} card${k > 1 ? 's' : ''} drawn this turn — pay 4 life for each or put it back on top`, options: drawn.map(c => ({ id: c.id, label: c.def.name })), min: k, max: k, secret: true }; two = (ids || []).map(id => this.card(id)).filter(c => c && drawn.includes(c)).slice(0, k); while (two.length < k) two.push(drawn.find(c => !two.includes(c))); }
+        let back = 0, paid = 0;
+        for (const c of two) {
+          let pay = false;
+          if (p.life > 4) pay = p.ai ? (p.life >= 14 && cardWorth(c) >= 4 && paid === 0) : yield { kind: 'yesno', player: p.idx, text: `${src.def.name}: pay 4 life to keep ${c.def.name}? (otherwise it goes back on top)`, card: c.id, value: 'sylvanPay' };
+          if (pay) { p.life -= 4; paid++; }
+          else { removeFrom(p.hand, c); c.zone = 'library'; p.library.push(c); back++; }
+        }
+        this.say(`${p.name} ${paid ? `pays ${paid * 4} life` : ''}${paid && back ? ' and ' : ''}${back ? `puts ${back} card${back > 1 ? 's' : ''} back on top` : ''}.`);
+        break;
+      }
+      // Oath of Druids: if an opponent controls more creatures, the upkeep player may dig for a creature and put it onto the battlefield.
+      case 'oathDruids': {
+        const pl = this.players[ctx.thatPlayer ?? p.idx], opp = this.opponentOf(pl);
+        if (opp.battlefield.filter(isCreature).length <= pl.battlefield.filter(isCreature).length) break;
+        const yes = pl.ai ? pl.library.some(isCreatureDef) : yield { kind: 'yesno', player: pl.idx, text: `${src.def.name}: reveal cards until a creature and put it onto the battlefield?`, card: src.id, value: 'oath' };
+        if (yes) yield* this.digUntil(pl, 'creature', 'battlefield', src);
+        break;
+      }
+      // Oath of Ghouls: if your graveyard has more creature cards than the opponent's, you may return one to hand.
+      case 'oathGhouls': {
+        const pl = this.players[ctx.thatPlayer ?? p.idx], opp = this.opponentOf(pl);
+        const mine = pl.graveyard.filter(isCreatureDef);
+        if (mine.length <= opp.graveyard.filter(isCreatureDef).length) break;
+        let c;
+        if (pl.ai) c = mine.slice().sort((a, b) => cardWorth(b) - cardWorth(a))[0];
+        else { const ids = yield { kind: 'choose', player: pl.idx, text: `${src.def.name}: you may return a creature card from your graveyard to your hand`, options: mine.map(x => ({ id: x.id, label: x.def.name })), min: 0, max: 1 }; c = this.card((ids || [])[0]); if (c && !mine.includes(c)) c = null; }
+        if (c) { this.moveTo(c, 'hand'); this.say(`${pl.name} returns ${c.def.name} to hand.`); }
+        break;
+      }
       case 'madness': {   // the discarded card waits in exile: cast it for its madness cost, or it goes to the graveyard
         if (src.zone !== 'exile') break;
         const mad = src.def.keywords.find(k => k.k === 'Madness'); const owner = this.players[src.owner];
@@ -1661,6 +1784,17 @@ export class Duel {
     this.sacrifice(c);
     return true;
   }
+  // Reveal from the top until a card matching `what`; it goes to `hit` (hand / battlefield), the rest to the graveyard.
+  *digUntil(p, what, hit, src) {
+    const revealed = [];
+    let found = null;
+    while (p.library.length) { const c = p.library.pop(); c.zone = 'limbo'; revealed.push(c); if (matchCardWhat(c, what) && c.def.kind !== 'unsupported') { found = c; break; } }
+    this.say(`${p.name} reveals ${revealed.length ? revealed.map(c => c.def.name).join(', ') : 'nothing'}.`);
+    if (found) { found.zone = 'library'; p.library.push(found); this.moveTo(found, hit, { controller: p.idx }); }
+    for (const c of revealed) if (c !== found) { c.zone = 'library'; p.library.push(c); this.moveTo(c, 'graveyard'); }
+    if (found) this.say(`${found.def.name} goes ${hit === 'hand' ? 'to hand' : 'onto the battlefield'}; ${revealed.length - 1} card${revealed.length === 2 ? '' : 's'} into the graveyard.`);
+    else this.say(`No ${what} found; ${revealed.length} card${revealed.length === 1 ? '' : 's'} into the graveyard.`);
+  }
   *tutor(p, e, src = null) {
     const what = e.what.replace(/ cards?$/, '');
     const opts = p.library.filter(c => matchCardWhat(c, what) && (e.maxMv == null || (c.def.cmc ?? 0) <= e.maxMv) && (e.named !== '$self' || c.def.name === src.def.name));
@@ -1769,6 +1903,7 @@ export class Duel {
       else { this.say(`${ctrl.name} sacrifices ${cand[0].def.name} for ${c.def.name}.`); this.sacrifice(cand[0]); }
     }
     c.zone = zone;
+    if (zone === 'graveyard') this.fireEvent({ type: 'toGraveyard', card: c, player: c.owner });
     if (zone === 'battlefield') {
       c.controller = opts.controller ?? c.owner;
       const ctrl = this.players[c.controller];
@@ -1813,6 +1948,7 @@ export class Duel {
     for (let i = 0; i < n; i++) {
       if (!p.library.length) { p.drewFromEmpty = true; break; }
       const c = p.library.pop(); c.zone = 'hand'; p.hand.push(c); drawn.push(c);
+      if (p.drawnTurn !== this.turn) { p.drawnTurn = this.turn; p.drawnThisTurn = []; } p.drawnThisTurn.push(c.id);   // Sylvan Library
       this.fireEvent({ type: 'draws', player: p.idx });
     }
     if (!silent && drawn.length) {
@@ -1940,6 +2076,8 @@ export class Duel {
     if (source.flags?.has('dealsNoDamage')) return 0;
     const ci = noPrev ? -1 : pl.cop.findIndex(f => f === 'any' || (Array.isArray(f) ? f.some(x => (source.def?.colors || []).includes(x)) : f === 'artifact' ? isType(source, 'artifact') : (source.def?.colors || []).includes(f)));
     if (ci >= 0) { pl.cop.splice(ci, 1); this.say(`${pl.name}'s circle of protection prevents ${source.def.name}'s damage.`); return 0; }
+    // Solitary Confinement / Energy Field: prevent damage dealt to you (Energy Field: only from sources you don't control)
+    if (!noPrev && pl.battlefield.some(k => k.def.abilities.some(ab => ab.type === 'static' && ab.kind === 'preventDamageToYou' && (!ab.fromOpp || (source.controller ?? -1) !== pl.idx)) && !k.cur?.flags.has('noAbilities'))) { this.say(`Damage to ${pl.name} is prevented.`); return 0; }
     if (!noPrev && pl.shield > 0) { const used = Math.min(pl.shield, n); pl.shield -= used; n -= used; this.say(`${used} damage to ${pl.name} is prevented.`); if (n <= 0) return 0; }
     // Crumbling Sanctuary: the damage exiles cards from the top of the library instead of costing life.
     if (this.permanents().some(c => c.def.abilities.some(ab => ab.type === 'static' && ab.kind === 'damageToLibrary'))) {
@@ -2058,10 +2196,12 @@ export class Duel {
     this.ignoreLandwalk = new Set();
     for (const pl of this.players) pl.lifeFloor = undefined;
     for (const c of perms) for (const ab of c.def.abilities) if (ab.type === 'static' && ab.kind === 'lifeFloor' && !(ab.condition && !this.conditionHolds(ab.condition, c))) { const pl = this.players[c.controller]; pl.lifeFloor = Math.max(pl.lifeFloor ?? -Infinity, ab.n); }
+    const opals = all.filter(o => o.def.abilities.some(ab => ab.type === 'static' && ab.kind === 'opalescence'));
     for (const c of all) {
       const d = c.def;
       const cur = { p: d.power || 0, t: d.toughness || 0, kw: new Set(), flags: new Set(), types: new Set(d.types.map(t => t.toLowerCase())), cantBeBlockedBy: [], blockableOnlyBy: [], attackOnlyIfDefenderHas: null, lose: [], preventFrom: null, granted: [] };
       for (const f of c.temp.flags) if (typeof f === 'string' && f.startsWith('lose:')) cur.lose.push(f.slice(5));
+      if (opals.some(o => o !== c) && d.types.includes('Enchantment') && !d.aura && !d.subtypes.includes('Aura')) { cur.types.add('creature'); cur.p = d.cmc || 0; cur.t = d.cmc || 0; }   // Opalescence
       for (const k of d.keywords) if (typeof k === 'string' ? true : ['Protection', 'Landwalk', 'Rampage'].includes(k.k)) cur.kw.add(k);
       for (const k of c.temp.kw) cur.kw.add(k);
       const cda = d.abilities.find(ab => ab.kind === 'cda');
@@ -2124,6 +2264,8 @@ export class Duel {
     if (cond.didntAttack && src.attackedThisTurn) ok = false;
     if (cond.attackedOrBlocked && !(src.attackedThisTurn || src.blockedThisTurn)) ok = false;
     if (cond.threshold && me.graveyard.length < 7) ok = false;
+    if (cond.onlyCreatureInGy && !(src.zone === 'graveyard' && me.graveyard.filter(isCreatureDef).length === 1)) ok = false;   // Nether Spirit
+    if (cond.noSubtype && this.permanents().some(x => hasSubtype(x, cond.noSubtype))) ok = false;   // Sarcomancy
     if (cond.controlsCreature && !me.battlefield.some(isCreature)) ok = false;   // Worship
     // "if ~ is in your graveyard with N creature cards (directly) above it": later cards sit higher in the array.
     if (cond.gyAbove) {
@@ -2207,6 +2349,8 @@ export function has0(def, kw) { return def.keywords.some(k => (typeof k === 'str
 export function isCreatureDef(c) { return c.def.types.includes('Creature'); }
 export function sameRef(a, b) { return a && b && a.type === b.type && a.id === b.id && a.idx === b.idx; }
 export function addCosts(a, b) { return { pips: [...a.pips, ...(b.pips || [])], generic: (a.generic || 0) + (b.generic || 0), x: a.x || b.x }; }
+// Rough card worth for engine-side AI picks (Sylvan Library, Oath of Ghouls).
+function cardWorth(c) { return isLand(c) ? 2 : (c.def.cmc || 0) + (isCreatureDef(c) ? 1 : 0); }
 function auraRestrict(what) {
   const r = {};
   if (what === 'creature') r.types = ['creature'];

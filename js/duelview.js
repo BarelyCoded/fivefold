@@ -70,6 +70,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     if (card.def.spell?.alternativeCost?.bounceLands && duel.canCast(me, card, { bounceLands: true })) return true;
     if (card.def.spell?.alternativeCost?.discardAlt && duel.canCast(me, card, { discardAlt: true })) return true;
     if (card.def.spell?.alternativeCost?.lifeAlt && duel.canCast(me, card, { lifeAlt: true })) return true;
+    if (duel.alurenOk?.(card) && duel.canCast(me, card, { aluren: true })) return true;   // Aluren: free creature spells
     return false;
   }
   function hasAnyPlay() {
@@ -581,6 +582,10 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
       const can = hand.some(c => c.def.subtypes.includes(info.discardAlt.land)) && hand.length >= 1 + info.discardAlt.others;
       if (can) { const canPayMana = duel.canPay(me, card.def.cost); ui.menu = { title: `Discard ${info.discardAlt.land} and ${info.discardAlt.others} other card instead of paying?`, items: [{ label: `Discard ${info.discardAlt.land} + ${info.discardAlt.others}`, primary: !canPayMana, action: () => { opts.discardAlt = true; ui.menu = null; next(w); } }, ...(canPayMana ? [{ label: 'Pay mana instead', primary: true, action: () => { opts.discardAlt = false; ui.menu = null; next(w); } }] : [])] }; render(); return; }
       opts.discardAlt = false;
+    }
+    if (info.aluren && !('aluren' in opts)) {   // Aluren: cast it for free (and at instant speed)
+      if (duel.canCast(me, card, { ...opts, aluren: true })) { const canPayMana = duel.canCast(me, card, { ...opts, aluren: false }); ui.menu = { title: `Cast ${card.def.name} without paying its mana cost (Aluren)?`, items: [{ label: 'Cast it free', primary: true, action: () => { opts.aluren = true; ui.menu = null; next(w); } }, ...(canPayMana ? [{ label: `Pay ${costString(card.def.cost)} instead`, action: () => { opts.aluren = false; ui.menu = null; next(w); } }] : [])] }; render(); return; }
+      opts.aluren = false;
     }
     if (info.lifeAlt && !('lifeAlt' in opts)) {   // Snuff Out: pay life rather than mana
       if (duel.canCast(me, card, { ...opts, lifeAlt: true })) { const canPayMana = duel.canPay(me, card.def.cost); ui.menu = { title: `Pay ${info.lifeAlt.life} life instead of ${costString(card.def.cost)}?`, items: [{ label: `Pay ${info.lifeAlt.life} life`, primary: !canPayMana, action: () => { opts.lifeAlt = true; ui.menu = null; next(w); } }, ...(canPayMana ? [{ label: 'Pay mana instead', primary: true, action: () => { opts.lifeAlt = false; ui.menu = null; next(w); } }] : [])] }; render(); return; }

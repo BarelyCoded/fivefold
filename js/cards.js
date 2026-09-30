@@ -368,6 +368,26 @@ const rules = [
   [/^(target player) puts a card from their hand on top of their library$/, m => tgt({ type: 'handToTop' }, m[1])],
   // Engineered Plague / Evacuation / Hibernation / Flaring Pain / Gerrard's Wisdom.
   [/^choose a creature type$/, () => [{ type: 'chooseType' }]],
+  // Replenish: "return all enchantment cards from your graveyard to the battlefield"
+  [/^return all (artifact|enchantment|creature|land) cards from your graveyard to the battlefield$/, m => [{ type: 'massReturn', what: m[1] }]],
+  // Show and Tell
+  [/^each player may put an artifact, creature, enchantment, or land card from their hand onto the battlefield$/, () => [{ type: 'showAndTell' }]],
+  // Pox (and its "round up each time" rider)
+  [/^each player loses a third of their life, then discards a third of the cards in their hand, then sacrifices a third of the creatures they control of their choice, then sacrifices a third of the lands they control of their choice$/, () => [{ type: 'pox' }]],
+  [/^round up each time$/, () => []],
+  // Recoup
+  [/^(target sorcery card in your graveyard) gains flashback until end of turn$/, m => tgt({ type: 'grantFlashback' }, m[1])],
+  [/^the flashback cost is equal to its mana cost$/, () => []],
+  // Graveborn Muse: "you draw X cards and you lose X life, where X is the number of Zombies you control"
+  [/^you draw x cards and you lose x life, where x is the number of (\w+?)s you control$/, m => { const a = { calc: 'count', restrict: { control: 'you', subtypes: [capSub(m[1])], types: ['permanent'] } }; return [{ type: 'draw', amount: a, sel: 'you' }, { type: 'lose', amount: a, sel: 'you' }]; }],
+  // Rogue Elephant: "sacrifice it unless you sacrifice a Forest"
+  [/^sacrifice (?:it|~) unless you sacrifice (?:a|an) (\w+)$/, m => [{ type: 'unlessSacrifice', what: m[1], effects: [{ type: 'sacrificeSelf' }] }]],
+  // Cavern Harpy: "return a blue or black creature you control to its owner's hand" (not targeted)
+  [/^return (?:a|an) (.+?) you control to its owner's hand$/, m => { const k = parseTarget('all ' + m[1] + ' you control'); return k && k.restrict ? [{ type: 'returnOwn', restrict: k.restrict }] : null; }],
+  // Goblin Tinkerer rider: "that artifact deals damage equal to its mana value to ~"
+  [/^that (?:artifact|creature|permanent) deals damage equal to its mana value to ~$/, () => [{ type: 'prevDealsCmcToSelf' }]],
+  // Emerald Charm mode, Magnetic Web & co.: "target creature loses flying until end of turn"
+  [/^(target .+?) loses (flying|first strike|trample|haste|shadow|fear) until end of turn$/, m => tgt({ type: 'loseTemp', keyword: cap(m[2]) }, m[1])],
   [/^choose a color$/, () => [{ type: 'chooseColorSelf' }]],
   [/^~ becomes the color of your choice until end of turn$/, () => [{ type: 'chooseColorSelf', temp: true }]],
   [/^~ gets \+(\d+)\/\+(\d+) and becomes the color of your choice until end of turn$/, m => [{ type: 'pump', p: Number(m[1]), t: Number(m[2]), sel: 'self', restrict: {} }, { type: 'chooseColorSelf', temp: true }]],   // Wild Mongrel
@@ -630,6 +650,8 @@ export function parseEffects(text) {
   if ((wm = whole.match(/^domain — (target player|you) draws? a card for each basic land type among lands (?:they|you) controls?$/))) { const k = wm[1] === 'you' ? { sel: 'you' } : T(wm[1]); if (k) { out.effects.push({ type: 'draw', amount: { calc: 'domain', of: k.sel === 'you' ? 'you' : 'subject' }, ...k }); return out; } }
   if (/^draw four cards, then choose x cards in your hand and discard the rest$/.test(whole)) { out.effects.push({ type: 'draw', amount: 4, sel: 'you' }, { type: 'discardDownTo', amount: 'X', sel: 'you' }); return out; }
   if (/^draw a card, then draw cards equal to the number of cards named ~ in all graveyards$/.test(whole)) { out.effects.push({ type: 'draw', amount: 1, sel: 'you' }, { type: 'draw', amount: { calc: 'graveyardNameAll' }, sel: 'you' }); return out; }
+  // Hermit Druid: dig until a matching card, it goes to hand (or play), the rest into the graveyard.
+  if ((wm = whole.match(/^reveal cards from the top of your library until you reveal (?:a|an) (.+?) card\. put that card (into your hand|onto the battlefield) and all other cards revealed this way into your graveyard$/))) { out.effects.push({ type: 'digUntil', what: wm[1], hit: wm[2] === 'into your hand' ? 'hand' : 'battlefield', rest: 'graveyard' }); return out; }
   // Hand disruption: Duress / Unmask ("... that player discards that card") and Mesmeric Fiend ("exile that card").
   if ((wm = whole.match(/^(target opponent|target player) reveals their hand(?:,? and|\.) you choose (?:a|an) (.+?) card from it\. (exile that card|(?:that player|they) discards? that card)$/))) { const k = T(wm[1]); if (k) { out.effects.push({ type: 'handPick', action: wm[3].startsWith('exile') ? 'exile' : 'discard', filter: parseCardFilter(wm[2]), ...k }); return out; } }
   // Cabal Therapy (approximated: you see the hand and name a card in it; all copies are discarded).
@@ -798,6 +820,11 @@ function parseStatic(t) {
   if ((m = t.match(/^(?:threshold — )?as long as (?:there are )?seven or more cards (?:are )?in your graveyard, (.+)$/))) { const inner = parseStatic(m[1]); if (!inner) return null; for (const o of inner) o.condition = { ...(o.condition || {}), threshold: true }; return inner; }
   // Effect-first threshold wording: "~ gets +2/+2 as long as there are seven or more cards in your graveyard." (Nimble Mongoose, Werebear, Krosan Beast).
   if ((m = t.match(/^(?:threshold — )?(.+?) as long as (?:there are )?seven or more cards (?:are )?in your graveyard$/))) { const inner = parseStatic(m[1]); if (!inner) return null; for (const o of inner) o.condition = { ...(o.condition || {}), threshold: true }; return inner; }
+  // Energy Field / Solitary Confinement / Opalescence / Aluren
+  if ((m = t.match(/^prevent all damage that would be dealt to you( by sources you don't control)?$/))) return [{ type: 'static', kind: 'preventDamageToYou', fromOpp: !!m[1], scope: { who: 'self' } }];
+  if (/^skip your draw step$/.test(t)) return [{ type: 'static', kind: 'skipDraw', scope: { who: 'self' } }];
+  if (/^each other non-aura enchantment is a creature in addition to its other types and has base power and base toughness each equal to its mana value$/.test(t)) return [{ type: 'static', kind: 'opalescence', scope: { who: 'self' } }];
+  if ((m = t.match(/^any player may cast creature spells with mana value (\d+) or less without paying their mana costs and as though they had flash$/))) return [{ type: 'static', kind: 'aluren', maxMv: Number(m[1]), scope: { who: 'self' } }];
   // "~ can't be countered" / "this spell can't be countered": a cast-time flag, harmless as a static on a permanent.
   if (/^(?:~|this spell|this creature) can't be countered(?: by spells or abilities)?$/.test(t)) return [{ type: 'static', kind: 'uncounterable', scope: { who: 'self' } }];
   // "~ gets +1/+1 and can't block" (Putrid Imp): a P/T change riding with a combat restriction.
@@ -844,6 +871,7 @@ function parseStatic(t) {
   if (/^you may play an additional land on each of your turns$/.test(t)) return [{ type: 'static', kind: 'extraLands', n: 1, who: 'you', scope: { who: 'self' } }];
   if (/^artifacts, creatures, and lands your opponents control enter tapped$/.test(t)) return [{ type: 'static', kind: 'oppEntersTapped', scope: { who: 'self' } }];
   if (/^you have no maximum hand size$/.test(t)) return [{ type: 'static', kind: 'noMaxHand', scope: { who: 'self' } }];
+  if ((m = t.match(/^your maximum hand size is (\w+)$/))) return [{ type: 'static', kind: 'maxHand', n: amt(m[1]), scope: { who: 'self' } }];   // Recycle
   if ((m = t.match(/^all (lands|(?:plains|islands|swamps|mountains|forests)) are (\d+)\/(\d+)(?: (?:white|blue|black|red|green))? creatures that are still lands$/))) {
     const scope = m[1] === 'lands' ? { who: 'all', types: ['land'] } : { who: 'all', types: ['land'], subtype: cap(m[1].replace(/s$/, '')) };
     return [{ type: 'static', kind: 'animateLand', p: Number(m[2]), t: Number(m[3]), scope }];
@@ -1073,6 +1101,15 @@ function parseAbilityLine(line, ctx) {
       condition = { gyAbove: n, directly: !!cm[2] };
       rest = cm[3].replace(/\breturn ~ to your hand\b/, 'return ~ from your graveyard to your hand').replace(/\bput ~ onto the battlefield\b/, 'return ~ from your graveyard to the battlefield');
     }
+    // Whole-ability specials: Sylvan Library, Oath of Druids, Oath of Ghouls.
+    if (/^you may draw two additional cards\. if you do, choose two cards in your hand drawn this turn\. for each of those cards, pay 4 life or put the card on top of your library$/.test(rest)) return { type: 'triggered', ...ev, effects: [{ type: 'sylvanLibrary' }], text: line };
+    if (/^that player chooses target player who controls more creatures than they do and is their opponent\. the first player may reveal cards from the top of their library until they reveal a creature card/.test(rest)) return { type: 'triggered', ...ev, effects: [{ type: 'oathDruids' }], text: line };
+    if (/^that player chooses target player whose graveyard has fewer creature cards in it than their graveyard does and is their opponent\. the first player may return a creature card from their graveyard to their hand$/.test(rest)) return { type: 'triggered', ...ev, effects: [{ type: 'oathGhouls' }], text: line };
+    if (/^that player untaps a land they control$/.test(rest)) return { type: 'triggered', ...ev, effects: [{ type: 'untapOneLand', sel: 'thatPlayer' }], text: line };   // Rising Waters
+    let zoneGy = false;
+    if ((cm = rest.match(/^if ~ is the only creature card in your graveyard, (?:you may )?return ~ to the battlefield$/))) return { type: 'triggered', ...ev, condition: { onlyCreatureInGy: true }, zone: 'graveyard', effects: [{ type: 'selfFromGraveyard', to: 'battlefield' }], optional: true, text: line };   // Nether Spirit
+    if ((cm = rest.match(/^if ~ is in your graveyard, (.+)$/))) { zoneGy = true; rest = cm[1]; }   // Genesis
+    if ((cm = rest.match(/^if there are no (\w+?)s on the battlefield, (.+)$/))) { condition = { noSubtype: capSub(cm[1]) }; rest = cm[2]; }   // Sarcomancy
     const pay = parsePay(rest);
     let body = pay.body;
     if ((cm = body.match(/^if ~ is untapped, (.+)$/))) { condition = { selfUntapped: true }; body = cm[1]; }
@@ -1083,7 +1120,7 @@ function parseAbilityLine(line, ctx) {
     if ((cm = body.match(/^that player (draws an additional card|draws a card)$/))) return { type: 'triggered', ...ev, condition, effects: [{ type: 'draw', amount: 1, sel: 'thatPlayer' }], text: line };
     const eff = parseEffects(body);
     if (!eff.effects.length) return null;
-    const zone = eff.effects.some(e => e.type === 'selfFromGraveyard') ? 'graveyard' : undefined;   // Squee & co. trigger while in the graveyard
+    const zone = zoneGy || eff.effects.some(e => e.type === 'selfFromGraveyard') ? 'graveyard' : undefined;   // Squee & co. trigger while in the graveyard
     return { type: 'triggered', ...ev, condition, zone, effects: eff.effects, optional: eff.optional, pay: pay.cost, payer: pay.payer, notes: eff.notes, text: line };
   }
   const st = parseStatic(t);
@@ -1144,8 +1181,11 @@ function parseEvent(w) {
   if ((m = w.match(/^(?:a|an) (.+?) becomes tapped$/)) && !/ or /.test(m[1])) { const k = parseTarget('each ' + m[1]); return k && k.sel === 'each' && !k.restrict.players ? { event: 'anyTapped', restrict: k.restrict } : null; }
   if ((m = w.match(/^(?:a|an) (.+?) is put into a graveyard from the battlefield(?:, if it wasn't sacrificed)?$/))) { const k = parseTarget('each ' + m[1]); return k && k.sel === 'each' && !k.restrict.players ? { event: 'anyDies', restrict: k.restrict, notSacrificed: / wasn't sacrificed/.test(w) } : null; }
   if (/^~ is dealt damage$/.test(w)) return { event: 'dealtDamage' };
+  if (/^a card is put into your graveyard from anywhere$/.test(w)) return { event: 'toYourGraveyard' };   // Energy Field
+  if ((m = w.match(/^(?:a|an|another) (\w+) enters(?: the battlefield)?$/)) && !['creature', 'land'].includes(m[1])) return { event: 'anyCreatureEtb', subtype: capSub(m[1]), other: /^another /.test(w) };   // Wirewood Savage: "whenever a Beast enters"
   if ((m = w.match(/^(a player|an opponent) casts (?:a|an) (creature|noncreature|artifact|enchantment|instant|sorcery) spell$/))) return { event: 'anyCast', kind: m[2], who: m[1] === 'an opponent' ? 'opp' : null };
   if (/^you play a land$/.test(w)) return { event: 'youPlayLand' };
+  if (/^you play a card$/.test(w)) return { event: 'youPlayCard' };   // Recycle: cast a spell or play a land
   if (/^(?:a|another) land enters(?: the battlefield)?$/.test(w)) return { event: 'anyLandEtb' };
   if (/^an opponent draws a card$/.test(w)) return { event: 'oppDraws' };
   if (/^a player taps a land for mana$/.test(w)) return { event: 'manaTap' };
