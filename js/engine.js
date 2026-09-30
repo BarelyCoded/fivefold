@@ -18,6 +18,7 @@ const emptyPool = () => ({ W: 0, U: 0, B: 0, R: 0, G: 0, C: 0 });
 const kwName = k => (typeof k === 'string' ? k : k.k);
 
 export const has = (c, kw) => !!c.cur && c.cur.kw.has(kw);
+export const colorsOf = c => (c.temp?.color ? [c.temp.color] : (c.def.colors || []));   // Wild Mongrel: "becomes the color of your choice until end of turn"
 export const power = c => (c.cur ? c.cur.p : c.def.power || 0);
 export const toughness = c => (c.cur ? c.cur.t : c.def.toughness || 0);
 export const isCreature = c => c.cur ? c.cur.types.has('creature') : c.def.types.includes('Creature');
@@ -719,6 +720,7 @@ export class Duel {
     if (d.kind === 'land') return this.sorcerySpeed(p) && p.landPlayed < this.landLimit(p);
     if (d.animateDead && !this.players.some(pl => pl.graveyard.some(c => isCreatureDef(c)))) return false;   // needs a creature in a graveyard to target
     if (this.active !== p.idx && this.ownTurnOnly()) return false;   // City of Solitude
+    if (d.castWhen && ((d.castWhen.turn === 'you' && this.active !== p.idx) || (d.castWhen.turn === 'opp' && this.active === p.idx) || (d.castWhen.steps && !d.castWhen.steps.includes(this.step)))) return false;   // Necrologia, combat tricks
     const instantSpeed = d.kind === 'instant' || has0(d, 'Flash');
     if (!instantSpeed && !this.sorcerySpeed(p)) return false;
     let cost = fromGrave ? d.keywords.find(k => k.k === 'Flashback').cost : d.cost;
@@ -734,6 +736,8 @@ export class Duel {
     } else if (opts.discardAlt && d.spell?.alternativeCost?.discardAlt) {
       const alt = d.spell.alternativeCost.discardAlt; const hand = p.hand.filter(c => c !== card);   // Foil: a named-type card + N others
       if (!hand.some(c => hasSubtype(c, alt.land)) || hand.length < 1 + alt.others) return false;
+    } else if (opts.lifeAlt && d.spell?.alternativeCost?.lifeAlt) {
+      const alt = d.spell.alternativeCost.lifeAlt; if (p.life < alt.life || !p.battlefield.some(l => hasSubtype(l, alt.land))) return false;   // Snuff Out
     } else if (!this.canPay(p, cost, opts.x || 0, opts.poolOnly)) return false;
     const fbSac = fromGrave ? d.keywords.find(k => k.k === 'Flashback')?.sacrifice : null;   // Cabal Therapy's flashback
     const add = (fbSac ? { sacrifice: fbSac } : null) || d.spell?.additionalCost || d.additionalCost;
@@ -741,6 +745,7 @@ export class Duel {
       if (add.sacrifice && !p.battlefield.some(c => this.sacMatches(c, add.sacrifice))) return false;
       if (add.discard && p.hand.length - 1 < add.discard) return false;
       if (add.life && p.life <= add.life) return false;
+      if (add.lifeX && p.life < (opts.x || 0)) return false;   // Hatred: pay X life
     }
     if (d.aura) { const spec = { sel: d.aura === 'creature' ? 'creature' : 'permanent', restrict: auraRestrict(d.aura) }; if (!this.legalTargets(p, spec, card).length) return false; }
     if (d.spell) {
@@ -787,7 +792,8 @@ export class Duel {
   // Describe everything the caster must decide before casting.
   castOptions(p, card) {
     const d = card.def;
-    const out = { targets: [], x: !!d.cost.x, kicker: d.keywords.find(k => k.k === 'Kicker')?.cost || null, buyback: d.keywords.find(k => k.k === 'Buyback')?.cost || null, modes: null, additional: d.spell?.additionalCost || d.additionalCost || null, pitch: d.spell?.alternativeCost?.pitch || null, sacLands: d.spell?.alternativeCost?.sacLands || null, bounceLands: d.spell?.alternativeCost?.bounceLands || null, discardAlt: d.spell?.alternativeCost?.discardAlt || null, flashback: card.zone === 'graveyard', cycling: d.keywords.find(k => k.k === 'Cycling')?.cost || null };
+    const lifeX = !!(d.spell?.additionalCost || d.additionalCost)?.lifeX;
+    const out = { targets: [], x: !!d.cost.x || lifeX, lifeX, kicker: d.keywords.find(k => k.k === 'Kicker')?.cost || null, buyback: d.keywords.find(k => k.k === 'Buyback')?.cost || null, modes: null, additional: d.spell?.additionalCost || d.additionalCost || null, pitch: d.spell?.alternativeCost?.pitch || null, sacLands: d.spell?.alternativeCost?.sacLands || null, bounceLands: d.spell?.alternativeCost?.bounceLands || null, discardAlt: d.spell?.alternativeCost?.discardAlt || null, lifeAlt: d.spell?.alternativeCost?.lifeAlt || null, flashback: card.zone === 'graveyard', cycling: d.keywords.find(k => k.k === 'Cycling')?.cost || null };
     if (d.spell?.modes) out.modes = { pick: d.spell.modal === 'one' ? 1 : 2, options: this.availableModes(p, card) };
     if (d.aura) out.targets.push({ text: `Enchant ${d.aura}`, options: this.legalTargets(p, { sel: 'permanent', restrict: auraRestrict(d.aura) }, card) });
     return out;
@@ -852,6 +858,7 @@ export class Duel {
       this.discardCards(p, chosen);
       this.say(`${p.name} discards ${chosen.map(c => c.def.name).join(' and ')} to cast ${d.name}.`);
     }
+    else if (opts.lifeAlt && d.spell?.alternativeCost?.lifeAlt) { const k = d.spell.alternativeCost.lifeAlt.life; p.life -= k; this.say(`${p.name} pays ${k} life to cast ${d.name}.`); }
     else this.payMana(p, this.planPayment(p, cost, opts.x || 0, opts.poolOnly));
     if (fromGrave) { const fl = d.keywords.find(k => k.k === 'Flashback')?.life; if (fl) { p.life -= fl; this.say(`${p.name} pays ${fl} life for flashback.`); } }
     const fbSac = fromGrave ? d.keywords.find(k => k.k === 'Flashback')?.sacrifice : null;
@@ -860,6 +867,7 @@ export class Duel {
       if (add.sacrifice) { const c = this.card(opts.sacrifice) || p.battlefield.filter(x => this.sacMatches(x, add.sacrifice)).sort((a, b) => a.def.cmc - b.def.cmc)[0]; if (c) { opts._sacrificed = c; this.sacrifice(c); } }
       if (add.discard) { const cs = (opts.discard || []).map(id => this.card(id)).filter(c => c && p.hand.includes(c) && c !== card); while (cs.length < add.discard) { const c = p.hand.find(x => x !== card && !cs.includes(x)); if (!c) break; cs.push(c); } this.discardCards(p, cs); }
       if (add.life) p.life -= add.life;
+      if (add.lifeX && opts.x) { p.life -= opts.x; this.say(`${p.name} pays ${opts.x} life.`); }
     }
     card.zone = 'stack'; removeFrom(p.hand, card); removeFrom(p.graveyard, card);
     const item = { id: uid++, kind: 'spell', card, controller: p.idx, targets, x: opts.x || 0, modes: opts.modes || null, kicked: !!opts.kicked, buyback: !!opts.buyback, flashback: fromGrave, effects: this.spellEffects(d, opts), sacrificed: opts._sacrificed || null };
@@ -1016,7 +1024,7 @@ export class Duel {
     for (const k of c.cur.kw) {
       if (typeof k !== 'object' || k.k !== 'Protection') continue;
       const f = k.from;
-      if (COLORS.includes(f) && (source.def?.colors || []).includes(f)) return true;
+      if (COLORS.includes(f) && (source.def ? colorsOf(source) : []).includes(f)) return true;
       if (f === 'artifacts' && source.def && isType(source, 'artifact')) return true;
       if (f === 'creatures' && source.def && isCreatureDef(source)) return true;
       if (f === 'instants' && source.def?.kind === 'instant') return true;
@@ -1030,14 +1038,14 @@ export class Duel {
     if (!r) return true;
     if (r.types && !r.types.some(t => t === 'permanent' || isType(c, t) || (t === 'creature' && isCreature(c)))) return false;
     if (r.not) for (const n of r.not) {
-      if (COLORS.includes(n) && c.def.colors.includes(n)) return false;
+      if (COLORS.includes(n) && colorsOf(c).includes(n)) return false;
       if (['artifact', 'land', 'creature', 'enchantment'].includes(n) && isType(c, n)) return false;
       if (n === 'wall' && hasSubtype(c, 'Wall')) return false;
       if (n === 'token' && c.token) return false;
       if (n === 'basic' && c.def.basic) return false;
       if (n === 'legendary' && c.def.legendary) return false;
     }
-    if (r.colors && !r.colors.some(col => c.def.colors.includes(col))) return false;
+    if (r.colors && !r.colors.some(col => colorsOf(c).includes(col))) return false;
     if (r.subtypes && !r.subtypes.some(s => hasSubtype(c, s))) return false;
     if (r.state === 'attacking' && !this.attackers.includes(c.id)) return false;
     if (r.state === 'blocking' && !Object.values(this.blocks).flat().includes(c.id)) return false;
@@ -1407,7 +1415,7 @@ export class Duel {
         this.moveTo(pick, 'library'); this.say(`${pl.name} puts a card from hand on top of their library.`);
       } break;
       // Engineered Plague: pick a creature type (from types in play, in graveyards, or in your own hand).
-      case 'chooseColorSelf': for (const s of subs.length ? subs : [{ card: src }]) { const c = s.card || src; let col; if (p.ai) col = (c.def.colors && c.def.colors[0]) || 'G'; else col = yield { kind: 'color', player: p.idx, text: `${c.def.name}: choose a color` }; c.chosenColor = col || 'C'; this.say(`${p.name} chooses ${({ W: 'white', U: 'blue', B: 'black', R: 'red', G: 'green', C: 'colorless' }[c.chosenColor] || c.chosenColor)} for ${c.def.name}.`); this.refresh(); } break;
+      case 'chooseColorSelf': for (const s of subs.length ? subs : [{ card: src }]) { const c = s.card || src; let col; if (p.ai) col = (c.def.colors && c.def.colors[0]) || 'G'; else col = yield { kind: 'color', player: p.idx, text: `${c.def.name}: choose a color` }; if (e.temp) { c.temp.color = col && col !== 'C' ? col : null; } else c.chosenColor = col || 'C'; this.say(`${p.name} chooses ${({ W: 'white', U: 'blue', B: 'black', R: 'red', G: 'green', C: 'colorless' }[c.chosenColor] || c.chosenColor)} for ${c.def.name}.`); this.refresh(); } break;
       case 'chooseType': {
         const types = new Set();
         for (const pl of this.players) for (const c of [...pl.battlefield, ...pl.graveyard, ...(pl === p ? pl.hand : [])]) if (isCreatureDef(c)) for (const st of c.def.subtypes) types.add(st);
@@ -1486,6 +1494,7 @@ export class Duel {
       case 'mill': for (const s of subs) if (s.player) { const k = this.amount(e.amount, ctx, s); for (let i = 0; i < k; i++) { const c = s.player.library.pop(); if (c) this.moveTo(c, 'graveyard'); } } break;
       case 'counter': for (const s of subs) if (s.item) {
         if (s.item.card?.def.uncounterable) { this.say(`${s.item.card.def.name} can't be countered.`); continue; }
+        if (e.maxMv != null) { const lim = ctx.item?.kicked && e.kickedMaxMv != null ? e.kickedMaxMv : e.maxMv; if ((s.item.card?.def.cmc ?? 0) > lim) { this.say(`${s.item.card.def.name} has mana value over ${lim}; it isn't countered.`); continue; } }   // Prohibit
         if (e.toTop) s.item._toTop = true;
         const ctrl = this.players[s.item.controller];
         if (e.unlessPay) { const pay = this.amount(e.unlessPay, ctx); const cost = { pips: [], generic: pay, x: false }; if (this.canPay(ctrl, cost)) { const yes = yield { kind: 'yesno', player: ctrl.idx, text: `Pay {${pay}} to stop ${s.item.card.def.name} from being countered?`, value: 'pay' }; if (yes) { this.payMana(ctrl, this.planPayment(ctrl, cost)); this.say(`${ctrl.name} pays ${pay}.`); continue; } } }
@@ -1494,6 +1503,13 @@ export class Duel {
         this.counterItem(s.item);
       } break;
       // Misdirection: change the single target of the targeted spell to a new legal target that I choose.
+      case 'madness': {   // the discarded card waits in exile: cast it for its madness cost, or it goes to the graveyard
+        if (src.zone !== 'exile') break;
+        const mad = src.def.keywords.find(k => k.k === 'Madness'); const owner = this.players[src.owner];
+        const cast = mad ? yield* this.castFromEffect(owner, src, mad.cost, 'madness') : false;
+        if (!cast && src.zone === 'exile') { this.moveTo(src, 'graveyard'); this.say(`${src.def.name} goes to the graveyard.`); }
+        break;
+      }
       case 'redirect': for (const s of subs) if (s.item && s.item.kind === 'spell') {
         const it = s.item; const spellCtrl = this.players[it.controller];
         const specs = this.targetSpecs(spellCtrl, it.card, { modes: it.modes, kicked: it.kicked });
@@ -1822,7 +1838,35 @@ export class Duel {
     if (!best) { const bf = target.battlefield.find(c => !isLand(c)); best = bf?.def.name; }
     return best || null;
   }
-  discardCards(p, cards) { for (const c of cards) if (c && p.hand.includes(c)) { this.moveTo(c, 'graveyard'); this.say(`${p.name} discards ${c.def.name}.`); } }
+  discardCards(p, cards) {
+    for (const c of cards) if (c && p.hand.includes(c)) {
+      // Madness: the card is discarded into exile, and its owner may cast it for its madness cost.
+      if (c.def.keywords.some(k => k.k === 'Madness') && c.def.kind !== 'unsupported') { this.moveTo(c, 'exile'); this.say(`${p.name} discards ${c.def.name} (madness).`); this.pushTrigger(c, { effects: [{ type: 'madness' }], text: 'Madness' }); continue; }
+      this.moveTo(c, 'graveyard'); this.say(`${p.name} discards ${c.def.name}.`);
+    }
+  }
+  // Cast a card as part of an effect (madness): pay `cost` instead of its mana cost, ignoring timing. Returns true if cast.
+  *castFromEffect(p, card, cost, how) {
+    const d = card.def;
+    if (!this.canPay(p, cost)) return false;
+    const specs = this.targetSpecs(p, card, {});
+    const legal = specs.map(s => this.legalTargets(p, s.effect, card));
+    if (legal.some(l => !l.length)) return false;
+    const yes = yield { kind: 'yesno', player: p.idx, text: `Cast ${d.name} for its ${how} cost ${costString(cost)}?`, card: card.id, value: how };
+    if (!yes) return false;
+    const targets = [];
+    for (let i = 0; i < specs.length; i++) { const pick = yield { kind: 'target', player: p.idx, text: `${d.name}: ${specs[i].text}`, options: legal[i], effect: specs[i].effect, source: card.id }; targets.push(legal[i].find(l => pick && sameRef(l, pick)) || legal[i][0]); }
+    this.payMana(p, this.planPayment(p, cost));
+    removeFrom(this.players[card.owner].exile, card); removeFrom(p.hand, card); removeFrom(p.graveyard, card);
+    card.zone = 'stack'; card.controller = p.idx;
+    const item = { id: uid++, kind: 'spell', card, controller: p.idx, targets, x: 0, modes: null, kicked: false, buyback: false, flashback: false, effects: this.spellEffects(d, {}), sacrificed: null };
+    this.stack.push(item);
+    this.say(`${p.name} casts ${d.name} for its ${how} cost${this.targetText(targets)}.`);
+    this.fx.push({ type: 'cast', id: card.id, controller: p.idx });
+    for (const t of targets) if (t.type === 'perm') this.fireEvent({ type: 'targeted', card: this.card(t.id) });
+    this.fireEvent({ type: 'cast', player: p.idx, card });
+    return true;
+  }
   tap(c) { if (c.tapped) return; c.tapped = true; this.fireEvent({ type: 'tapped', card: c }); }
   sacrifice(c) { if (!c || c.zone !== 'battlefield') return; this.say(`${this.players[c.controller].name} sacrifices ${c.def.name}.`); this.moveTo(c, 'graveyard', { sacrificed: true }); }
   destroy(c, noRegen) {
@@ -1929,8 +1973,8 @@ export class Duel {
     if (has(a, 'Flying') && !(has(b, 'Flying') || has(b, 'Reach'))) return false;
     if (has(a, 'Shadow') !== has(b, 'Shadow')) return false;
     if (has(a, 'Horsemanship') && !has(b, 'Horsemanship')) return false;
-    if (has(a, 'Fear') && !(isType(b, 'artifact') || b.def.colors.includes('B'))) return false;
-    if (has(a, 'Intimidate') && !(isType(b, 'artifact') || b.def.colors.some(c => a.def.colors.includes(c)))) return false;
+    if (has(a, 'Fear') && !(isType(b, 'artifact') || colorsOf(b).includes('B'))) return false;
+    if (has(a, 'Intimidate') && !(isType(b, 'artifact') || colorsOf(b).some(c => colorsOf(a).includes(c)))) return false;
     if (b.cur.flags.has('blockOnlyFlying') && !has(a, 'Flying')) return false;
     if (b.cur.cantBlockPower !== undefined && power(a) >= b.cur.cantBlockPower) return false;
     for (const k of a.cur.kw) if (typeof k === 'object' && k.k === 'Landwalk' && !this.ignoreLandwalk.has('all') && !this.ignoreLandwalk.has(k.land) && this.players[b.controller].battlefield.some(l => isLand(l) && hasSubtype(l, k.land) && (!k.snow || l.def.supertypes.includes('Snow')))) return false;
@@ -2062,7 +2106,7 @@ export class Duel {
       c.cur.p = cp + c.temp.p; c.cur.t = ct + c.temp.t; c.cur.kw = new Set(); c.cur.granted = []; c.cur.flags.add('noAbilities');
     }
     for (const c of all) for (const lost of c.cur.lose) for (const k of [...c.cur.kw]) if ((typeof k === 'string' ? k : k.k) === lost) c.cur.kw.delete(k);
-    for (const c of all) if (c.temp.flags?.includes('swapPT')) { const t = c.cur.p; c.cur.p = c.cur.t; c.cur.t = t; }
+    for (const c of all) if ((c.temp.flags || []).filter(f => f === 'swapPT').length % 2) { const t = c.cur.p; c.cur.p = c.cur.t; c.cur.t = t; }   // switching twice switches back
   }
   conditionHolds(cond, src) {
     const me = this.players[src.controller], opp = this.opponentOf(me);
@@ -2100,7 +2144,7 @@ export class Duel {
     if (scope.restrict) return this.matchesRestrict(c, scope.restrict, this.players[src.controller]);
     if (scope.types && !scope.types.some(t => c.cur.types.has(t))) return false;
     if (scope.subtype) { const st = scope.subtype === '$chosen' ? src.chosenType : scope.subtype; if (!st || !hasSubtype(c, st)) return false; }   // Engineered Plague reads the type chosen as it entered
-    if (scope.color && !c.def.colors.includes(scope.color)) return false;
+    if (scope.color && !colorsOf(c).includes(scope.color)) return false;
     if (scope.powerGE !== undefined && (c.cur ? c.cur.p : power(c)) < scope.powerGE) return false;
     return true;
   }
@@ -2162,7 +2206,7 @@ function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 export function has0(def, kw) { return def.keywords.some(k => (typeof k === 'string' ? k : k.k) === kw); }
 export function isCreatureDef(c) { return c.def.types.includes('Creature'); }
 export function sameRef(a, b) { return a && b && a.type === b.type && a.id === b.id && a.idx === b.idx; }
-function addCosts(a, b) { return { pips: [...a.pips, ...(b.pips || [])], generic: (a.generic || 0) + (b.generic || 0), x: a.x || b.x }; }
+export function addCosts(a, b) { return { pips: [...a.pips, ...(b.pips || [])], generic: (a.generic || 0) + (b.generic || 0), x: a.x || b.x }; }
 function auraRestrict(what) {
   const r = {};
   if (what === 'creature') r.types = ['creature'];

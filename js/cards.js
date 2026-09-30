@@ -370,6 +370,8 @@ const rules = [
   [/^choose a creature type$/, () => [{ type: 'chooseType' }]],
   [/^choose a color$/, () => [{ type: 'chooseColorSelf' }]],
   [/^~ becomes the color of your choice until end of turn$/, () => [{ type: 'chooseColorSelf', temp: true }]],
+  [/^~ gets \+(\d+)\/\+(\d+) and becomes the color of your choice until end of turn$/, m => [{ type: 'pump', p: Number(m[1]), t: Number(m[2]), sel: 'self', restrict: {} }, { type: 'chooseColorSelf', temp: true }]],   // Wild Mongrel
+  [/^switch ~'s power and toughness until end of turn$/, () => [{ type: 'flag', flag: 'swapPT', temp: true, sel: 'self' }]],   // Aquamoeba
   [/^~ becomes the creature type of your choice until end of turn$/, () => [{ type: 'chooseType', temp: true }]],
   [/^return all (.+?) to their owners' hands$/, m => { const k = T('all ' + m[1]); return k ? [{ type: 'bounceAllPerms', restrict: k.restrict }] : null; }],
   [/^damage can't be prevented this turn$/, () => [{ type: 'noPrevent' }]],
@@ -474,6 +476,8 @@ const rules = [
   [/^(?:you )?mill (\S+) cards?$/, m => [{ type: 'mill', amount: amt(m[1]), sel: 'you' }]],
   [/^change the target of target spell with a single target$/, () => [{ type: 'redirect', sel: 'spell', restrict: { spellKind: 'spell', singleTarget: true } }]],   // Misdirection
   [/^counter target (?:activated or triggered|triggered or activated|activated|triggered) ability$/, m => { const k = T(m[0].replace(/^counter /, '')); return k ? [{ type: 'counter', sel: k.sel, restrict: k.restrict }] : null; }],   // Stifle
+  [/^counter (target(?: .+?)? spell) unless its controller pays \{1\} for each card in your graveyard$/, m => { const k = T(m[1]); return k ? [{ type: 'counter', unlessPay: { calc: 'graveyard', what: 'card' }, ...k }] : null; }],   // Circular Logic
+  [/^counter (target(?: .+?)? spell) if its mana value is (\d+) or less$/, m => { const k = T(m[1]); return k ? [{ type: 'counter', unlessPay: null, maxMv: Number(m[2]), ...k }] : null; }],   // Prohibit
   [/^counter (target(?: .+?)? spell)(?: unless its controller pays \{(\w+)\})?$/, m => { const k = T(m[1]); if (!k) return null; return [{ type: 'counter',unlessPay: m[2] ? (m[2].toUpperCase() === 'X' ? 'X' : Number(m[2])) : null, ...k }]; }],
   [/^counter (target spell with mana value x)$/, m => { const k = T(m[1]); return k ? [{ type: 'counter', unlessPay: null, note: 'X must equal the spell\'s mana value; the game does not enforce it', ...k }] : null; }],
   [/^counter (target(?: .+?)? spell)\. if that spell is countered this way, put it on top of its owner's library instead of into that player's graveyard$/, m => { const k = T(m[1]); return k ? [{ type: 'counter', toTop: true, unlessPay: null, ...k }] : null; }],
@@ -720,6 +724,26 @@ function parseAbilityCost(text) {
   return cost;
 }
 
+// "Cast this spell only …" windows: the steps it may be cast in and whose turn it must be.
+const COMBAT_STEPS = ['beginCombat', 'attackers', 'blockers', 'firstStrike', 'damage', 'endCombat'];
+function castWindow(t) {
+  const W = {
+    'during combat': { steps: COMBAT_STEPS },
+    'during the declare blockers step': { steps: ['blockers'] },
+    'during the declare attackers step': { steps: ['attackers'] },
+    'during combat before blockers are declared': { steps: ['beginCombat', 'attackers'] },
+    'during combat after blockers are declared': { steps: ['blockers', 'firstStrike', 'damage', 'endCombat'] },
+    'during combat on your turn before blockers are declared': { steps: ['beginCombat', 'attackers'], turn: 'you' },
+    'before the combat damage step': { steps: ['upkeep', 'draw', 'main1', 'beginCombat', 'attackers', 'blockers'] },
+    'after combat': { steps: ['main2', 'end'] },
+    'during your turn': { turn: 'you' },
+    "during an opponent's turn": { turn: 'opp' },
+    "during an opponent's turn, before attackers are declared": { turn: 'opp', steps: ['upkeep', 'draw', 'main1', 'beginCombat'] },
+    'during your end step': { turn: 'you', steps: ['end'] },
+  };
+  return W[t] || null;
+}
+
 // ---- keyword lines ------------------------------------------------------------------
 function parseKeywordLine(line, def) {
   // Returns true if the whole line was keywords.
@@ -755,6 +779,7 @@ function parseKeywordLine(line, def) {
     else if ((m = p.match(/^Flashback (\{.+\})$/))) found.push({ k: 'Flashback', cost: parseCost(m[1]) });
     else if ((m = p.match(/^Flashback—sacrifice (?:a|an) (\w+)$/i))) found.push({ k: 'Flashback', cost: { pips: [], generic: 0, x: false }, sacrifice: m[1].toLowerCase() });   // Cabal Therapy
     else if ((m = p.match(/^Buyback (\{.+\})$/))) found.push({ k: 'Buyback', cost: parseCost(m[1]) });
+    else if ((m = p.match(/^Madness (\{.+\})$/))) found.push({ k: 'Madness', cost: parseCost(m[1]) });
     else if ((m = p.match(/^Echo (\{.+\})$/))) found.push({ k: 'Echo', cost: parseCost(m[1]) });
     else if ((m = p.match(/^Equip (\{.+\}|\d+)$/))) found.push({ k: 'Equip', cost: parseCost(m[1].startsWith('{') ? m[1] : `{${m[1]}}`) });
     else if ((m = p.match(/^Enchant (creature|permanent|land|artifact|enchantment|wall|creature you control|land you control|artifact an opponent controls|creature an opponent controls|player|opponent)$/i))) found.push({ k: 'Enchant', what: m[1].toLowerCase() });
@@ -1243,6 +1268,7 @@ export function compile(c) {
     }
     inModes = false;
     let m;
+    if (/^as an additional cost to cast (?:this spell|~), pay x life\.?$/.test(lower)) { additionalCost = { lifeX: true }; continue; }   // Hatred, Necrologia
     if ((m = lower.match(/^as an additional cost to cast (?:this spell|~), (sacrifice (?:a|an) (creature|land|artifact|permanent|goblin|\w+)|discard (?:a|\w+) cards?|pay (\d+) life|exile (?:a|an) \w+ card from your graveyard)\.?$/))) {
       if (m[2]) additionalCost = { sacrifice: m[2] };
       else if (/^discard/.test(m[1])) additionalCost = { discard: amt(m[1].split(' ')[1]) };
@@ -1251,14 +1277,20 @@ export function compile(c) {
       continue;
     }
     if ((m = lower.match(/^you may (?:pay (\d+) life and )?(?:exile|remove) (?:a|an) (white|blue|black|red|green) card from your hand rather than pay (?:this spell's|~'s) mana cost\.?$/))) { alternativeCost = { pitch: COLOR_WORD[m[2]], life: m[1] ? Number(m[1]) : 0 }; continue; }
+    // Snuff Out: "If you control a Swamp, you may pay 4 life rather than pay this spell's mana cost."
+    if ((m = lower.match(/^if you control (?:a|an) (plains|island|swamp|mountain|forest), you may pay (\d+) life rather than pay (?:this spell's|~'s) mana cost\.?$/))) { alternativeCost = { ...(alternativeCost || {}), lifeAlt: { life: Number(m[2]), land: cap(m[1]) } }; continue; }
     // Fireblast: "You may sacrifice two Mountains rather than pay this spell's mana cost."
     if ((m = lower.match(/^you may sacrifice (\w+) (plains|islands|swamps|mountains|forests) rather than pay (?:this spell's|~'s) mana cost\.?$/))) { alternativeCost = { ...(alternativeCost || {}), sacLands: { land: cap(m[2].replace(/s$/, '')), n: amt(m[1]) || 1 } }; continue; }
     // Daze / Gush: "You may return an/two Island(s) you control to its/their owner's hand rather than pay this spell's mana cost."
     if ((m = lower.match(/^you may return (a|an|\w+) (plains|island|swamp|mountain|forest)s? you control to (?:its owner's|their owner's|your) hand rather than pay (?:this spell's|~'s) mana cost\.?$/))) { alternativeCost = { ...(alternativeCost || {}), bounceLands: { land: cap(m[2]), n: amt(m[1]) || 1 } }; continue; }
     // Foil: "You may discard an Island card and another card rather than pay this spell's mana cost."
     if ((m = lower.match(/^you may discard (?:a|an) (plains|island|swamp|mountain|forest) card and another card rather than pay (?:this spell's|~'s) mana cost\.?$/))) { alternativeCost = { ...(alternativeCost || {}), discardAlt: { land: cap(m[1]), others: 1 } }; continue; }
+    // Prohibit: "If this spell was kicked, counter that spell if its mana value is 4 or less instead."
+    if ((m = lower.match(/^if (?:~|this spell) was kicked, counter that spell if its mana value is (\d+) or less instead\.?$/)) && spellEffects.some(e => e.type === 'counter' && e.maxMv != null)) { spellEffects.find(e => e.type === 'counter').kickedMaxMv = Number(m[1]); continue; }
     if ((m = lower.match(/^if (?:~|this spell) was kicked, (.+)$/))) { const eff = parseEffects(m[1]); if (eff.effects.length) kickedEffects = eff.effects; else def.notes.push('Kicker effect ignored'); continue; }
     if ((m = lower.match(/^if ~ was kicked, it enters(?: the battlefield)? with (\S+) ([+-]1\/[+-]1) counters? on it$/))) { kickedEffects = [{ type: 'counters', kind: m[2], amount: amt(m[1]), sel: 'self' }]; continue; }
+    // "Cast this spell only during combat / your end step / an opponent's turn …" (Necrologia, Hydroblast-era combat tricks)
+    if ((m = lower.match(/^cast (?:this spell|~) only (during|before|after) ([^.]+?)\.?$/))) { const w = castWindow(m[1] + ' ' + m[2]); if (w) { def.castWhen = w; continue; } }
     if (parseKeywordLine(line, def)) continue;
     if (def.unsupportedReason) break;
     // Instant / sorcery text is spell effects; permanents have abilities.

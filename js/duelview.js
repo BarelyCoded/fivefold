@@ -69,6 +69,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     if (card.def.spell?.alternativeCost?.sacLands && duel.canCast(me, card, { sacLands: true })) return true;
     if (card.def.spell?.alternativeCost?.bounceLands && duel.canCast(me, card, { bounceLands: true })) return true;
     if (card.def.spell?.alternativeCost?.discardAlt && duel.canCast(me, card, { discardAlt: true })) return true;
+    if (card.def.spell?.alternativeCost?.lifeAlt && duel.canCast(me, card, { lifeAlt: true })) return true;
     return false;
   }
   function hasAnyPlay() {
@@ -581,7 +582,11 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
       if (can) { const canPayMana = duel.canPay(me, card.def.cost); ui.menu = { title: `Discard ${info.discardAlt.land} and ${info.discardAlt.others} other card instead of paying?`, items: [{ label: `Discard ${info.discardAlt.land} + ${info.discardAlt.others}`, primary: !canPayMana, action: () => { opts.discardAlt = true; ui.menu = null; next(w); } }, ...(canPayMana ? [{ label: 'Pay mana instead', primary: true, action: () => { opts.discardAlt = false; ui.menu = null; next(w); } }] : [])] }; render(); return; }
       opts.discardAlt = false;
     }
-    if (info.x && !('x' in opts)) { let maxX = 0; for (let x = 20; x >= 0; x--) if (duel.canPay(me, card.def.cost, x)) { maxX = x; break; } w.maxX = maxX; w.stage = 'x'; render(); return; }
+    if (info.lifeAlt && !('lifeAlt' in opts)) {   // Snuff Out: pay life rather than mana
+      if (duel.canCast(me, card, { ...opts, lifeAlt: true })) { const canPayMana = duel.canPay(me, card.def.cost); ui.menu = { title: `Pay ${info.lifeAlt.life} life instead of ${costString(card.def.cost)}?`, items: [{ label: `Pay ${info.lifeAlt.life} life`, primary: !canPayMana, action: () => { opts.lifeAlt = true; ui.menu = null; next(w); } }, ...(canPayMana ? [{ label: 'Pay mana instead', primary: true, action: () => { opts.lifeAlt = false; ui.menu = null; next(w); } }] : [])] }; render(); return; }
+      opts.lifeAlt = false;
+    }
+    if (info.x && !('x' in opts)) { let maxX = 0; if (info.lifeX) maxX = Math.max(0, me.life - 1); else for (let x = 20; x >= 0; x--) if (duel.canPay(me, card.def.cost, x)) { maxX = x; break; } w.maxX = maxX; w.stage = 'x'; render(); return; }
     if (info.additional && !w.extraDone) {
       const a = info.additional;
       if (a.sacrifice && !('sacrifice' in opts)) { const cands = me.battlefield.filter(c => isType(c, a.sacrifice)); ui.menu = { title: `Sacrifice a ${a.sacrifice}`, items: cands.map(c => ({ label: c.def.name, action: () => { opts.sacrifice = c.id; ui.menu = null; next(w); } })) }; render(); return; }

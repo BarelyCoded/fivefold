@@ -1,5 +1,5 @@
 // Opponent AI for the rules core: priority decisions and choice answers. Greedy, no lookahead.
-import { has, power, toughness, isCreature, isLand, isType, has0, isCreatureDef, abilitiesOf } from './engine.js';
+import { has, power, toughness, isCreature, isLand, isType, has0, isCreatureDef, abilitiesOf, addCosts } from './engine.js';
 import { needsTarget } from './cards.js';
 import { planFor } from './ai-plans.js';
 
@@ -93,7 +93,12 @@ function buildCastOpts(duel, p, card) {
   if (info.sacLands && !duel.canPay(p, d.cost) && duel.canCast(p, card, { sacLands: true })) opts.sacLands = true;   // Fireblast for free
   if (info.bounceLands && !duel.canPay(p, d.cost) && duel.canCast(p, card, { bounceLands: true })) opts.bounceLands = true;   // Daze / Gush for free
   if (info.discardAlt && !duel.canPay(p, d.cost) && duel.canCast(p, card, { discardAlt: true })) opts.discardAlt = true;   // Foil for free
-  if (info.x) {
+  if (info.lifeAlt && !duel.canPay(p, d.cost) && p.life > 8 && duel.canCast(p, card, { lifeAlt: true })) opts.lifeAlt = true;   // Snuff Out for free
+  if (info.lifeX) {   // Hatred / Necrologia: X is paid in life — spend what can safely be spared
+    const spend = Math.min(6, p.life - 8);
+    if (spend <= 0) return null;
+    opts.x = spend;
+  } else if (info.x) {
     const spend = maxX(duel, p, d.cost);
     if (spend <= 0) return null;
     opts.x = spend;
@@ -250,7 +255,10 @@ function abilityOpts(duel, p, c, i) {
   const opts = { targets: [] };
   if (info.x) { opts.x = maxX(duel, p, ab.cost.mana); if (!opts.x) return null; }
   if (info.sacrifice) { const s = info.sacrifice.map(id => duel.card(id)).sort((a, b) => value(a) - value(b))[0]; if (!s) return null; opts.sacrifice = s.id; }
-  if (info.discard) { opts.discard = p.hand.slice().sort((a, b) => cardValue(a) - cardValue(b)).slice(0, ab.cost.discard).map(c => c.id); }
+  if (info.discard) {   // pitch the least valuable card — or a madness card we can then cast cheaply (Wild Mongrel + Arrogant Wurm)
+    const mad = c => { const k = c.def.keywords.find(x => x.k === 'Madness'); return k && duel.canPay(p, addCosts(k.cost, ab.cost.mana)) ? -10 : 0; };
+    opts.discard = p.hand.slice().sort((a, b) => cardValue(a) + mad(a) - cardValue(b) - mad(b)).slice(0, ab.cost.discard).map(c => c.id);
+  }
   for (const t of info.targets) { const pick = pickTarget(duel, p, t.effect, t.options, opts.x || 0); if (!pick) return null; opts.targets.push(pick); }
   return opts;
 }

@@ -95,5 +95,62 @@ section('Soulless One counts Zombies on the battlefield and Zombie cards in grav
 { const d = newDuel(); mainPhase(d); const so = place(d, D('Soulless One'), 0); place(d, D('Gravedigger'), 1); gy(d, D('Gravedigger'), 0); gy(d, bears(), 1); d.refresh();
   ok(power(so) === 3, `Soulless One is ${power(so)}/${toughness(so)} (itself + Gravedigger + one in the yard)`); }
 
+section('Hatred: pay X life, target creature gets +X/+0');
+{ const d = newDuel(); mainPhase(d); const b = place(d, bears(), 0); const h = hand(d, D('Hatred'), 0); pool(d, 0, { B: 2, C: 3 });
+  ok(!d.canCast(d.players[0], h, { x: 25, targets: [{ type: 'perm', id: b.id }] }), 'cannot pay more life than you have');
+  ok(d.cast(d.players[0], h, { x: 7, targets: [{ type: 'perm', id: b.id }] }), 'cast Hatred for X=7'); ok(d.players[0].life === 13, `paid 7 life (${d.players[0].life})`);
+  processAndResolve(d); ok(power(b) === 9, `Bears are ${power(b)}/${toughness(b)}`); }
+
+section('Necrologia: only in your end step; pay X life, draw X');
+{ const d = newDuel(); mainPhase(d); for (let k = 0; k < 6; k++) lib(d, bears(), 0); const n = hand(d, D('Necrologia'), 0); pool(d, 0, { B: 2, C: 3 });
+  ok(!d.canCast(d.players[0], n, { x: 3 }), 'not castable in the main phase'); d.step = 'end';
+  ok(d.cast(d.players[0], n, { x: 3 }), 'castable in my end step'); processAndResolve(d);
+  ok(d.players[0].life === 17 && d.players[0].hand.length === 3, `paid 3, drew 3 (${d.players[0].life}, hand ${d.players[0].hand.length})`); }
+
+section('Snuff Out: pay 4 life with a Swamp');
+{ const d = newDuel(); mainPhase(d); const b = place(d, bears(), 1); const so = hand(d, D('Snuff Out'), 0); pool(d, 0, {});
+  ok(!d.canCast(d.players[0], so, { lifeAlt: true, targets: [{ type: 'perm', id: b.id }] }), 'needs a Swamp');
+  place(d, D('Swamp'), 0); ok(d.cast(d.players[0], so, { lifeAlt: true, targets: [{ type: 'perm', id: b.id }] }), 'cast for 4 life');
+  processAndResolve(d); ok(d.players[0].life === 16 && b.zone === 'graveyard', `paid 4, creature destroyed (${d.players[0].life}, ${b.zone})`); }
+
+section('Prohibit: mana value 2 or less, 4 or less if kicked');
+{ const mk = (kicked, victim) => { const d = newDuel(); mainPhase(d); d.active = 1; d.priority = 1; const v = hand(d, D(victim), 1); pool(d, 1, { W: 2, U: 2, B: 2, R: 2, G: 2, C: 4 });
+    d.cast(d.players[1], v, {}); const item = d.stack[d.stack.length - 1]; d.priority = 0; const pr = hand(d, D('Prohibit'), 0); pool(d, 0, { U: 1, C: 3 });
+    d.cast(d.players[0], pr, { kicked, targets: [{ type: 'spell', id: item.id }] }); processAndResolve(d); return v.zone; };
+  ok(mk(false, 'Grizzly Bears') === 'graveyard', 'counters a 2-drop unkicked');
+  ok(mk(false, 'Hill Giant') === 'battlefield', 'does not counter a 4-drop unkicked');
+  ok(mk(true, 'Hill Giant') === 'graveyard', 'kicked counters a 4-drop'); }
+
+section('Circular Logic: counter unless they pay 1 per card in my graveyard');
+{ const d = newDuel(); mainPhase(d); d.active = 1; d.priority = 1; const b = hand(d, bears(), 1); pool(d, 1, { G: 1, C: 3 });
+  d.cast(d.players[1], b, {}); const item = d.stack[d.stack.length - 1]; for (let k = 0; k < 3; k++) gy(d, D('Island'), 0);
+  d.priority = 0; const cl = hand(d, D('Circular Logic'), 0); pool(d, 0, { U: 1, C: 2 });
+  d.cast(d.players[0], cl, { targets: [{ type: 'spell', id: item.id }] }); processAndResolve(d);
+  ok(b.zone === 'graveyard', `they had 2 floating against a tax of 3: countered (${b.zone})`); }
+
+section('Madness: discarding Arrogant Wurm lets me cast it for {2}{G}');
+{ const d = newDuel(); mainPhase(d); const wm = place(d, D('Wild Mongrel'), 0); const aw = hand(d, D('Arrogant Wurm'), 0); pool(d, 0, { G: 1, C: 2 });
+  const i = abIdx(wm.def, a => a.type === 'activated');
+  ok(d.activate(d.players[0], wm, i, { discard: [aw.id] }), 'Mongrel discards the Wurm'); ok(aw.zone === 'exile', `Wurm waits in exile (${aw.zone})`);
+  processAndResolve(d); ok(aw.zone === 'battlefield', `Wurm cast for its madness cost (${aw.zone})`); ok(d.players[0].pool.G === 0, 'paid the madness cost');
+  ok(power(wm) === 3, `Mongrel pumped (${power(wm)})`); }
+
+section('Madness declined / unaffordable goes to the graveyard');
+{ const d = newDuel(); mainPhase(d); const wm = place(d, D('Wild Mongrel'), 0); const aw = hand(d, D('Arrogant Wurm'), 0); pool(d, 0, {});
+  d.activate(d.players[0], wm, abIdx(wm.def, a => a.type === 'activated'), { discard: [aw.id] }); processAndResolve(d);
+  ok(aw.zone === 'graveyard', `no mana: Wurm is put into the graveyard (${aw.zone})`); }
+
+section('Wild Mongrel changes color: dodges a colour-restricted removal');
+{ const d = newDuel(); mainPhase(d); const wm = place(d, D('Wild Mongrel'), 0); hand(d, bears(), 0);
+  d.activate(d.players[0], wm, abIdx(wm.def, a => a.type === 'activated'), {});
+  const g = d.resolveTop(); let r = g.next(); while (!r.done) r = g.next(r.value.kind === 'color' ? 'B' : undefined); d.refresh();
+  const tb = d.legalTargets(d.players[1], { sel: 'creature', restrict: { types: ['creature'], not: ['B'] } }, null);
+  ok(wm.temp.color === 'B' && !tb.some(t => t.id === wm.id), `black Mongrel can't be hit by a nonblack-only spell (${wm.temp.color})`); }
+
+section('Aquamoeba switches power and toughness (twice = back)');
+{ const d = newDuel(); mainPhase(d); const aq = place(d, D('Aquamoeba'), 0); hand(d, bears(), 0); hand(d, bears(), 0); const i = abIdx(aq.def, a => a.type === 'activated');
+  d.activate(d.players[0], aq, i, {}); processAndResolve(d); d.refresh(); ok(power(aq) === 3 && toughness(aq) === 1, `3/1 after one switch (${power(aq)}/${toughness(aq)})`);
+  d.activate(d.players[0], aq, i, {}); processAndResolve(d); d.refresh(); ok(power(aq) === 1 && toughness(aq) === 3, `1/3 after two (${power(aq)}/${toughness(aq)})`); }
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
