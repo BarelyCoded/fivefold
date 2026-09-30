@@ -897,6 +897,7 @@ export class Duel {
     if (ab.condition && !this.conditionHolds(ab.condition, card)) return false;   // threshold etc.
     if (ab.timing === 'upkeep' && !(this.step === 'upkeep' && this.active === p.idx)) return false;
     if (c.tapCreature && !p.battlefield.some(x => isCreature(x) && !x.tapped && x !== card)) return false;
+    if (c.returnPerm && !p.battlefield.some(x => this.sacMatches(x, c.returnPerm))) return false;
     if ((c.mana.pips.length || c.mana.generic || c.mana.x) && !this.canPay(p, c.mana, opts.x || 0)) return false;
     for (const e of ab.effects) if (needsTarget(e) && !this.legalTargets(p, e, card).length) return false;
     return true;
@@ -929,6 +930,10 @@ export class Duel {
     if (c.exileTop) for (let k = 0; k < c.exileTop; k++) { const t = p.library.pop(); if (t) { t.zone = 'limbo'; this.moveTo(t, 'exile'); } }
     if (c.exileFromGraveyard) { const chosen = [].concat(opts.exileFromGraveyard ?? []).map(id => this.card(id)).filter(x => x && p.graveyard.includes(x)); const rest = p.graveyard.filter(x => !chosen.includes(x)); while (chosen.length < c.exileFromGraveyard && rest.length) chosen.push(rest.shift()); for (const x of chosen) this.moveTo(x, 'exile'); }
     if (c.returnSelf) this.moveTo(card, 'hand');   // Recurring Nightmare
+    if (c.returnPerm) {   // Quirion Ranger: bounce a (preferably tapped) Forest; Wirewood Symbiote: an Elf
+      const r = this.card(opts.returnPerm) || p.battlefield.filter(x => this.sacMatches(x, c.returnPerm)).sort((a, b) => (b.tapped ? 1 : 0) - (a.tapped ? 1 : 0) || a.def.cmc - b.def.cmc)[0];
+      if (r && r.controller === p.idx && r.zone === 'battlefield' && this.sacMatches(r, c.returnPerm)) { this.moveTo(r, 'hand'); this.say(`${p.name} returns ${r.def.name} to hand.`); }
+    }
     if (c.tapLand) { const l = this.card(opts.tapLand) || p.battlefield.find(x => isLand(x) && !x.tapped && hasSubtype(x, c.tapLand)); if (l) this.tap(l); }
     if (c.discard) { const cs = (opts.discard || []).map(id => this.card(id)).filter(x => x && p.hand.includes(x)); while (cs.length < c.discard) { const x = p.hand.find(h => !cs.includes(h)); if (!x) break; cs.push(x); } this.discardCards(p, cs); }
     if (c.removeCounter) card.counters[c.removeCounter.kind] -= c.removeCounter.n;
@@ -1163,7 +1168,16 @@ export class Duel {
       case 'thatOpp': return ctx.thatPlayer !== undefined ? [{ player: this.opponentOf(this.players[ctx.thatPlayer]) }] : [];   // "each of that player's opponents"
       case 'castSpell': { const cc = ctx.item?.ev?.card; const it = cc && this.stack.find(x => x.card === cc); return it ? [{ item: it }] : []; }
       case 'sacrificed': return ctx.item?.sacrificed ? [{ card: ctx.item.sacrificed }] : [];
-      case 'prevController': { const s = ctx.prev ? this.deref(ctx.prev) : ctx.item?.fixed ? { card: ctx.item.fixed } : null; return s?.card ? [{ player: this.players[s.card.controller] }] : []; }
+      case 'prevController': case 'prevOwner': {
+        // Undermine / Path of Peace riders: the referenced spell may already be countered, the permanent destroyed.
+        if ((ctx.prev?.type === 'spell' || ctx.prev?.type === 'ability') && ctx.prevItemController !== undefined) return [{ player: this.players[ctx.prevItemController] }];
+        const s = ctx.prev ? this.deref(ctx.prev) : null;
+        if (s?.item) return [{ player: this.players[s.item.controller] }];
+        const c = s?.card || this.prevCard(ctx);
+        if (!c) return [];
+        const who = e.sel === 'prevOwner' ? c.owner : (c.controller ?? c.owner);
+        return [{ player: this.players[who] }];
+      }
       case 'prev': {
         // "that creature" / "its controller": the previous target, even if it has since left the battlefield
         if (ctx.prev) { if (ctx.prev.type === 'perm') { const c = this.card(ctx.prev.id); return c ? [{ card: c }] : []; } return [this.deref(ctx.prev)].filter(Boolean); }
@@ -1476,6 +1490,7 @@ export class Duel {
         const ctrl = this.players[s.item.controller];
         if (e.unlessPay) { const pay = this.amount(e.unlessPay, ctx); const cost = { pips: [], generic: pay, x: false }; if (this.canPay(ctrl, cost)) { const yes = yield { kind: 'yesno', player: ctrl.idx, text: `Pay {${pay}} to stop ${s.item.card.def.name} from being countered?`, value: 'pay' }; if (yes) { this.payMana(ctrl, this.planPayment(ctrl, cost)); this.say(`${ctrl.name} pays ${pay}.`); continue; } } }
         if (e.drawController) this.delayed.push({ player: s.item.controller, type: 'draw', amount: e.drawController });
+        ctx.prevItemController = s.item.controller;
         this.counterItem(s.item);
       } break;
       // Misdirection: change the single target of the targeted spell to a new legal target that I choose.
@@ -2093,6 +2108,8 @@ export class Duel {
     const pl = this.players[c.controller];
     const w = cda.count;
     if (cda.restrict) return (cda.base || 0) + this.permanents().filter(x => !(cda.restrict.other && x === c) && this.matchesRestrict(x, cda.restrict, pl)).length;
+    if (typeof w === 'string' && w.startsWith('bfgy:')) { const sub = cap(w.slice(5)); return this.permanents().filter(x => hasSubtype(x, sub)).length + this.players.reduce((a, x) => a + x.graveyard.filter(g => (g.def.subtypes || []).includes(sub)).length, 0); }
+    if (typeof w === 'string' && w.startsWith('gy:')) { const [, who, what] = w.split(':'); const pls = who === 'all' ? this.players : [pl]; return pls.reduce((a, x) => a + x.graveyard.filter(g => matchCardWhat(g, what)).length, 0); }
     if (w === 'cards in hand') return pl.hand.length;
     if (w === 'cards in all hands') return this.players.reduce((a, x) => a + x.hand.length, 0);   // Multani
     if (w === 'creature cards in graveyards') return this.players.reduce((s, p) => s + p.graveyard.filter(isCreatureDef).length, 0);
@@ -2206,6 +2223,6 @@ export function costText(c) {
   if (c.mana && (c.mana.pips.length || c.mana.generic || c.mana.x)) { if (c.mana.x) parts.push('X'.repeat(c.mana.x)); if (c.mana.generic) parts.push(String(c.mana.generic)); parts.push(...c.mana.pips.map(p => p.join('/'))); }
   const s = parts.join('');
   const extra = [];
-  if (c.tap) extra.push('T'); if (c.sacSelf) extra.push('sacrifice'); if (c.sacrifice) extra.push('sacrifice a ' + c.sacrifice); if (c.discard) extra.push('discard ' + c.discard); if (c.life) extra.push(c.life + ' life');
+  if (c.tap) extra.push('T'); if (c.sacSelf) extra.push('sacrifice'); if (c.sacrifice) extra.push('sacrifice a ' + c.sacrifice); if (c.discard) extra.push('discard ' + c.discard); if (c.life) extra.push(c.life + ' life'); if (c.returnPerm) extra.push('return a ' + c.returnPerm);
   return [s, ...extra].filter(Boolean).join(', ') || '0';
 }

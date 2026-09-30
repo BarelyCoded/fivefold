@@ -467,6 +467,7 @@ const rules = [
   [/^(?:you )?lose (\S+) life$/, m => [{ type: 'lose', amount: amt(m[1]), sel: 'you' }]],
   [/^(target player|target opponent|each player|each opponent) gains (\S+) life$/, m => { const k = T(m[1]); return k ? [{ type: 'gain', amount: amt(m[2]), ...k }] : null; }],
   [/^(target player|target opponent|each player|each opponent) loses (\S+) life$/, m => { const k = T(m[1]); return k ? [{ type: 'lose', amount: amt(m[2]), ...k }] : null; }],
+  [/^(its|that spell's|that creature's|that permanent's) (controller|owner) (loses|gains) (\S+) life$/, m => [{ type: m[3] === 'loses' ? 'lose' : 'gain', amount: amt(m[4]), sel: m[2] === 'owner' ? 'prevOwner' : 'prevController' }]],
   [/^its controller gains life equal to its power$/, () => [{ type: 'gainEqualPower', sel: 'prev' }]],
   [/^you gain life equal to (?:the damage dealt this way|its power|that creature's power)$/, () => [{ type: 'gainEqualPrev' }]],
   [/^(target player|target opponent|each player|each opponent|that player) mills (\S+) cards?$/, m => { const k = T(m[1]); return k ? [{ type: 'mill', amount: amt(m[2]), ...k }] : null; }],
@@ -481,6 +482,8 @@ const rules = [
     const what = m[1].replace(/ or /g, '|'); const to = m[2].startsWith('into') ? 'hand' : m[2].startsWith('on top') ? 'top' : 'battlefield';
     return [{ type: 'tutor', what, to, tapped: !!m[3] }];
   }],
+  // Enlightened / Worldly Tutor: "Search your library for a X card, reveal it, then shuffle and put that card on top."
+  [/^search your library for (?:a|an) (.+?) card, reveal (?:it|that card), then shuffle and put (?:that|the) card on top(?: of your library)?$/, m => [{ type: 'tutor', what: m[1].replace(/ or /g, '|'), to: 'top' }]],
   // Mercenary / Rebel chains: "Search your library for a Mercenary permanent card with mana value N or less, put it onto the battlefield, then shuffle."
   [/^search your library for (?:a|an) (.+?) permanent card with mana value (\d+) or less, put it onto the battlefield, then shuffle$/, m => [{ type: 'tutor', what: m[1].replace(/ or /g, '|'), maxMv: Number(m[2]), to: 'battlefield' }]],
   // "Search your library for a card named ~, reveal it, put it into your hand, then shuffle." (Daru Cavalier, Avarax, Screaming Seahawk).
@@ -701,6 +704,7 @@ function parseAbilityCost(text) {
     else if (/^exile ~$/i.test(p)) cost.exileSelf = true;
     else if ((m = p.match(/^put a ([+-]\d+\/[+-]\d+|\w+) counter on ~$/i))) cost.addCounter = { kind: m[1].toLowerCase(), n: 1 };   // Wall of Roots
     else if (/^return ~ to its owner's hand$/i.test(p)) cost.returnSelf = true;   // Recurring Nightmare
+    else if ((m = p.match(/^return (?:a|an) ([a-z]+) you control to its owner's hand$/i))) cost.returnPerm = m[1].toLowerCase();   // Quirion Ranger, Wirewood Symbiote
     else if ((m = p.match(/^exile the top (\w+) cards? of your library$/i))) cost.exileTop = amt(m[1].toLowerCase()) || 1;
     else if ((m = p.match(/^tap an untapped (plains|island|swamp|mountain|forest) you control$/i))) cost.tapLand = cap(m[1].toLowerCase());
     else if ((m = p.match(/^remove any number of (\w+) counters from ~$/i))) cost.removeCounter = { kind: m[1].toLowerCase(), n: 'all' };
@@ -895,6 +899,8 @@ function parseStatic(t) {
     return [{ type: 'static', kind: 'cda', count: m[3], restrict: k.restrict, base: Number(m[2] || 0), which: m[1].startsWith('power and') ? 'both' : m[1].startsWith('power') ? 'p' : 't', scope: { who: 'self' } }];
   }
   if ((m = t.match(/^~'s power and toughness are each equal to the number of (.+?) you control$/))) return [{ type: 'static', kind: 'cda', count: m[1], scope: { who: 'self' } }];
+  if ((m = t.match(/^~'s power and toughness are each equal to the number of (\w+?)s on the battlefield plus the number of \1 cards in all graveyards$/))) return [{ type: 'static', kind: 'cda', count: 'bfgy:' + m[1], scope: { who: 'self' } }];   // Soulless One
+  if ((m = t.match(/^~'s power and toughness are each equal to the number of ((?:(?!the number of).)+?) cards? in (all graveyards|your graveyard)$/))) return [{ type: 'static', kind: 'cda', count: 'gy:' + (m[2] === 'all graveyards' ? 'all' : 'you') + ':' + m[1], scope: { who: 'self' } }];   // Terravore, Mortivore
   if ((m = t.match(/^~'s power and toughness are each equal to the number of cards in your hand$/))) return [{ type: 'static', kind: 'cda', count: 'cards in hand', scope: { who: 'self' } }];
   if ((m = t.match(/^~'s power and toughness are each equal to the total number of cards in all players' hands$/))) return [{ type: 'static', kind: 'cda', count: 'cards in all hands', scope: { who: 'self' } }];   // Multani, Maro-Sorcerer
   if ((m = t.match(/^~'s power is equal to the number of creature cards in all graveyards and its toughness is equal to that number plus 1$/))) return [{ type: 'static', kind: 'cda', count: 'creature cards in graveyards', plusT: 1, scope: { who: 'self' } }];
@@ -944,7 +950,7 @@ function parseAbilityLine(line, ctx) {
   // "Threshold — {R}, {T}, Sacrifice ~: ..." — the ability word is decoration; the condition rides at the end.
   const thresholdWord = /^threshold — /i.test(t); if (thresholdWord) t = t.replace(/^threshold — /i, '');
   // activated: "cost: effect"
-  if ((m = t.match(/^((?:(?:\{[^}]+\})+|[^:{}]+?)(?:,\s*(?:(?:\{[^}]+\})+|[^:{}]+?))*):\s+(.+)$/)) && /\{|sacrifice|discard|pay|remove|tap|put a/i.test(m[1])) {
+  if ((m = t.match(/^((?:(?:\{[^}]+\})+|[^:{}]+?)(?:,\s*(?:(?:\{[^}]+\})+|[^:{}]+?))*):\s+(.+)$/)) && /\{|sacrifice|discard|pay|remove|tap|put a|return|exile/i.test(m[1])) {
     const cost = parseAbilityCost(m[1]);
     if (!cost) return null;
     let body = m[2];
@@ -984,6 +990,8 @@ function parseAbilityLine(line, ctx) {
     body = body.replace(/\s*activate only during your upkeep\.?$/i, () => { timing = 'upkeep'; return ''; });
     // mana ability
     let mm;
+    // "Add {G} for each creature you control" (Gaea's Cradle, Priest of Titania, Rofellos, Serra's Sanctum).
+    if ((mm = body.match(/^add (\{[wubrgc]\}) for each (.+?)\.?$/))) { const phrase = mm[2].replace(/ on the battlefield$/, ''); const k = parseTarget('all ' + phrase); if (k && k.restrict) return { type: 'mana', cost, produces: [mm[1][1].toUpperCase()], amount: { calc: 'count', restrict: k.restrict }, ...manaExtra }; }
     if ((mm = body.match(/^add ((?:\{[wubrgc]\})+)\.?$/))) return { type: 'mana', cost, produces: [...new Set([...mm[1].matchAll(/\{(\w)\}/g)].map(x => x[1].toUpperCase()))] , amount: [...mm[1].matchAll(/\{(\w)\}/g)].length, ...manaExtra };
     if ((mm = body.match(/^add (\{[wubrgc]\})(?: or (\{[wubrgc]\}))+\.?$/))) return { type: 'mana', cost, produces: [...body.matchAll(/\{(\w)\}/g)].map(x => x[1].toUpperCase()), amount: 1, ...manaExtra };
     if ((mm = body.match(/^add ((?:\{[wubrgc]\})(?: or \{[wubrgc]\})*)\. put a (\w+) counter on ~\.?$/))) return { type: 'mana', cost, produces: [...mm[1].matchAll(/\{(\w)\}/g)].map(x => x[1].toUpperCase()), amount: 1, counter: mm[2] };
@@ -1179,7 +1187,7 @@ export function compile(c) {
   def.isPermanent = ['land', 'creature', 'artifact', 'enchantment'].includes(def.kind);
   def.basic = tl.supertypes.includes('Basic');
   def.legendary = tl.supertypes.includes('Legendary');
-  const unsupported = why => ({ ...def, kind: 'unsupported', status: 'unsupported', notes: [why] });
+  const unsupported = why => ({ ...def, kind: 'unsupported', status: 'unsupported', notes: [why, ...(def.notes || [])] });   // keep the per-line notes: which sentences failed
 
   // Chaos Orb: a bespoke one-shot. Its ability tears the orb into pieces that flutter down and destroy
   // the permanents they land on, then shatters the orb itself. The generic parser can't express any of
@@ -1336,3 +1344,4 @@ export function statusLabel(def) {
   if (!def) return 'not found';
   return { full: 'ready', approx: 'approximated', unsupported: 'unsupported' }[def.status] || def.status;
 }
+export const __internals = { normalizeOracle, parseAbilityLine, parseStatic, parseSentence, parseEvent, parseAbilityCost, parseKeywordLine };   // for tools/ only
