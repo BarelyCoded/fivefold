@@ -494,5 +494,34 @@ section('Foil needs an Island plus another card to cast for free');
 { const d = newDuel(); mainPhase(d); const foil = hand(d, D('Foil'), 0); hand(d, D('Island'), 0); pool(d, 0, {});
   ok(!d.canCast(d.players[0], foil, { discardAlt: true }), 'not free with only the Island (no second card to discard)'); }
 
+section('Misdirection: pitch a blue card, redirect a single-target spell');
+{ const d = newDuel(); mainPhase(d);
+  const mis = hand(d, D('Misdirection'), 0); const blue = hand(d, D('Counterspell'), 0); pool(d, 0, {});   // no mana; pitch the blue card
+  d.active = 1; d.priority = 1; const bolt = hand(d, D('Lightning Bolt'), 1); pool(d, 1, { R: 1 });
+  d.cast(d.players[1], bolt, { targets: [{ type: 'player', idx: 0 }] }); const item = d.stack[d.stack.length - 1];
+  ok(item.targets.length === 1, 'the Bolt has a single target (me)');
+  d.priority = 0;
+  const legalSpell = d.legalTargets(d.players[0], { type: 'redirect', sel: 'spell', restrict: { spellKind: 'spell', singleTarget: true } }, mis);
+  ok(legalSpell.some(t => t.id === item.id), 'Misdirection can target the single-target Bolt');
+  ok(d.canCast(d.players[0], mis, { pitch: blue.id }), 'castable for free by exiling a blue card');
+  ok(d.cast(d.players[0], mis, { pitch: blue.id, targets: [{ type: 'spell', id: item.id }] }), 'cast Misdirection pitching Counterspell');
+  ok(blue.zone === 'exile', `the blue card was exiled (${blue.zone})`);
+  const before = d.players[1].life;
+  // at resolution, redirect the Bolt to the opponent (player 1)
+  processAndResolve(d, [{ type: 'player', idx: 1 }]);
+  ok(d.players[1].life === before - 3 && d.players[0].life === 20, `the Bolt was redirected to the opponent (them ${d.players[1].life}, me ${d.players[0].life})`); }
+
+section('Misdirection: AI redirects an opponent burn spell back at them');
+{ const d = newDuel(); mainPhase(d); d.players[1].name = 'Sligh';
+  // player 0 (human) casts Bolt at the AI; the AI (player 1) Misdirects it back at player 0
+  const bolt = hand(d, D('Lightning Bolt'), 0); pool(d, 0, { R: 1 });
+  d.cast(d.players[0], bolt, { targets: [{ type: 'player', idx: 1 }] }); const item = d.stack[d.stack.length - 1];
+  const mis = hand(d, D('Misdirection'), 1); const blue = hand(d, D('Counterspell'), 1);
+  d.priority = 1;
+  ok(d.cast(d.players[1], mis, { pitch: blue.id, targets: [{ type: 'spell', id: item.id }] }), 'AI casts Misdirection at the Bolt');
+  const before0 = d.players[0].life;
+  processAndResolve(d);   // AI picks the redirect target via its hooks
+  ok(d.players[0].life === before0 - 3, `the AI redirected the Bolt back at its caster (life ${d.players[0].life})`); }
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

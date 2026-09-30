@@ -107,6 +107,7 @@ export function parseTarget(phrase) {
   if ((m = p.match(/^you and (each .+)$/))) { const k = parseTarget(m[1]); if (!k || k.sel !== 'each') return null; k.restrict.players = 'you'; return k; }
   if (/^another target /.test(p)) { const inner = parseTarget(p.replace(/^another /, '')); if (inner) { inner.restrict.other = true; return inner; } }
   if (/^target spell with (?:converted mana cost|mana value) x$/.test(p)) return { sel: 'spell', restrict: { spellKind: 'spell', cmcX: true } };
+  if (/^target spell with a single target$/.test(p)) return { sel: 'spell', restrict: { spellKind: 'spell', singleTarget: true } };   // Misdirection
   if (/^target (?:activated or triggered|triggered or activated) ability$/.test(p)) return { sel: 'ability', restrict: {} };   // Stifle
   if (/^target (activated|triggered) ability$/.test(p)) return { sel: 'ability', restrict: { abilityKind: RegExp.$1 } };
   if ((m = p.match(/^target (.*?)\s*spell$/))) {
@@ -470,6 +471,7 @@ const rules = [
   [/^you gain life equal to (?:the damage dealt this way|its power|that creature's power)$/, () => [{ type: 'gainEqualPrev' }]],
   [/^(target player|target opponent|each player|each opponent|that player) mills (\S+) cards?$/, m => { const k = T(m[1]); return k ? [{ type: 'mill', amount: amt(m[2]), ...k }] : null; }],
   [/^(?:you )?mill (\S+) cards?$/, m => [{ type: 'mill', amount: amt(m[1]), sel: 'you' }]],
+  [/^change the target of target spell with a single target$/, () => [{ type: 'redirect', sel: 'spell', restrict: { spellKind: 'spell', singleTarget: true } }]],   // Misdirection
   [/^counter target (?:activated or triggered|triggered or activated|activated|triggered) ability$/, m => { const k = T(m[0].replace(/^counter /, '')); return k ? [{ type: 'counter', sel: k.sel, restrict: k.restrict }] : null; }],   // Stifle
   [/^counter (target(?: .+?)? spell)(?: unless its controller pays \{(\w+)\})?$/, m => { const k = T(m[1]); if (!k) return null; return [{ type: 'counter',unlessPay: m[2] ? (m[2].toUpperCase() === 'X' ? 'X' : Number(m[2])) : null, ...k }]; }],
   [/^counter (target spell with mana value x)$/, m => { const k = T(m[1]); return k ? [{ type: 'counter', unlessPay: null, note: 'X must equal the spell\'s mana value; the game does not enforce it', ...k }] : null; }],

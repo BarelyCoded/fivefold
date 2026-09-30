@@ -987,6 +987,7 @@ export class Duel {
           let ok = true;
           if (k === 'creature') ok = isC; else if (k === 'noncreature') ok = !isC; else if (k === 'instant or sorcery') ok = d.kind === 'instant' || d.kind === 'sorcery';
           else if (['artifact', 'enchantment', 'instant', 'sorcery'].includes(k)) ok = d.kind === k || d.types.map(x => x.toLowerCase()).includes(k);
+          if (r.singleTarget && (it.targets || []).length !== 1) ok = false;   // Misdirection: only a spell with exactly one target
           if (ok) out.push({ type: 'spell', id: it.id, label: d.name });
         }
         break;
@@ -1476,6 +1477,23 @@ export class Duel {
         if (e.unlessPay) { const pay = this.amount(e.unlessPay, ctx); const cost = { pips: [], generic: pay, x: false }; if (this.canPay(ctrl, cost)) { const yes = yield { kind: 'yesno', player: ctrl.idx, text: `Pay {${pay}} to stop ${s.item.card.def.name} from being countered?`, value: 'pay' }; if (yes) { this.payMana(ctrl, this.planPayment(ctrl, cost)); this.say(`${ctrl.name} pays ${pay}.`); continue; } } }
         if (e.drawController) this.delayed.push({ player: s.item.controller, type: 'draw', amount: e.drawController });
         this.counterItem(s.item);
+      } break;
+      // Misdirection: change the single target of the targeted spell to a new legal target that I choose.
+      case 'redirect': for (const s of subs) if (s.item && s.item.kind === 'spell') {
+        const it = s.item; const spellCtrl = this.players[it.controller];
+        const specs = this.targetSpecs(spellCtrl, it.card, { modes: it.modes, kicked: it.kicked });
+        const ti = specs.findIndex((sp, k) => it.targets[k]);   // the one effect that carries a target
+        if (ti < 0) { this.say(`${it.card.def.name} has no target to change.`); continue; }
+        const spec = specs[ti];
+        const legal = this.legalTargets(spellCtrl, spec.effect, it.card).filter(l => !sameRef(l, it.targets[ti]) || this.legalTargets(spellCtrl, spec.effect, it.card).length === 1);
+        if (!legal.length) { this.say(`No new legal target for ${it.card.def.name}.`); continue; }
+        let pick;
+        if (p.ai) pick = this.hooks.choose ? this.hooks.choose(this, { kind: 'target', player: p.idx, effect: spec.effect, options: legal, source: src.id }) : legal[0];
+        else pick = yield { kind: 'target', player: p.idx, text: `Change ${it.card.def.name}'s target`, options: legal, effect: spec.effect, source: src.id };
+        if (!pick) pick = legal[0];
+        it.targets[ti] = pick;
+        const newName = pick.type === 'player' ? (pick.label || this.players[pick.idx]?.name) : (pick.label || this.card(pick.id)?.def?.name || 'a new target');
+        this.say(`${p.name} changes ${it.card.def.name}'s target to ${newName}.`);
       } break;
       case 'tutor': yield* this.tutor(p, e, src); break;
       case 'returnSelfToHand': if (src.zone === 'graveyard') { this.moveTo(src, 'hand'); this.say(`${src.def.name} returns to its owner's hand.`); } break;
