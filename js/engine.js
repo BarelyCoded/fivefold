@@ -501,7 +501,7 @@ export class Duel {
       case 'enchantedBecomesBlocked': return !!c.attachedTo && ev.type === 'becomesBlocked' && ev.card === c.attachedTo;
       case 'enchantedLeaves': return false; // fired directly from moveTo (the aura has already been detached by then)
       case 'anyTapped': return ev.type === 'tapped' && ev.card !== c && this.matchesRestrict(ev.card, ab.restrict, this.players[c.controller]);
-      case 'anyDies': return ev.type === 'dies' && ev.card !== c && this.matchesRestrict(ev.card, ab.restrict, this.players[c.controller]) && !(ab.notSacrificed && ev.sacrificed);
+      case 'anyDies': return ev.type === 'dies' && ev.card !== c && this.matchesRestrict(ev.card, ab.restrict, this.players[c.controller]) && !(ab.notSacrificed && ev.sacrificed) && !(ab.ownerYou && ev.card.owner !== c.controller) && !(ab.ownerYou && ev.card.token);
       case 'dealtDamage': return ev.type === 'damage' && ev.target === c;
       case 'endCombat': return ev.type === 'endCombat';
       case 'youPlayCard': return (ev.type === 'cast' && ev.player === c.controller) || (ev.type === 'playedLand' && ev.player === c.controller);
@@ -663,7 +663,14 @@ export class Duel {
     if (isLand(card)) {
       for (const src of this.permanents()) for (const ab of src.def.abilities) {
         if (ab.type !== 'static' || ab.kind !== 'manaBonus' || !this.inScope(ab.scope, src, card)) continue;
-        const col = ab.mana === 'same' ? color : ab.mana; p.pool[col]++; this.say(`${src.def.name} adds an extra ${col}.`);
+        let col = ab.mana === 'same' ? color : ab.mana;
+        if (col === 'any') {   // Fertile Ground: the colour your hand is shortest on, else the one just tapped
+          const have = new Set(p.battlefield.flatMap(l => l.def.produces || [])); const need = {};
+          for (const h of p.hand) for (const pip of h.def.cost?.pips || []) for (const x of pip) if (!have.has(x)) need[x] = (need[x] || 0) + 1;
+          col = Object.entries(need).sort((a, b) => b[1] - a[1])[0]?.[0] || (COLORS.includes(color) ? color : 'G');
+        }
+        const k = ab.perSubtype ? this.permanents().filter(x => hasSubtype(x, ab.perSubtype)).length : (ab.n || 1);   // Elvish Guidance, Overgrowth
+        if (k > 0) { p.pool[col] += k; this.say(`${src.def.name} adds an extra ${k > 1 ? k + ' ' : ''}${col}.`); }
       }
       this.fireEvent({ type: 'manaTap', player: p.idx, card });
     }
@@ -777,6 +784,8 @@ export class Duel {
     }
     return true;
   }
+  // Spells cast this turn (all players) — Storm counts the ones cast before it. Returns the count before this one.
+  noteCast() { if (this.castTurn !== this.turn) { this.castTurn = this.turn; this.castThisTurn = 0; } return this.castThisTurn++; }
   // Aluren: creature spells with mana value 3 or less cost nothing and have flash, for every player.
   alurenOk(card) {
     if (!isCreatureDef(card) || card.zone !== 'hand') return false;
@@ -912,6 +921,8 @@ export class Duel {
     this.fx.push({ type: 'cast', id: card.id, controller: p.idx });
     for (const t of targets) if (t.type === 'perm') this.fireEvent({ type: 'targeted', card: this.card(t.id) });
     this.fireEvent({ type: 'cast', player: p.idx, card });
+    const before = this.noteCast();
+    if (d.keywords.includes('Storm') && before > 0) this.pushTrigger(card, { effects: [{ type: 'stormCopies', item, n: before }], text: `Storm (${before} cop${before === 1 ? 'y' : 'ies'})` });
     for (const c of p.battlefield) if (has(c, 'Prowess') && !isCreatureDef(card)) this.pushTrigger(c, { effects: [{ type: 'pump', p: 1, t: 1, sel: 'self' }], text: 'Prowess' });
     this.passes = 0; this.priority = p.idx; this.emit(); return true;
   }
@@ -1120,7 +1131,7 @@ export class Duel {
       const d = card.def;
       const specs = this.targetSpecs(p, card, { modes: item.modes, kicked: item.kicked });
       const legal = specs.map((s, i) => this.refIsLegal(p, s.effect, item.targets[i], card));
-      if (specs.length && !legal.some(Boolean)) { this.say(`${d.name} is countered on resolution (no legal targets).`); this.moveTo(card, item.flashback ? 'exile' : 'graveyard'); this.afterResolve(); return; }
+      if (specs.length && !legal.some(Boolean)) { this.say(`${d.name}${item.copy ? ' (copy)' : ''} is countered on resolution (no legal targets).`); if (!item.copy) this.moveTo(card, item.flashback ? 'exile' : 'graveyard'); this.afterResolve(); return; }
       if (d.isPermanent) {
         if (d.entersDiscard) {   // Mox Diamond: discard a land card as it would enter, or it goes to the graveyard instead
           const lands = p.hand.filter(c => isLand(c));
@@ -1140,7 +1151,7 @@ export class Duel {
       }
       const ctx = { p, source: card, targets: item.targets.slice(), ti: 0, x: item.x, prev: null, legal, item };
       yield* this.runEffects(item.effects, ctx, d.spellOptional);
-      if (card.zone === 'stack') this.moveTo(card, item.flashback || item.exileSelf ? 'exile' : item.buyback ? 'hand' : 'graveyard');
+      if (!item.copy && card.zone === 'stack') this.moveTo(card, item.flashback || item.exileSelf ? 'exile' : item.buyback ? 'hand' : 'graveyard');   // a storm copy is not a card
       this.afterResolve(); return;
     }
     // ability or trigger
@@ -1181,7 +1192,8 @@ export class Duel {
   *runEffects(effects, ctx, optionalAll) {
     if (optionalAll && !ctx.p.ai) { const yes = yield { kind: 'yesno', player: ctx.p.idx, text: `${ctx.source.def.name}: apply the effect?`, value: 'optional' }; if (!yes) return; }
     for (const e of effects) {
-      if (e.ifDid && ctx.did === false) continue;   // "sacrifice ~. If you do, …" when the sacrifice could not happen
+      if (e.ifDid && ctx.did === false) continue;
+      if (e.unlessPunished && ctx.punished) continue;   // Browbeat: someone took the damage   // "sacrifice ~. If you do, …" when the sacrifice could not happen
       yield* this.applyEffect(e, ctx);
       this.sba();
       if (this.winner !== null) return;
@@ -1794,6 +1806,74 @@ export class Duel {
       case 'revealRandom': for (const s of subs) if (s.player) { const h = s.player.hand; ctx.thatPlayer = s.player.idx; if (!h.length) { ctx.revealedCmc = 0; this.say(`${s.player.name} has no cards in hand.`); continue; } const c = h[Math.floor(this.rng() * h.length)]; ctx.revealedCmc = c.def.cmc || 0; this.say(`${s.player.name} reveals ${c.def.name} at random.`); } break;
       case 'pumpRevealed': for (const s of subs) if (s.card && isCreature(s.card)) { const k = (ctx.revealedCmc || 0) * e.sign; s.card.temp.p += k; s.card.temp.t += k; this.say(`${s.card.def.name} gets ${k >= 0 ? '+' : ''}${k}/${k >= 0 ? '+' : ''}${k} until end of turn.`); } break;
       case 'toLibraryTop': for (const s of subs) if (s.card && s.card.zone === 'battlefield') { const c = s.card, ow = this.players[c.owner]; this.moveTo(c, 'library'); if (c.zone === 'library') { removeFrom(ow.library, c); ow.library.push(c); } this.say(`${c.def.name} is put on top of ${ow.name}'s library.`); } break;
+      // Storm: copy the spell once per spell cast before it this turn; each copy may pick new targets.
+      case 'stormCopies': {
+        const it = e.item, card = it.card, caster = this.players[it.controller];
+        const specs = this.targetSpecs(caster, card, { modes: it.modes, kicked: it.kicked });
+        for (let k = 0; k < e.n; k++) {
+          const targets = [];
+          for (let i = 0; i < specs.length; i++) {
+            const legal = this.legalTargets(caster, specs[i].effect, card);
+            if (!legal.length) { targets.push(it.targets[i] || null); continue; }
+            const pick = yield { kind: 'target', player: caster.idx, text: `${card.def.name} copy ${k + 1} of ${e.n}: ${specs[i].text}`, options: legal, effect: specs[i].effect, source: card.id };
+            targets.push(legal.find(l => pick && sameRef(l, pick)) || legal.find(l => sameRef(l, it.targets[i] || {})) || legal[0]);
+          }
+          this.stack.push({ ...it, id: uid++, copy: true, targets });
+        }
+        this.say(`${card.def.name} is copied ${e.n} time${e.n > 1 ? 's' : ''}.`);
+        break;
+      }
+      // Mortuary / Enduring Renewal / Angelic Renewal: move the creature card that just died.
+      case 'returnPrev': { const c = this.prevCard(ctx); if (!c || c.zone !== 'graveyard') break; const ow = this.players[c.owner];
+        if (e.to === 'hand') { this.moveTo(c, 'hand'); this.say(`${c.def.name} returns to ${ow.name}'s hand.`); }
+        else if (e.to === 'top') { this.moveTo(c, 'library'); removeFrom(ow.library, c); ow.library.push(c); this.say(`${c.def.name} is put on top of ${ow.name}'s library.`); }
+        else { this.moveTo(c, 'battlefield', { controller: p.idx }); this.say(`${c.def.name} returns to the battlefield.`); }
+        break; }
+      // Extract: exile a card of your choice from the target player's library.
+      case 'extract': for (const s of subs) if (s.player) { const L = s.player.library; if (!L.length) continue; let c;
+        if (p.ai) c = L.slice().sort((a, b) => cardWorth(b) - cardWorth(a))[0];
+        else { const ids = yield { kind: 'choose', player: p.idx, text: `${src.def.name}: exile a card from ${s.player.name}'s library`, options: L.map(x => ({ id: x.id, label: x.def.name })), min: 1, max: 1, secret: true }; c = this.card((ids || [])[0]); if (!c || !L.includes(c)) c = L[0]; }
+        this.moveTo(c, 'exile'); shuffle(L, this.rng); this.say(`${p.name} exiles ${c.def.name} from ${s.player.name}'s library.`); } break;
+      // Lobotomy: pick a non-basic-land card from their hand, exile every copy from graveyard, hand and library.
+      case 'lobotomy': for (const s of subs) if (s.player) { const pl = s.player; this.say(`${pl.name} reveals: ${pl.hand.map(c => c.def.name).join(', ') || 'an empty hand'}.`);
+        const opts = pl.hand.filter(c => !(c.def.basic && isLand(c))); if (!opts.length) { shuffle(pl.library, this.rng); continue; } let pick;
+        if (p.ai) pick = opts.slice().sort((a, b) => cardWorth(b) - cardWorth(a))[0];
+        else { const ids = yield { kind: 'choose', player: p.idx, text: `${src.def.name}: choose a card to exile every copy of`, options: opts.map(c => ({ id: c.id, label: c.def.name })), min: 1, max: 1 }; pick = this.card((ids || [])[0]); if (!pick || !opts.includes(pick)) pick = opts[0]; }
+        const nm = pick.def.name; const all = [...pl.graveyard, ...pl.hand, ...pl.library].filter(c => c.def.name === nm);
+        for (const c of all) this.moveTo(c, 'exile'); shuffle(pl.library, this.rng); this.say(`${all.length} ${nm} exiled.`); } break;
+      // Haunting Echoes: exile their graveyard (except basic lands) and every library copy of those cards.
+      case 'hauntingEchoes': for (const s of subs) if (s.player) { const pl = s.player; const gone = pl.graveyard.filter(c => !(c.def.basic && isLand(c))); const names = new Set(gone.map(c => c.def.name));
+        for (const c of gone) this.moveTo(c, 'exile'); const lib = pl.library.filter(c => names.has(c.def.name)); for (const c of lib) this.moveTo(c, 'exile'); shuffle(pl.library, this.rng);
+        this.say(`${gone.length} cards exiled from ${pl.name}'s graveyard and ${lib.length} from their library.`); } break;
+      // Browbeat & co.: the opponent may take the damage to stop the effect.
+      case 'punisher': { const opp = this.opponentOf(p); const k = this.amount(e.amount, ctx);
+        let take;
+        if (opp.ai) { const later = (ctx.item?.effects || []).filter(x => x.unlessPunished); const nuke = later.some(x => x.type === 'destroyAll'); take = opp.life - k >= 8 && (!nuke || opp.battlefield.filter(isCreature).length >= p.battlefield.filter(isCreature).length); }
+        else take = yield { kind: 'yesno', player: opp.idx, text: `${src.def.name}: take ${k} damage to stop it?`, card: src.id, value: 'punisher' };
+        if (take) { this.dealDamage(src, opp, k); ctx.punished = true; this.say(`${opp.name} takes the damage.`); } else { ctx.punished = false; this.say(`Nobody takes the damage.`); }
+        break; }
+      // Oath of Lieges / Scholars / Mages
+      case 'oathOf': { const pl = this.players[ctx.thatPlayer ?? p.idx], opp = this.opponentOf(pl);
+        const more = e.compare === 'lands' ? opp.battlefield.filter(isLand).length > pl.battlefield.filter(isLand).length : e.compare === 'hand' ? opp.hand.length > pl.hand.length : opp.life > pl.life;
+        if (!more) break;
+        const yes = pl.ai ? (e.what !== 'scholars' || pl.hand.length <= 2) : yield { kind: 'yesno', player: pl.idx, text: `${src.def.name}: use the Oath?`, card: src.id, value: 'oath' };
+        if (!yes) break;
+        if (e.what === 'lieges') yield* this.tutor(pl, { what: 'basic land', to: 'battlefield' }, src);
+        else if (e.what === 'scholars') { const k = pl.hand.length; this.discardCards(pl, pl.hand.slice()); this.drawCards(pl, 3); this.say(`${pl.name} discards ${k} and draws three.`); }
+        else this.dealDamage(src, opp, 1);
+        break; }
+      // Mind Whip: the enchanted creature's controller pays {3} or takes 2 and taps it.
+      case 'unlessPayAura': { const who = this.players[ctx.thatPlayer ?? src.attachedTo?.controller ?? p.idx]; let paid = false;
+        if (this.canPay(who, e.pay)) { paid = yield { kind: 'yesno', player: who.idx, text: `${src.def.name}: pay ${costString(e.pay)}?`, card: src.id, value: 'unlessPay' }; if (paid) { this.payMana(who, this.planPayment(who, e.pay)); this.say(`${who.name} pays ${costString(e.pay)}.`); } }
+        if (!paid) yield* this.runEffects(e.effects, ctx, false);
+        break; }
+      // Paroxysm: reveal the top card — a land destroys the creature, anything else gives it +3/+3.
+      case 'paroxysm': { const host = src.attachedTo; if (!host) break; const pl = this.players[host.controller]; const top = pl.library[pl.library.length - 1]; if (!top) break;
+        this.say(`${pl.name} reveals ${top.def.name}.`); if (isLand(top)) this.destroy(host); else { host.temp.p += 3; host.temp.t += 3; this.say(`${host.def.name} gets +3/+3 until end of turn.`); } break; }
+      // Unnatural Hunger: sacrifice another creature or take damage equal to the enchanted creature's power.
+      case 'unnaturalHunger': { const host = src.attachedTo; if (!host) break; const pl = this.players[host.controller]; const others = pl.battlefield.filter(c => isCreature(c) && c !== host);
+        let sac = false; if (others.length) sac = pl.ai ? power(host) >= 3 : yield { kind: 'yesno', player: pl.idx, text: `${src.def.name}: sacrifice another creature (otherwise take ${power(host)} damage)?`, card: src.id, value: 'unlessSacrifice' };
+        if (sac) yield* this.sacrificeChoice(pl, 'creature', host); else this.dealDamage(src, pl, power(host)); break; }
       case 'madness': {   // the discarded card waits in exile: cast it for its madness cost, or it goes to the graveyard
         if (src.zone !== 'exile') break;
         const mad = src.def.keywords.find(k => k.k === 'Madness'); const owner = this.players[src.owner];
@@ -2183,6 +2263,7 @@ export class Duel {
     this.fx.push({ type: 'cast', id: card.id, controller: p.idx });
     for (const t of targets) if (t.type === 'perm') this.fireEvent({ type: 'targeted', card: this.card(t.id) });
     this.fireEvent({ type: 'cast', player: p.idx, card });
+    this.noteCast();
     return true;
   }
   tap(c) { if (c.tapped) return; c.tapped = true; this.fireEvent({ type: 'tapped', card: c }); }
@@ -2199,7 +2280,7 @@ export class Duel {
     const i = this.stack.indexOf(item); if (i < 0) return;
     this.stack.splice(i, 1);
     this.say(`${item.card.def.name} is countered.`);
-    if (item.kind === 'spell') { item.card.zone = 'limbo'; if (item._toTop) { this.moveTo(item.card, 'library'); const ow = this.players[item.card.owner]; removeFrom(ow.library, item.card); ow.library.push(item.card); } else this.moveTo(item.card, item.flashback ? 'exile' : 'graveyard'); }
+    if (item.kind === 'spell' && !item.copy) { item.card.zone = 'limbo'; if (item._toTop) { this.moveTo(item.card, 'library'); const ow = this.players[item.card.owner]; removeFrom(ow.library, item.card); ow.library.push(item.card); } else this.moveTo(item.card, item.flashback ? 'exile' : 'graveyard'); }
   }
   // Damage-replacement layer: prevent / redirect / reduce a damage instance (Pentagram, Jade Monolith,
   // Forcefield, Nova Pentacle, Reverse Damage, Al-abara's Carpet).

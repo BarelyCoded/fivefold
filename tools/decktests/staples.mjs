@@ -458,5 +458,58 @@ section('Time Ebb puts a creature on top; Submerge is free against a Forest');
   ok(!d2.canCast(d2.players[0], sm, { freeIf: true, targets: [{ type: 'perm', id: b2.id }] }), 'needs my Island'); place(d2, D('Island'), 0);
   ok(d2.cast(d2.players[0], sm, { freeIf: true, targets: [{ type: 'perm', id: b2.id }] }), 'free with an Island vs their Forest'); }
 
+section('Storm: Brain Freeze copies itself per earlier spell');
+{ const d = newDuel(); mainPhase(d); for (let k = 0; k < 20; k++) lib(d, bears(), 1);
+  const r1 = hand(d, D('Dark Ritual'), 0), r2 = hand(d, D('Dark Ritual'), 0); pool(d, 0, { B: 2, U: 1, C: 1 });
+  d.cast(d.players[0], r1, {}); processAndResolve(d); d.cast(d.players[0], r2, {}); processAndResolve(d);
+  const bf = hand(d, D('Brain Freeze'), 0); d.cast(d.players[0], bf, { targets: [{ type: 'player', idx: 1 }] }); processAndResolve(d, [{ type: 'player', idx: 1 }, { type: 'player', idx: 1 }]);
+  ok(d.players[1].graveyard.length === 9 && bf.zone === 'graveyard', `three Brain Freezes: 9 milled, one card in the graveyard (${d.players[1].graveyard.length}, ${bf.zone})`); }
+
+section('Storm copies can take new targets (Temporal Fissure)');
+{ const d = newDuel(); mainPhase(d); const a = place(d, bears(), 1), b = place(d, D('Hill Giant'), 1); d.noteCast();
+  const tf = hand(d, D('Temporal Fissure'), 0); pool(d, 0, { U: 1, C: 4 }); d.cast(d.players[0], tf, { targets: [{ type: 'perm', id: a.id }] }); processAndResolve(d, [{ type: 'perm', id: b.id }]);
+  ok(a.zone === 'hand' && b.zone === 'hand', `both bounced (${a.zone}, ${b.zone})`); }
+
+section('Fertile Ground / Overgrowth add extra mana');
+{ const d = newDuel(); mainPhase(d); const f = place(d, D('Forest'), 0); const og = place(d, D('Overgrowth'), 0); og.attachedTo = f; pool(d, 0, {}); d.refresh();
+  d.activateMana(d.players[0], f, 0, 'G'); ok(d.players[0].pool.G === 3, `Forest + Overgrowth = GGG (${d.players[0].pool.G})`); }
+
+section('Browbeat: the opponent takes 5 or I draw three');
+{ const d = newDuel(); mainPhase(d); for (let k = 0; k < 5; k++) lib(d, bears(), 0); const bb = hand(d, D('Browbeat'), 0); pool(d, 0, { R: 1, C: 2 });
+  d.cast(d.players[0], bb, { targets: [{ type: 'player', idx: 0 }] }); processAndResolve(d);
+  ok(d.players[1].life === 15 && d.players[0].hand.length === 0, `AI at 20 takes 5 (${d.players[1].life}, hand ${d.players[0].hand.length})`);
+  const d2 = newDuel(); mainPhase(d2); d2.players[1].life = 9; for (let k = 0; k < 5; k++) lib(d2, bears(), 0); const b2 = hand(d2, D('Browbeat'), 0); pool(d2, 0, { R: 1, C: 2 });
+  d2.cast(d2.players[0], b2, { targets: [{ type: 'player', idx: 0 }] }); processAndResolve(d2); ok(d2.players[0].hand.length === 3, `AI at 9 lets me draw (${d2.players[0].hand.length})`); }
+
+section('Extract / Lobotomy / Haunting Echoes');
+{ const d = newDuel(); mainPhase(d); const t = lib(d, D('Hill Giant'), 1); lib(d, bears(), 1); const ex = hand(d, D('Extract'), 0); pool(d, 0, { U: 1 });
+  d.cast(d.players[0], ex, { targets: [{ type: 'player', idx: 1 }] }); processAndResolve(d, [], y => [t.id]); ok(t.zone === 'exile', 'Extract exiled the chosen card');
+  const d2 = newDuel(); mainPhase(d2); const h = hand(d2, D('Counterspell'), 1); lib(d2, D('Counterspell'), 1); gy(d2, D('Counterspell'), 1); lib(d2, bears(), 1); const lb = hand(d2, D('Lobotomy'), 0); pool(d2, 0, { U: 1, B: 1, C: 2 });
+  d2.cast(d2.players[0], lb, { targets: [{ type: 'player', idx: 1 }] }); processAndResolve(d2, [], y => [h.id]);
+  ok(d2.players[1].exile.filter(c => c.def.name === 'Counterspell').length === 3, 'Lobotomy exiled all three Counterspells');
+  const d3 = newDuel(); mainPhase(d3); gy(d3, bears(), 1); gy(d3, D('Forest'), 1); lib(d3, bears(), 1); lib(d3, D('Island'), 1); const he = hand(d3, D('Haunting Echoes'), 0); pool(d3, 0, { B: 2, C: 3 });
+  d3.cast(d3.players[0], he, { targets: [{ type: 'player', idx: 1 }] }); processAndResolve(d3);
+  ok(d3.players[1].exile.length === 2 && d3.players[1].graveyard.length === 1, `Bears x2 exiled, Forest stays (${d3.players[1].exile.length})`); }
+
+section('Oath of Mages / Scholars / Lieges');
+{ const d = newDuel(); mainPhase(d); place(d, D('Oath of Mages'), 0); d.players[1].life = 25; d.fireEvent({ type: 'upkeep', player: 0 }); processAndResolve(d);
+  ok(d.players[1].life === 24, 'Mages pings the richer opponent');
+  const d2 = newDuel(); mainPhase(d2); place(d2, D('Oath of Lieges'), 0); place(d2, D('Forest'), 1); const pl = lib(d2, D('Plains'), 0); d2.fireEvent({ type: 'upkeep', player: 0 }); processAndResolve(d2, [], y => [pl.id]);
+  ok(pl.zone === 'battlefield', 'Lieges fetches a basic land'); }
+
+section('Mind Whip, Paroxysm, Unnatural Hunger');
+{ const d = newDuel(); mainPhase(d); const b = place(d, bears(), 1); const mw = place(d, D('Mind Whip'), 0); mw.attachedTo = b; d.fireEvent({ type: 'upkeep', player: 1 }); processAndResolve(d);
+  ok(d.players[1].life === 18 && b.tapped, `no mana to pay: 2 damage and tapped (${d.players[1].life})`);
+  const d2 = newDuel(); mainPhase(d2); const b2 = place(d2, bears(), 0); const px = place(d2, D('Paroxysm'), 1); px.attachedTo = b2; lib(d2, D('Forest'), 0); d2.fireEvent({ type: 'upkeep', player: 0 }); processAndResolve(d2);
+  ok(b2.zone === 'graveyard', 'Paroxysm: a land on top destroys it');
+  const d3 = newDuel(); mainPhase(d3); const b3 = place(d3, D('Hill Giant'), 0); const uh = place(d3, D('Unnatural Hunger'), 1); uh.attachedTo = b3; d3.fireEvent({ type: 'upkeep', player: 0 }); processAndResolve(d3);
+  ok(d3.players[0].life === 17, `no other creature: 3 damage (${d3.players[0].life})`); }
+
+section('Mortuary and Angelic Renewal');
+{ const d = newDuel(); mainPhase(d); place(d, D('Mortuary'), 0); const b = place(d, bears(), 0); d.destroy(b); processAndResolve(d);
+  const L = d.players[0].library; ok(L[L.length - 1] === b, 'Mortuary puts the creature on top');
+  const d2 = newDuel(); mainPhase(d2); const ar = place(d2, D('Angelic Renewal'), 0); const b2 = place(d2, bears(), 0); d2.destroy(b2); processAndResolve(d2);
+  ok(b2.zone === 'battlefield' && ar.zone === 'graveyard', `Angelic Renewal brings it back (${b2.zone}, ${ar.zone})`); }
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

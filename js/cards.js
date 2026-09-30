@@ -17,7 +17,7 @@ const IGNORED_KW = new Set(['Banding', 'Phasing', 'Bushido', 'Provoke', 'Soulshi
   'Rebound', 'Battle cry', 'Living weapon', 'Totem armor', 'Annihilator', 'Level up', 'Unearth', 'Retrace', 'Exert', 'Afflict', 'Embalm',
   'Eternalize', 'Improvise', 'Fabricate', 'Partner', 'Melee', 'Escalate', 'Emerge', 'Escape', 'Mutate', 'Companion', 'Landfall', 'Hellbent', 'Threshold', 'Amplify', 'Modular']);
 // Keywords that break the game if ignored.
-const UNSUPPORTED_KW = new Set(['Storm', 'Suspend', 'Morph', 'Megamorph', 'Cascade', 'Dredge', 'Transmute', 'Ripple', 'Epic', 'Haunt',
+const UNSUPPORTED_KW = new Set(['Suspend', 'Morph', 'Megamorph', 'Cascade', 'Dredge', 'Transmute', 'Ripple', 'Epic', 'Haunt',
   'Forecast', 'Graft', 'Hideaway', 'Champion', 'Evoke', 'Conspire', 'Devour', 'Crew', 'Amass', 'Adapt', 'Riot', 'Spectacle']);
 
 export function slug(name) {
@@ -425,6 +425,13 @@ const rules = [
   [/^if that creature is (?:white|blue|black|red|green), you may put it on the bottom of its owner's library instead$/, () => []],
   [/^that opponent may put an artifact, creature, enchantment, or land card from their hand onto the battlefield$/, () => [{ type: 'showAndTell', only: 'prevOwner' }]],   // Metamorphose
   [/^~ becomes an enchantment$/, () => [{ type: 'unanimateSelf' }]],   // Opal Acrolith
+  // Mortuary / Enduring Renewal / Angelic Renewal: the creature card that just died
+  [/^return it to your hand$/, () => [{ type: 'returnPrev', to: 'hand' }]],
+  [/^put that card on top of your library$/, () => [{ type: 'returnPrev', to: 'top' }]],
+  [/^return that card to the battlefield$/, () => [{ type: 'returnPrev', to: 'battlefield' }]],
+  // Extract / Lobotomy / Haunting Echoes
+  [/^search (target player)'s library for a card and exile it$/, m => tgt({ type: 'extract' }, m[1])],
+  [/^then that player shuffles$/, () => []],
   [/^choose a color$/, () => [{ type: 'chooseColorSelf' }]],
   [/^~ becomes the color of your choice until end of turn$/, () => [{ type: 'chooseColorSelf', temp: true }]],
   [/^~ gets \+(\d+)\/\+(\d+) and becomes the color of your choice until end of turn$/, m => [{ type: 'pump', p: Number(m[1]), t: Number(m[2]), sel: 'self', restrict: {} }, { type: 'chooseColorSelf', temp: true }]],   // Wild Mongrel
@@ -696,6 +703,10 @@ export function parseEffects(text) {
   if ((wm = whole.match(/^domain — (target player|you) draws? a card for each basic land type among lands (?:they|you) controls?$/))) { const k = wm[1] === 'you' ? { sel: 'you' } : T(wm[1]); if (k) { out.effects.push({ type: 'draw', amount: { calc: 'domain', of: k.sel === 'you' ? 'you' : 'subject' }, ...k }); return out; } }
   if (/^draw four cards, then choose x cards in your hand and discard the rest$/.test(whole)) { out.effects.push({ type: 'draw', amount: 4, sel: 'you' }, { type: 'discardDownTo', amount: 'X', sel: 'you' }); return out; }
   if (/^draw a card, then draw cards equal to the number of cards named ~ in all graveyards$/.test(whole)) { out.effects.push({ type: 'draw', amount: 1, sel: 'you' }, { type: 'draw', amount: { calc: 'graveyardNameAll' }, sel: 'you' }); return out; }
+  if ((wm = whole.match(/^(target player) reveals their hand, then you choose a card other than a basic land card from it\. search that player's graveyard, hand, and library for all cards with the same name as the chosen card and exile them(?:\. then that player shuffles)?$/))) { const k = T(wm[1]); if (k) { out.effects.push({ type: 'lobotomy', ...k }); return out; } }
+  if ((wm = whole.match(/^exile all cards from (target player)'s graveyard other than basic land cards\. for each card exiled this way, search that player's library for all cards with the same name as that card and exile them(?:\. then that player shuffles)?$/))) { const k = T(wm[1]); if (k) { out.effects.push({ type: 'hauntingEchoes', ...k }); return out; } }
+  // Browbeat / Book Burning / Breaking Point: the opponent may take the damage to stop the effect.
+  if ((wm = whole.match(/^any player may have ~ deal (\d+) damage to them\. if no one does, (.+)$/))) { const inner = parseEffects(wm[2]); if (inner.effects.length) { out.effects.push({ type: 'punisher', amount: Number(wm[1]) }, ...inner.effects.map(e => ({ ...e, unlessPunished: true }))); out.notes.push(...inner.notes); return out; } }
   // Gilded Drake: swap it for up to one opposing creature, or sacrifice it.
   if (/^exchange control of ~ and up to one target creature an opponent controls\. if you don't or can't make an exchange, sacrifice ~\. this ability still resolves if its target becomes illegal$/.test(whole)) { out.effects.push({ type: 'gildedDrake' }); return out; }
   // Goblin Welder: swap an artifact a player controls for an artifact card in that player's graveyard.
@@ -854,6 +865,7 @@ function parseKeywordLine(line, def) {
     else if ((m = p.match(/^Flashback—sacrifice (?:a|an) (\w+)$/i))) found.push({ k: 'Flashback', cost: { pips: [], generic: 0, x: false }, sacrifice: m[1].toLowerCase() });   // Cabal Therapy
     else if ((m = p.match(/^Buyback (\{.+\})$/))) found.push({ k: 'Buyback', cost: parseCost(m[1]) });
     else if ((m = p.match(/^Madness (\{.+\})$/))) found.push({ k: 'Madness', cost: parseCost(m[1]) });
+    else if (p === 'Storm') found.push('Storm');
     else if ((m = p.match(/^Echo (\{.+\})$/))) found.push({ k: 'Echo', cost: parseCost(m[1]) });
     else if ((m = p.match(/^Equip (\{.+\}|\d+)$/))) found.push({ k: 'Equip', cost: parseCost(m[1].startsWith('{') ? m[1] : `{${m[1]}}`) });
     else if ((m = p.match(/^Enchant (creature|permanent|land|artifact|enchantment|wall|creature you control|land you control|artifact an opponent controls|creature an opponent controls|player|opponent)$/i))) found.push({ k: 'Enchant', what: m[1].toLowerCase() });
@@ -952,6 +964,9 @@ function parseStatic(t) {
   if (/^as ~ enters, choose a color$/.test(t)) return [{ type: 'triggered', event: 'etb', effects: [{ type: 'chooseColorSelf' }], optional: false, text: 'as ~ enters, choose a color' }];
   if ((m = t.match(/^(enchanted wall|enchanted creature) can attack as though it didn't have defender$/))) return [{ type: 'static', kind: 'canAttackWithDefender', scope: { who: 'enchanted' } }];
   if ((m = t.match(/^whenever enchanted land is tapped for mana, its controller adds an additional \{([wubrg])\}$/))) return [{ type: 'static', kind: 'manaBonus', mana: m[1].toUpperCase(), scope: { who: 'enchanted' } }];
+  if ((m = t.match(/^whenever enchanted land is tapped for mana, its controller adds an additional \{([wubrg])\}\{\1\}$/))) return [{ type: 'static', kind: 'manaBonus', mana: m[1].toUpperCase(), n: 2, scope: { who: 'enchanted' } }];   // Overgrowth
+  if (/^whenever enchanted land is tapped for mana, its controller adds an additional one mana of any color$/.test(t)) return [{ type: 'static', kind: 'manaBonus', mana: 'any', scope: { who: 'enchanted' } }];   // Fertile Ground
+  if ((m = t.match(/^whenever enchanted land is tapped for mana, its controller adds an additional \{([wubrg])\} for each (\w+?) on the battlefield$/))) return [{ type: 'static', kind: 'manaBonus', mana: m[1].toUpperCase(), perSubtype: capSub(m[2]), scope: { who: 'enchanted' } }];   // Elvish Guidance
   if (/^whenever a player taps a land for mana, that player adds one mana of any type that land produced$/.test(t)) return [{ type: 'static', kind: 'manaBonus', mana: 'same', scope: { who: 'all', types: ['land'] } }];
   // "Creatures you control get +1/+1." "Other Goblin creatures get +1/+0." "All Walls get..." "Enchanted creature gets +2/+2 and has flying."
   if ((m = t.match(/^(enchanted creature|equipped creature|~|other (.+?)|all (.+?)|(.+?) you control|(.+?) creatures|.+?) (?:gets?|has|have|gains?) (.+?)(?: as long as (.+))?$/))) {
@@ -1174,6 +1189,13 @@ function parseAbilityLine(line, ctx) {
     if (/^you may draw two additional cards\. if you do, choose two cards in your hand drawn this turn\. for each of those cards, pay 4 life or put the card on top of your library$/.test(rest)) return { type: 'triggered', ...ev, effects: [{ type: 'sylvanLibrary' }], text: line };
     if (/^that player chooses target player who controls more creatures than they do and is their opponent\. the first player may reveal cards from the top of their library until they reveal a creature card/.test(rest)) return { type: 'triggered', ...ev, effects: [{ type: 'oathDruids' }], text: line };
     if (/^that player chooses target player whose graveyard has fewer creature cards in it than their graveyard does and is their opponent\. the first player may return a creature card from their graveyard to their hand$/.test(rest)) return { type: 'triggered', ...ev, effects: [{ type: 'oathGhouls' }], text: line };
+    if (/^that player chooses target player who controls more lands than they do and is their opponent\. the first player may search their library for a basic land card, put that card onto the battlefield, then shuffle$/.test(rest)) return { type: 'triggered', ...ev, effects: [{ type: 'oathOf', compare: 'lands', what: 'lieges' }], text: line };
+    if (/^that player chooses target player who has more cards in hand than they do and is their opponent\. the first player may discard their hand and draw three cards$/.test(rest)) return { type: 'triggered', ...ev, effects: [{ type: 'oathOf', compare: 'hand', what: 'scholars' }], text: line };
+    if (/^that player chooses target player who has more life than they do and is their opponent\. the first player may have ~ deal 1 damage to the second player$/.test(rest)) return { type: 'triggered', ...ev, effects: [{ type: 'oathOf', compare: 'life', what: 'mages' }], text: line };
+    // Mind Whip / Paroxysm / Unnatural Hunger (upkeep of the enchanted creature's controller)
+    if (/^that player may pay \{3\}\. if they don't, ~ deals 2 damage to that player and you tap that creature$/.test(rest)) return { type: 'triggered', ...ev, effects: [{ type: 'unlessPayAura', pay: parseCost('{3}'), effects: [{ type: 'damage', amount: 2, sel: 'thatPlayer' }, { type: 'tap', sel: 'enchanted' }] }], text: line };
+    if (/^that player reveals the top card of their library\. if that card is a land card, destroy that creature\. otherwise, it gets \+3\/\+3 until end of turn$/.test(rest)) return { type: 'triggered', ...ev, effects: [{ type: 'paroxysm' }], text: line };
+    if (/^~ deals damage equal to that creature's power to that player unless they sacrifice another creature of their choice$/.test(rest)) return { type: 'triggered', ...ev, effects: [{ type: 'unnaturalHunger' }], text: line };
     if (/^that player untaps a land they control$/.test(rest)) return { type: 'triggered', ...ev, effects: [{ type: 'untapOneLand', sel: 'thatPlayer' }], text: line };   // Rising Waters
     // Sanctuaries: "if you control a C1 or C2 permanent, <small>. If you control a C1 permanent and a C2 permanent, <big> instead."
     if ((cm = rest.match(/^if you control a (white|blue|black|red|green) or (white|blue|black|red|green) permanent, (.+?)\. if you control a \1 permanent and a \2 permanent, (.+)$/))) {
@@ -1262,6 +1284,7 @@ function parseEvent(w) {
   if (/^enchanted creature becomes blocked$/.test(w)) return { event: 'enchantedBecomesBlocked' };
   if (/^enchanted (?:creature|permanent|land|artifact) leaves the battlefield$/.test(w)) return { event: 'enchantedLeaves' };
   if ((m = w.match(/^(?:a|an) (.+?) becomes tapped$/)) && !/ or /.test(m[1])) { const k = parseTarget('each ' + m[1]); return k && k.sel === 'each' && !k.restrict.players ? { event: 'anyTapped', restrict: k.restrict } : null; }
+  if (/^a (?:nontoken )?creature is put into your graveyard from the battlefield$/.test(w)) return { event: 'anyDies', restrict: { types: ['creature'] }, ownerYou: true };   // Mortuary, Enduring Renewal
   if ((m = w.match(/^(?:a|an) (.+?) is put into a graveyard from the battlefield(?:, if it wasn't sacrificed)?$/))) { const k = parseTarget('each ' + m[1]); return k && k.sel === 'each' && !k.restrict.players ? { event: 'anyDies', restrict: k.restrict, notSacrificed: / wasn't sacrificed/.test(w) } : null; }
   if (/^~ is dealt damage$/.test(w)) return { event: 'dealtDamage' };
   if (/^a card is put into your graveyard from anywhere$/.test(w)) return { event: 'toYourGraveyard' };   // Energy Field
