@@ -492,6 +492,12 @@ export class Duel {
     switch (ab.event) {
       case 'etb': return ev.type === 'etb' && ev.card === c;
       case 'turnedFaceUp': return ev.type === 'turnedFaceUp' && ev.card === c;
+      case 'anyAttacks': return ev.type === 'attacks' && (!ab.yours || ev.card.controller === c.controller) && (!ab.attacksYou || ev.card.controller !== c.controller);
+      case 'anyBlocks': return ev.type === 'blocks' && (!ab.yours || ev.card.controller === c.controller);
+      case 'anyAttacksOrBlocks': return ev.type === 'attacks' || ev.type === 'blocks';
+      case 'anyPlaysLand': return ev.type === 'playedLand';
+      case 'creatureDamagesYou': return ev.type === 'damage' && ev.target?.idx === c.controller && ev.source?.def && isCreature(ev.source);
+      case 'oppDiscards': return ev.type === 'discarded' && ev.player !== c.controller;
       case 'attacks': return ev.type === 'attacks' && ev.card === c;
       case 'unblocked': return ev.type === 'unblocked' && ev.card === c;
       case 'blocks': return ev.type === 'blocks' && ev.card === c;
@@ -511,7 +517,7 @@ export class Duel {
       case 'youPlayLand': return ev.type === 'etb' && isLand(ev.card) && ev.card.controller === c.controller && !(ab.other && ev.card === c);
       case 'anyLandEtb': return ev.type === 'etb' && isLand(ev.card);
       case 'oppDraws': return ev.type === 'draws' && ev.player !== c.controller;
-      case 'manaTap': return ev.type === 'manaTap';
+      case 'manaTap': return ev.type === 'manaTap' && (!ab.landType || hasSubtype(ev.card, ab.landType)) && (!ab.opp || ev.player !== c.controller);
       case 'attacksOrBlocks': return (ev.type === 'attacks' || ev.type === 'blocks') && ev.card === c;
       case 'blocksOrBlockedBy': return (ev.type === 'blocks' && ev.card === c && this.matchFilter(ev.attacker, ab.filter)) || (ev.type === 'becomesBlocked' && ev.card === c && ev.by.some(b => this.matchFilter(b, ab.filter)));
       case 'combatDamagePlayer': return ev.type === 'damage' && ev.source === c && ev.combat && ev.target.idx !== undefined;
@@ -522,7 +528,7 @@ export class Duel {
       case 'targeted': return ev.type === 'targeted' && ev.card === c;
       case 'anyCreatureDies': return ev.type === 'dies' && isCreatureDef(ev.card) && (!ab.other || ev.card !== c);
       case 'damagedByDies': return ev.type === 'dies' && !!ev.damaged && ev.damaged.has(c.id);
-      case 'anyCreatureEtb': return ev.type === 'etb' && (ab.subtype ? hasSubtype(ev.card, ab.subtype) : isCreatureDef(ev.card)) && (!ab.yours || ev.card.controller === c.controller) && (!ab.other || ev.card !== c);
+      case 'anyCreatureEtb': return ev.type === 'etb' && (ab.subtype ? hasSubtype(ev.card, ab.subtype) : isCreatureDef(ev.card)) && (ab.powerGE === undefined || power(ev.card) >= ab.powerGE) && (!ab.yours || ev.card.controller === c.controller) && (!ab.other || ev.card !== c);
       case 'toYourGraveyard': return ev.type === 'toGraveyard' && ev.player === c.controller;   // Energy Field
       case 'enchantedDealsDamage': return ev.type === 'damage' && ev.source === c.attachedTo && !!c.attachedTo && (!ab.toYou || ev.target === this.players[c.controller]);
       case 'enchantedDies': return false; // fired directly from moveTo (see enchantedGone)
@@ -533,7 +539,7 @@ export class Duel {
       case 'beginCombat': return ev.type === 'beginCombat' && ev.player === c.controller;
       case 'youCast': return ev.type === 'cast' && ev.player === c.controller && (ab.kind === 'any' || (ab.kind === 'creature' ? isCreatureDef(ev.card) : ab.kind === 'noncreature' ? !isCreatureDef(ev.card) : ev.card.def.kind === ab.kind || ev.card.def.types.map(t => t.toLowerCase()).includes(ab.kind)));
       case 'anyCombatToPlayer': return ev.type === 'damage' && ev.combat && ev.target && ev.target.idx !== undefined && ev.source && ev.source.def && this.matchesRestrict(ev.source, ab.filter || {}, this.players[c.controller]);
-      case 'anyCast': return ev.type === 'cast' && (!ab.color || ev.card.def.colors.includes(ab.color)) && (!ab.who || (ab.who === 'opp') === (ev.player !== c.controller)) && (!ab.kind || ab.kind === 'any' || (ab.kind === 'noncreature' ? !isCreatureDef(ev.card) : ab.kind === 'creature' ? isCreatureDef(ev.card) : ev.card.def.kind === ab.kind || ev.card.def.types.map(t => t.toLowerCase()).includes(ab.kind)));
+      case 'anyCast': return ev.type === 'cast' && (!ab.color || ev.card.def.colors.includes(ab.color)) && (!ab.multicolor || ev.card.def.colors.length > 1) && (!ab.colorsAny || ab.colorsAny.some(col => ev.card.def.colors.includes(col))) && (!ab.who || (ab.who === 'opp') === (ev.player !== c.controller)) && (!ab.kind || ab.kind === 'any' || (ab.kind === 'noncreature' ? !isCreatureDef(ev.card) : ab.kind === 'creature' ? isCreatureDef(ev.card) : ev.card.def.kind === ab.kind || ev.card.def.types.map(t => t.toLowerCase()).includes(ab.kind)));
       case 'exalted': return false;
     }
     return false;
@@ -560,9 +566,9 @@ export class Duel {
     }
     // "that creature" in block triggers refers to the other creature in the fight
     let fixed = null;
-    if (ev.type === 'blocks') fixed = ev.attacker;
+    if (ev.type === 'blocks') fixed = ab.event === 'anyBlocks' || ab.event === 'anyAttacksOrBlocks' ? ev.card : ev.attacker;   // Battle Strain: "that creature" is the blocker
     else if (ev.type === 'becomesBlocked') fixed = (ab.filter && ev.by.find(b => this.matchFilter(b, ab.filter))) || ev.by?.[0] || null;
-    else if ((ev.type === 'etb' || ev.type === 'tapped' || ev.type === 'manaTap' || ev.type === 'dies' || ev.type === 'cast') && ev.card !== source) fixed = ev.card;
+    else if ((ev.type === 'etb' || ev.type === 'tapped' || ev.type === 'manaTap' || ev.type === 'dies' || ev.type === 'cast' || ev.type === 'attacks') && ev.card !== source) fixed = ev.card;
     else if (ev.type === 'damage' && ev.source !== source) fixed = ev.source;
     if (/^enchanted/.test(ab.event) && source.attachedTo && ev.type !== 'blocks' && ev.type !== 'becomesBlocked') fixed = fixed && fixed !== source.attachedTo ? fixed : source.attachedTo;
     if (ev.type === 'enchantedGone') fixed = ev.host;
@@ -699,7 +705,8 @@ export class Duel {
     return true;
   }
   sacMatches(c, what, cost = null) {
-    if (!(isType(c, what) || hasSubtype(c, cap(what)) || (what === 'creature' && isCreature(c)))) return false;
+    if (!(what === 'permanent' || isType(c, what) || hasSubtype(c, cap(what)) || (what === 'creature' && isCreature(c)))) return false;
+    if (cost?.sacNontoken && c.token) return false;
     if (cost?.sacColor && !c.def.colors.includes(cost.sacColor)) return false;
     if (cost?.sacToken && !c.token) return false;
     if (cost?.sacSnow && !c.def.supertypes.includes('Snow')) return false;
@@ -1577,7 +1584,8 @@ export class Duel {
       case 'flag': for (const s of subs) if (s.card) { if (e.temp) s.card.temp.flags.push(e.flag); else s.card.flags.add(e.flag); } break;
       case 'loseTemp': for (const s of subs) if (s.card) s.card.temp.flags.push('lose:' + e.keyword); break;
       case 'removeFromCombat': for (const s of subs) if (s.card) { removeFrom(this.attackers, s.card.id); delete this.blocks[s.card.id]; for (const k of Object.keys(this.blocks)) this.blocks[k] = this.blocks[k].filter(id => id !== s.card.id); this.say(`${s.card.def.name} is removed from combat.`); } break;
-      case 'draw': for (const s of subs) if (s.player) this.drawCards(s.player, this.amount(e.amount, ctx, s)); break;
+      case 'draw': for (const s of subs) if (s.player) { if (e.mayDraw && !(yield { kind: 'yesno', player: s.player.idx, text: `${src.def.name}: draw a card?`, card: src.id, value: 'mayDraw' })) continue; this.drawCards(s.player, this.amount(e.amount, ctx, s)); } break;
+      case 'winGame': this.end(p.idx, `${p.name} wins with ${src.def.name}.`); break;
       case 'drawDiscardHand': for (const sb of subs) if (sb.player) { const k = sb.player.hand.length; this.drawCards(sb.player, k); yield* this.discardChoice(sb.player, k, false, p); } break;
       case 'discardDownTo': for (const sb of subs) if (sb.player) { const keep = this.amount(e.amount, ctx) || 0; const nn = Math.max(0, sb.player.hand.length - keep); if (nn > 0) yield* this.discardChoice(sb.player, nn, false, p); } break;
       case 'discardDraw': for (const s of subs) if (s.player) { const k = s.player.hand.length; this.discardCards(s.player, s.player.hand.slice()); this.drawCards(s.player, k); } break;
@@ -2265,6 +2273,7 @@ export class Duel {
       // Madness: the card is discarded into exile, and its owner may cast it for its madness cost.
       if (c.def.keywords.some(k => k.k === 'Madness') && c.def.kind !== 'unsupported') { this.moveTo(c, 'exile'); this.say(`${p.name} discards ${c.def.name} (madness).`); this.pushTrigger(c, { effects: [{ type: 'madness' }], text: 'Madness' }); continue; }
       this.moveTo(c, 'graveyard'); this.say(`${p.name} discards ${c.def.name}.`);
+      this.fireEvent({ type: 'discarded', player: p.idx, card: c });   // Megrim
     }
   }
   // Cast a card as part of an effect (madness): pay `cost` instead of its mana cost, ignoring timing. Returns true if cast.
@@ -2562,6 +2571,11 @@ export class Duel {
     if (cond.attackedOrBlocked && !(src.attackedThisTurn || src.blockedThisTurn)) ok = false;
     if (cond.threshold && me.graveyard.length < 7) ok = false;
     if (cond.selfCreature && !isCreature(src)) ok = false;
+    if (cond.lifeLE !== undefined && me.life > cond.lifeLE) ok = false;
+    if (cond.lifeGE !== undefined && me.life < cond.lifeGE) ok = false;
+    if (cond.creaturesGE !== undefined && me.battlefield.filter(isCreature).length < cond.creaturesGE) ok = false;
+    if (cond.noUntappedLands && me.battlefield.some(l => isLand(l) && !l.tapped)) ok = false;
+    if (cond.noLandPlayed && me.landPlayed > 0) ok = false;
     if (cond.notCreature && isCreature(src)) ok = false;   // Opal Champion: only while it is still just an enchantment
     if (cond.anyColorPerm && !me.battlefield.some(x => cond.anyColorPerm.some(col => colorsOf(x).includes(col)))) ok = false;   // Sanctuaries   // Spawning Pool's regeneration only while it's a creature
     if (cond.onlyCreatureInGy && !(src.zone === 'graveyard' && me.graveyard.filter(isCreatureDef).length === 1)) ok = false;   // Nether Spirit

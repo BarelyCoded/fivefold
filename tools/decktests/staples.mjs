@@ -583,5 +583,30 @@ section('Vernal Bloom and Fluctuator');
 { const d = newDuel(); mainPhase(d); place(d, D('Vernal Bloom'), 1); const f = place(d, D('Forest'), 0); pool(d, 0, {}); d.activateMana(d.players[0], f, 0, 'G'); ok(d.players[0].pool.G === 2, 'Forest makes GG');
   const d2 = newDuel(); mainPhase(d2); place(d2, D('Fluctuator'), 0); const c = hand(d2, D('Krosan Tusker'), 0); pool(d2, 0, { G: 1 }); ok(d2.canCast(d2.players[0], c, { cycling: true }), 'Tusker cycles for just {G}'); }
 
+section('Attack/block triggers: Caltrops, Fervent Charge, Battle Strain');
+{ const d = newDuel(); mainPhase(d); place(d, D('Caltrops'), 1); place(d, D('Fervent Charge'), 0); const a = place(d, D('Hill Giant'), 0);
+  d.fireEvent({ type: 'attacks', card: a }); processAndResolve(d); d.refresh(); ok(a.damage === 1 && power(a) === 5, `Hill Giant took 1 and got +2/+2 (${a.damage}, ${power(a)})`);
+  const d2 = newDuel(); mainPhase(d2); place(d2, D('Battle Strain'), 0); const b = place(d2, bears(), 1), x = place(d2, bears(), 0); d2.fireEvent({ type: 'blocks', card: b, attacker: x }); processAndResolve(d2);
+  ok(d2.players[1].life === 19, `blocker's controller takes 1 (${d2.players[1].life})`); }
+
+section('Aura Shards, Horn of Greed, Havoc, No Mercy, Megrim, Fecundity');
+{ const d = newDuel(); mainPhase(d); place(d, D('Aura Shards'), 0); const art = place(d, D('Mind Stone'), 1); const b = hand(d, bears(), 0); pool(d, 0, { G: 2 }); d.cast(d.players[0], b, {}); processAndResolve(d, [{ type: 'perm', id: art.id }]);
+  ok(art.zone === 'graveyard', 'Aura Shards destroyed the artifact');
+  const d2 = newDuel(); mainPhase(d2); place(d2, D('Horn of Greed'), 1); lib(d2, bears(), 0); const f = hand(d2, D('Forest'), 0); d2.cast(d2.players[0], f); processAndResolve(d2); ok(d2.players[0].hand.length === 1, 'drew for the land');
+  const d3 = newDuel(); mainPhase(d3); place(d3, D('Havoc'), 1); const sw = hand(d3, D('Swords to Plowshares'), 0); const t = place(d3, bears(), 1); pool(d3, 0, { W: 1 }); d3.cast(d3.players[0], sw, { targets: [{ type: 'perm', id: t.id }] }); processAndResolve(d3);
+  ok(d3.players[0].life === 18, `Havoc: 2 for casting white (${d3.players[0].life})`);
+  const d4 = newDuel(); mainPhase(d4); place(d4, D('No Mercy'), 0); const g = place(d4, bears(), 1); d4.dealDamage(g, d4.players[0], 2); processAndResolve(d4); ok(g.zone === 'graveyard', 'No Mercy destroyed the damaging creature');
+  const d5 = newDuel(); mainPhase(d5); place(d5, D('Megrim'), 0); hand(d5, bears(), 1); d5.discardCards(d5.players[1], d5.players[1].hand.slice()); processAndResolve(d5); ok(d5.players[1].life === 18, 'Megrim: 2 per discard');
+  const d6 = newDuel(); mainPhase(d6); place(d6, D('Fecundity'), 1); const k = place(d6, bears(), 0); lib(d6, bears(), 0); d6.destroy(k); processAndResolve(d6); ok(d6.players[0].hand.length === 1, 'Fecundity: the dead creature\'s controller draws'); }
+
+section('Upkeep / end-step conditions, Altar of Dementia, Xanthic Statue');
+{ const d = newDuel(); mainPhase(d); place(d, D('Convalescence'), 0); d.players[0].life = 8; d.fireEvent({ type: 'upkeep', player: 0 }); processAndResolve(d); ok(d.players[0].life === 9, 'Convalescence at 8');
+  d.players[0].life = 15; d.fireEvent({ type: 'upkeep', player: 0 }); processAndResolve(d); ok(d.players[0].life === 15, 'not at 15');
+  const d2 = newDuel(); mainPhase(d2); place(d2, D('Test of Endurance'), 0); d2.players[0].life = 50; d2.fireEvent({ type: 'upkeep', player: 0 }); processAndResolve(d2); ok(d2.winner === 0, 'Test of Endurance wins at 50');
+  const d3 = newDuel(); mainPhase(d3); const al = place(d3, D('Altar of Dementia'), 0); place(d3, D('Hill Giant'), 0); for (let i = 0; i < 5; i++) lib(d3, bears(), 1);
+  d3.activate(d3.players[0], al, abIdx(al.def, a => a.type === 'activated'), { targets: [{ type: 'player', idx: 1 }] }); processAndResolve(d3); ok(d3.players[1].graveyard.length === 3, `milled 3 (${d3.players[1].graveyard.length})`);
+  const d4 = newDuel(); mainPhase(d4); const xs = place(d4, D('Xanthic Statue'), 0); pool(d4, 0, { C: 5 }); d4.activate(d4.players[0], xs, abIdx(xs.def, a => a.type === 'activated'), {}); processAndResolve(d4); d4.refresh();
+  ok(isCreature(xs) && power(xs) === 8 && has(xs, 'Trample'), 'Xanthic Statue is an 8/8 trampler'); }
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

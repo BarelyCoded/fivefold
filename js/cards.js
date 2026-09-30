@@ -464,6 +464,20 @@ const rules = [
   [/^until end of turn, (target creature) loses all abilities and has base power and toughness 0\/1$/, m => tgt({ type: 'humble' }, m[1])],   // Humble
   [/^(target player) gains 4 life, then gains 4 life for each card named ~ in each graveyard$/, m => tgt({ type: 'gain', amount: { calc: 'graveyardNameAll', base: 4, mult: 4 } }, m[1])],   // Life Burst
   [/^you gain x plus (\d+) life$/, m => [{ type: 'gain', sel: 'you', amount: { calc: 'x', base: Number(m[1]) } }]],   // Vitalizing Cascade
+  [/^you win the game$/, () => [{ type: 'winGame' }]],
+  [/^they lose (\d+) life$/, m => [{ type: 'lose', amount: Number(m[1]), sel: 'thatPlayer' }]],   // Havoc
+  [/^you lose (\d+) life and add \{([wubrg])\}$/, m => [{ type: 'lose', amount: Number(m[1]), sel: 'you' }, { type: 'addMana', mana: [m[2].toUpperCase()] }]],   // Carnival of Souls
+  [/^(?:that creature's|its) controller (may )?draws? a card$/, m => [{ type: 'draw', amount: 1, sel: 'prevController', ...(m[1] ? { mayDraw: true } : {}) }]],   // Fecundity, Kavu Lair
+  [/^(?:that creature's|its) controller discards a card$/, () => [{ type: 'discard', amount: 1, sel: 'prevController' }]],   // Bereavement
+  [/^that creature's controller sacrifices a land(?: of their choice)?$/, () => [{ type: 'sacrifice', what: 'land', sel: 'prevController' }]],   // Burning Sands
+  [/^that player draws a card$/, () => [{ type: 'draw', amount: 1, sel: 'thatPlayer' }]],   // Horn of Greed
+  [/^that player discards a card$/, () => [{ type: 'discard', amount: 1, sel: 'thatPlayer' }]],   // Putrefaction
+  [/^~ deals (\d+) damage to that (?:creature's controller|player)$/, m => [{ type: 'damage', amount: Number(m[1]), sel: /creature's/.test(m[0]) ? 'prevController' : 'thatPlayer' }]],   // Battle Strain, Megrim, Scald
+  [/^~ deals (\d+) damage to it$/, m => [{ type: 'damage', amount: Number(m[1]), sel: 'prev' }]],   // Caltrops, Powerstone Minefield
+  [/^it gets ([+-]\d+)\/([+-]\d+) until end of turn$/, m => [{ type: 'pump', p: Number(m[1]), t: Number(m[2]), sel: 'prev' }]],   // Fervent Charge, Briar Patch
+  [/^you gain life equal to its toughness$/, () => [{ type: 'gainEqualPrev', stat: 'toughness' }]],   // Angelic Chorus
+  [/^(target player) mills cards equal to the sacrificed creature's power$/, m => tgt({ type: 'mill', amount: { calc: 'stat', stat: 'power', of: 'sacrificed' } }, m[1])],   // Altar of Dementia
+  [/^put (target (?:creature )?card from your graveyard) on top of your library$/, m => tgt({ type: 'gyToTop' }, m[1])],   // Haunted Crossroads
   [/^choose a color$/, () => [{ type: 'chooseColorSelf' }]],
   [/^~ becomes the color of your choice until end of turn$/, () => [{ type: 'chooseColorSelf', temp: true }]],
   [/^~ gets \+(\d+)\/\+(\d+) and becomes the color of your choice until end of turn$/, m => [{ type: 'pump', p: Number(m[1]), t: Number(m[2]), sel: 'self', restrict: {} }, { type: 'chooseColorSelf', temp: true }]],   // Wild Mongrel
@@ -670,7 +684,8 @@ const rules = [
   // Manlands: "~ becomes a 2/2 Assembly-Worker artifact creature until end of turn" (Mishra's Factory, etc.)
   // Also "2/1 blue Faerie creature with flying until end of turn" (Faerie Conclave, Treetop Village) and the
   // permanent "3/3 Elemental artifact creature that's still a land" (Stalking Stones).
-  [/^~ becomes a (\d+)\/(\d+)(.*?) creature(?: with (.+?))? (until end of turn|that's still a land)(?:\. it's still a land)?$/, m => {
+  [/^until end of turn, ~ becomes (an? \d+\/\d+ .+? creature(?: with .+?)?)$/, m => parseSentence('~ becomes ' + m[1] + ' until end of turn')],   // Xanthic Statue
+  [/^~ becomes an? (\d+)\/(\d+)(.*?) creature(?: with (.+?))? (until end of turn|that's still a land)(?:\. it's still a land)?$/, m => {
     const words = (m[3] || '').trim().split(/\s+/).filter(Boolean);
     const SUPER = ['artifact', 'enchantment', 'land'];
     const types = ['creature', ...words.filter(w => SUPER.includes(w))];
@@ -690,7 +705,7 @@ function parseClause(t) {
 }
 // A sentence may chain clauses with ", then " or " and ".
 function parseSentence(s) {
-  const t = s.trim().replace(/\.$/, '');
+  const t = s.trim().replace(/\.$/, '').replace(/( creature tokens?) named [a-z' ,-]+$/i, '$1');   // "a 3/1 red Beast creature token named Carnivore"
   const one = parseClause(t);
   if (one) return one;
   let um;
@@ -823,7 +838,8 @@ function parseAbilityCost(text) {
       if (mana) { const c = parseCost(mana); cost.mana.pips.push(...c.pips); cost.mana.generic += c.generic; cost.mana.x ||= c.x; }
     }
     else if (/^sacrifice ~$/i.test(p)) cost.sacSelf = true;
-    else if ((m = p.match(/^sacrifice (a|an|another|two|three|\d+) (?:(snow|white|blue|black|red|green|untapped) )?([a-z]+?)(?: (token))?s?$/i)) && /^[a-z]+$/i.test(m[3])) {
+    else if ((m = p.match(/^sacrifice (a|an|another|two|three|\d+) (?:(snow|white|blue|black|red|green|untapped|nontoken) )?([a-z]+?)(?: (token))?s?$/i)) && /^[a-z]+$/i.test(m[3])) {
+      if (m[2] && m[2].toLowerCase() === 'nontoken') cost.sacNontoken = true;   // Infernal Tribute
       cost.sacrifice = m[3].toLowerCase() === 'plain' ? 'plains' : m[3].toLowerCase(); cost.sacN = amt(m[1].toLowerCase()) || 1;
       if (m[2] && COLOR_WORD[m[2].toLowerCase()]) cost.sacColor = COLOR_WORD[m[2].toLowerCase()];
       if (m[2] && m[2].toLowerCase() === 'snow') cost.sacSnow = true;
@@ -1277,6 +1293,10 @@ function parseAbilityLine(line, ctx) {
     let zoneGy = false;
     if ((cm = rest.match(/^if ~ is the only creature card in your graveyard, (?:you may )?return ~ to the battlefield$/))) return { type: 'triggered', ...ev, condition: { onlyCreatureInGy: true }, zone: 'graveyard', effects: [{ type: 'selfFromGraveyard', to: 'battlefield' }], optional: true, text: line };   // Nether Spirit
     if ((cm = rest.match(/^if ~ is in your graveyard, (.+)$/))) { zoneGy = true; rest = cm[1]; }   // Genesis
+    if ((cm = rest.match(/^if you have (\d+) or (less|more) life, (.+)$/))) { condition = cm[2] === 'less' ? { lifeLE: Number(cm[1]) } : { lifeGE: Number(cm[1]) }; rest = cm[3]; }   // Convalescence, Test of Endurance
+    if ((cm = rest.match(/^if you control (\w+) or more creatures, (.+)$/))) { condition = { creaturesGE: amt(cm[1]) }; rest = cm[2]; }   // Epic Struggle
+    if ((cm = rest.match(/^if you control no untapped lands, (.+)$/))) { condition = { noUntappedLands: true }; rest = cm[1]; }   // Well of Life / Discovery
+    if ((cm = rest.match(/^if you didn't play a land this turn, (.+)$/))) { condition = { noLandPlayed: true }; rest = cm[1]; }   // Mercadian Atlas
     if ((cm = rest.match(/^if there are no (\w+?)s on the battlefield, (.+)$/))) { condition = { noSubtype: capSub(cm[1]) }; rest = cm[2]; }   // Sarcomancy
     const pay = parsePay(rest);
     let body = pay.body;
@@ -1351,6 +1371,20 @@ function parseEvent(w) {
   if ((m = w.match(/^(?:a|an) (.+?) is put into a graveyard from the battlefield(?:, if it wasn't sacrificed)?$/))) { const k = parseTarget('each ' + m[1]); return k && k.sel === 'each' && !k.restrict.players ? { event: 'anyDies', restrict: k.restrict, notSacrificed: / wasn't sacrificed/.test(w) } : null; }
   if (/^~ is dealt damage$/.test(w)) return { event: 'dealtDamage' };
   if (/^a card is put into your graveyard from anywhere$/.test(w)) return { event: 'toYourGraveyard' };   // Energy Field
+  // ---- any-creature combat / board events (coverage sweep) ----
+  if ((m = w.match(/^a creature (you control )?attacks( you)?$/))) return { event: 'anyAttacks', yours: !!m[1], attacksYou: !!m[2] };   // Caltrops, Fervent Charge, Briar Patch
+  if ((m = w.match(/^a creature (you control )?blocks$/))) return { event: 'anyBlocks', yours: !!m[1] };   // Noble Stand, Battle Strain
+  if (/^a creature attacks or blocks$/.test(w)) return { event: 'anyAttacksOrBlocks' };   // Powerstone Minefield
+  if (/^a creature you control enters(?: the battlefield)?$/.test(w)) return { event: 'anyCreatureEtb', yours: true };   // Aura Shards, Angelic Chorus
+  if ((m = w.match(/^a creature with power (\d+) or greater enters(?: the battlefield)?$/))) return { event: 'anyCreatureEtb', powerGE: Number(m[1]) };   // Kavu Lair
+  if (/^a player plays a land$/.test(w)) return { event: 'anyPlaysLand' };   // Horn of Greed
+  if (/^a creature deals damage to you$/.test(w)) return { event: 'creatureDamagesYou' };   // No Mercy
+  if ((m = w.match(/^an? (white|blue|black|red|green) creature dies$/))) return { event: 'anyDies', restrict: { types: ['creature'], colors: [COLOR_WORD[m[1]]] } };   // Bereavement
+  if (/^an opponent discards a card$/.test(w)) return { event: 'oppDiscards' };   // Megrim
+  if (/^an opponent casts a multicolored spell$/.test(w)) return { event: 'anyCast', who: 'opp', multicolor: true };   // Rewards of Diversity
+  if ((m = w.match(/^a player casts a (white|blue|black|red|green) or (white|blue|black|red|green) spell$/))) return { event: 'anyCast', colorsAny: [COLOR_WORD[m[1]], COLOR_WORD[m[2]]] };   // Putrefaction
+  if ((m = w.match(/^a player taps (?:a|an) (plains|island|swamp|mountain|forest) for mana$/))) return { event: 'manaTap', landType: cap(m[1]) };   // Scald
+  if ((m = w.match(/^an opponent taps (?:a|an) (plains|island|swamp|mountain|forest) for mana$/))) return { event: 'manaTap', landType: cap(m[1]), opp: true };   // Sanctimony
   if ((m = w.match(/^(?:a|an|another) (\w+) enters(?: the battlefield)?$/)) && !['creature', 'land'].includes(m[1])) return { event: 'anyCreatureEtb', subtype: capSub(m[1]), other: /^another /.test(w) };   // Wirewood Savage: "whenever a Beast enters"
   if ((m = w.match(/^(a player|an opponent) casts (?:a|an) (creature|noncreature|artifact|enchantment|instant|sorcery) spell$/))) return { event: 'anyCast', kind: m[2], who: m[1] === 'an opponent' ? 'opp' : null };
   if (/^you play a land$/.test(w)) return { event: 'youPlayLand' };
