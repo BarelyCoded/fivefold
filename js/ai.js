@@ -152,6 +152,12 @@ function worth(duel, p, card, opts) {
     case 'fog': case 'pump': case 'grant': case 'regenerate': case 'counter': case 'flag': return false; // instant-speed or combat use only
     case 'destroyAll': { const mine = p.battlefield.filter(c => duel.matchesRestrict(c, e.restrict, p)).reduce((s, c) => s + value(c), 0); const theirs = opp.battlefield.filter(c => duel.matchesRestrict(c, e.restrict, p)).reduce((s, c) => s + value(c), 0); return theirs >= mine + 4; }
     case 'discard': return opp.hand.length >= 2;
+    case 'damageDivided': return e.creatures ? opp.battlefield.some(isCreature) : true;
+    case 'preventDivided': case 'doomsday': return false;   // reactive / combo-only
+    case 'showAndTell': return p.hand.some(c => c !== card && c.def.isPermanent && !isLand(c) && (c.def.cmc || 0) >= 5);
+    case 'massReturn': return p.graveyard.filter(c => c.def.types.map(t => t.toLowerCase()).includes(e.what)).length >= 2;
+    case 'destroyAllChoice': return e.options.some(t => opp.battlefield.filter(c => t === 'creature' ? isCreature(c) : isType(c, t)).length > p.battlefield.filter(c => t === 'creature' ? isCreature(c) : isType(c, t)).length + 1);
+    case 'pox': return p.life > opp.life && p.hand.length <= opp.hand.length;
     case 'mill': return false;
     case 'token': return true;
     case 'extraTurn': return true;

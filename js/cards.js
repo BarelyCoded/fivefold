@@ -409,6 +409,8 @@ const rules = [
   // Doomsday
   [/^search your library and graveyard for five cards and exile the rest$/, () => [{ type: 'doomsday', n: 5 }]],
   [/^put the chosen cards on top of your library in any order$/, () => []],
+  // Goblin Recruiter: stack any number of Goblins on top in any order.
+  [/^search your library for any number of (\w+?) cards, reveal them, then shuffle and put (?:them|those cards) on top(?: of your library)? in any order$/, m => [{ type: 'tutorStack', what: m[1] }]],
   [/^choose a color$/, () => [{ type: 'chooseColorSelf' }]],
   [/^~ becomes the color of your choice until end of turn$/, () => [{ type: 'chooseColorSelf', temp: true }]],
   [/^~ gets \+(\d+)\/\+(\d+) and becomes the color of your choice until end of turn$/, m => [{ type: 'pump', p: Number(m[1]), t: Number(m[2]), sel: 'self', restrict: {} }, { type: 'chooseColorSelf', temp: true }]],   // Wild Mongrel
@@ -425,6 +427,15 @@ const rules = [
   [/^~ deals damage equal to its power to (.+)$/, m => tgt({ type: 'damageEqualPower' }, m[1])],
   [/^~ deals (\S+) damage to each creature (with|without) flying and each player$/, m => [{ type: 'damage', amount: amt(m[1]), sel: 'each', restrict: { types: ['creature'], flying: m[2] === 'with', players: 'all' } }]],
   [/^~ deals (\S+) damage to each creature and each player$/, m => [{ type: 'damage', amount: amt(m[1]), sel: 'each', restrict: { types: ['creature'], players: 'all' } }]],
+  // Divided damage (Fire Covenant, Pyrokinesis, Arc Lightning, Rolling Thunder, …): targets and the split are chosen as it resolves.
+  [/^(?:~|it) deals (x plus 1|x|\d+) damage divided as you choose among (one, two, or three|one or two|any number of) (targets|target creatures|target .+? creatures(?: without flying)?)(?:, where x is the number of creatures on the battlefield as you cast ~)?$/, m => {
+    const amount = m[1] === 'x plus 1' ? { calc: 'x', base: 1 } : /where x is the number of creatures/.test(m[0]) ? { calc: 'count', restrict: { types: ['creature'] } } : amt(m[1]);
+    const max = m[2] === 'one, two, or three' ? 3 : m[2] === 'one or two' ? 2 : 99;
+    let restrict = {}, creatures = false;
+    if (m[3] !== 'targets') { const k = parseTarget(m[3].replace(/creatures/, 'creature')); if (!k || k.sel !== 'creature') return null; restrict = k.restrict || {}; creatures = true; }
+    return [{ type: 'damageDivided', amount, max, creatures, restrict, note: 'targets and the split are chosen as it resolves' }];
+  }],
+  [/^prevent the next (x|\d+) damage that would be dealt this turn to any number of targets, divided as you choose(?:, where x is the number of (\w+) counters on ~)?$/, m => [{ type: 'preventDivided', amount: m[2] ? { calc: 'counters', kind: m[2] } : amt(m[1]), note: 'targets and the split are chosen as it resolves' }]],   // Remedy, Embolden, Serra's Hymn
   [/^~ deals (\S+)(?: plus (\d+))? damage divided (?:evenly|as you choose)[^]*$/, m => [{ type: 'damage', amount: m[2] ? { calc: 'x', base: Number(m[2]) } : amt(m[1]), sel: 'any', restrict: {}, note: 'damage not divided' }]],
   [/^~ deals damage to that player equal to the number of (.+?) they control$/, m => { const c = countOf(m[1] + ' that player controls'); return c ? [{ type: 'damage', amount: { ...c, of: 'subject' }, sel: 'thatPlayer' }] : null; }],
   // "have it deal X damage to target creature, where X is ..." — cycling triggers like Gempalm Incinerator
@@ -1372,7 +1383,7 @@ export function compile(c) {
     // Daze / Gush: "You may return an/two Island(s) you control to its/their owner's hand rather than pay this spell's mana cost."
     if ((m = lower.match(/^you may return (a|an|\w+) (plains|island|swamp|mountain|forest)s? you control to (?:its owner's|their owner's|your) hand rather than pay (?:this spell's|~'s) mana cost\.?$/))) { alternativeCost = { ...(alternativeCost || {}), bounceLands: { land: cap(m[2]), n: amt(m[1]) || 1 } }; continue; }
     // Foil: "You may discard an Island card and another card rather than pay this spell's mana cost."
-    if ((m = lower.match(/^you may discard (?:a|an) (plains|island|swamp|mountain|forest) card and another card rather than pay (?:this spell's|~'s) mana cost\.?$/))) { alternativeCost = { ...(alternativeCost || {}), discardAlt: { land: cap(m[1]), others: 1 } }; continue; }
+    if ((m = lower.match(/^you may discard (?:a|an) (plains|island|swamp|mountain|forest) card( and another card)? rather than pay (?:this spell's|~'s) mana cost\.?$/))) { alternativeCost = { ...(alternativeCost || {}), discardAlt: { land: cap(m[1]), others: m[2] ? 1 : 0 } }; continue; }   // Foil, Flameshot
     // Prohibit: "If this spell was kicked, counter that spell if its mana value is 4 or less instead."
     if ((m = lower.match(/^if (?:~|this spell) was kicked, counter that spell if its mana value is (\d+) or less instead\.?$/)) && spellEffects.some(e => e.type === 'counter' && e.maxMv != null)) { spellEffects.find(e => e.type === 'counter').kickedMaxMv = Number(m[1]); continue; }
     if ((m = lower.match(/^if (?:~|this spell) was kicked, (.+)$/))) { const eff = parseEffects(m[1]); if (eff.effects.length) kickedEffects = eff.effects; else def.notes.push('Kicker effect ignored'); continue; }
@@ -1387,6 +1398,8 @@ export function compile(c) {
     if (/^if ~ would enter(?: the battlefield)?, you may discard a land card instead\. if you do, put ~ onto the battlefield\. if you don't, put it into its owner's graveyard\.?$/.test(lower)) { def.entersDiscard = 'land'; continue; }   // Blurred Mongoose, Kavu Chameleon, Vexing Beetle, …
     if ((m = lower.match(/^flashback[—-]\s*(\{.+?\}), pay (\d+) life\.?$/))) { def.keywords.push({ k: 'Flashback', cost: parseCost(m[1]), life: Number(m[2]) }); continue; }   // Spirit Flare, Chill to the Bone
     // "You may cast ~ as though it had flash. …": approximate as Flash; the "sacrifice at cleanup if cast at instant speed" downside is dropped.
+    // Rout: "... If you cast it any time a sorcery couldn't have been cast, it costs {2} more to cast."
+    if ((m = lower.match(/^you may cast ~ as though it had flash(?:\. if you cast it any time a sorcery couldn't have been cast, it costs \{(\d+)\} more to cast| if you pay \{(\d+)\} more to cast it)\.?$/))) { m[1] = m[1] || m[2]; if (!def.keywords.some(k => k.k === 'Flash')) def.keywords.push({ k: 'Flash' }); def.flashTax = Number(m[1]); continue; }
     if (/^you may cast ~ as though it had flash\b/.test(lower)) { if (!def.keywords.some(k => k.k === 'Flash')) def.keywords.push({ k: 'Flash' }); def.notes.push('Approximated: cast at instant speed; the "sacrifice it at cleanup if cast that way" downside is not enforced'); continue; }
     // Cabal Ritual: the threshold "Add {B}{B}{B}{B}{B} instead …" rider folds into the ritual on the line before it.
     if ((m = lower.match(/^(?:threshold — )?add ((?:\{[wubrgc]\})+) instead if there are seven or more cards in your graveyard\.?$/)) && spellEffects.length && spellEffects[spellEffects.length - 1].type === 'addMana') {
@@ -1436,7 +1449,7 @@ export function compile(c) {
     for (let i = spellEffects.length - 1; i >= 0; i--) if (spellEffects[i].type === 'counterBonusDraw') { const c = spellEffects.find(e => e.type === 'counter'); if (c) c.drawController = spellEffects[i].amount; spellEffects.splice(i, 1); }
     if (!spellEffects.length && !modes.length) return unsupported('No recognisable effect');
     def.spell = { effects: spellEffects, modes: modes.length ? modes : null, modal, additionalCost, alternativeCost, kickedEffects };
-    if (def.cost.x && !JSON.stringify(spellEffects).includes('"X"') && !modes.length) def.notes.push('X has no effect');
+    if (def.cost.x && !JSON.stringify(spellEffects).includes('"X"') && !JSON.stringify(spellEffects).includes('"calc":"x"') && !modes.length) def.notes.push('X has no effect');
   }
   if (def.kind === 'creature') {
     if (def.starPT && !def.abilities.some(a => a.kind === 'cda')) return unsupported('Variable power/toughness');

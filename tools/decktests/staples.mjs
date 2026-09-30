@@ -389,5 +389,34 @@ section('Morph in multiplayer: the mirror hides the opponent\'s face-down card')
   const hc = host.players[0].battlefield.find(c => c.id === ea.id);
   ok(hc && hc.faceDown && hc.realDef?.name === 'Exalted Angel' && hc.unmorph, 'its controller\'s mirror knows the card and can turn it up'); }
 
+section('Divided damage: Fire Covenant splits X among creatures; Arc Lightning hits a player too');
+{ const d = newDuel(); mainPhase(d); const a = place(d, bears(), 1), b = place(d, D('Hill Giant'), 1); const fc = hand(d, D('Fire Covenant'), 0); pool(d, 0, { B: 1, R: 1, C: 1 });
+  d.cast(d.players[0], fc, { x: 5 }); const g = d.resolveTop(); let r = g.next();
+  while (!r.done) { const y = r.value; r = g.next(y.kind === 'choose' ? [a.id, b.id] : y.kind === 'divide' ? { [a.id]: 2, [b.id]: 3 } : undefined); }
+  ok(a.zone === 'graveyard' && b.zone === 'graveyard' && d.players[0].life === 15, `both die, 5 life paid (${a.zone}, ${b.zone}, ${d.players[0].life})`);
+  const d2 = newDuel(); mainPhase(d2); const c = place(d2, bears(), 1); const al = hand(d2, D('Arc Lightning'), 0); pool(d2, 0, { R: 1, C: 2 });
+  d2.cast(d2.players[0], al, {}); const g2 = d2.resolveTop(); let r2 = g2.next();
+  while (!r2.done) { const y = r2.value; r2 = g2.next(y.kind === 'choose' ? [c.id, -2] : y.kind === 'divide' ? { [c.id]: 2, [-2]: 1 } : undefined); }
+  ok(c.zone === 'graveyard' && d2.players[1].life === 19, `Bears die, 1 to the face (${d2.players[1].life})`); }
+
+section('Divided damage AI: kills what it can, rest to the face');
+{ const d = newDuel(); mainPhase(d); const a = place(d, bears(), 0); const pk = hand(d, D('Violent Eruption'), 1); d.active = 1; d.priority = 1; pool(d, 1, { R: 3, C: 1 });
+  d.cast(d.players[1], pk, {}); processAndResolve(d);
+  ok(a.zone === 'graveyard' && d.players[0].life === 18, `AI: 2 to the Bears, 2 to me (${a.zone}, ${d.players[0].life})`); }
+
+section('Divided prevention: Embolden shields');
+{ const d = newDuel(); mainPhase(d); const a = place(d, bears(), 0); const em = hand(d, D('Embolden'), 0); pool(d, 0, { W: 1, C: 2 });
+  d.cast(d.players[0], em, {}); const g = d.resolveTop(); let r = g.next();
+  while (!r.done) { const y = r.value; r = g.next(y.kind === 'choose' ? [a.id, -1] : y.kind === 'divide' ? { [a.id]: 3, [-1]: 1 } : undefined); }
+  ok(a.shield === 3 && d.players[0].shield === 1, `shields 3 and 1 (${a.shield}, ${d.players[0].shield})`); }
+
+section('Rout costs {2} more at instant speed; Goblin Recruiter stacks Goblins on top');
+{ const d = newDuel(); mainPhase(d); const r = hand(d, D('Rout'), 0); pool(d, 0, { W: 2, C: 3 });
+  ok(d.canCast(d.players[0], r), 'sorcery speed for 5'); d.active = 1; d.step = 'end';
+  ok(!d.canCast(d.players[0], r), 'not for 5 at instant speed'); pool(d, 0, { W: 2, C: 5 }); ok(d.canCast(d.players[0], r), 'for 7 at instant speed');
+  const d2 = newDuel(); mainPhase(d2); for (let k = 0; k < 4; k++) lib(d2, D('Island'), 0); const g1 = lib(d2, D('Goblin Piledriver'), 0), g2 = lib(d2, D('Goblin Warchief'), 0); lib(d2, D('Island'), 0);
+  const gr = hand(d2, D('Goblin Recruiter'), 0); pool(d2, 0, { R: 1, C: 1 }); d2.cast(d2.players[0], gr, {}); processAndResolve(d2, [], y => [g2.id, g1.id]);
+  const L = d2.players[0].library; ok(L[L.length - 1] === g2 && L[L.length - 2] === g1, `Warchief on top, then Piledriver (${L.slice(-2).map(c => c.def.name).join(', ')})`); }
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

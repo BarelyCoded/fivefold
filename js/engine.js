@@ -744,6 +744,7 @@ export class Duel {
     let cost = fromGrave ? (d.keywords.find(k => k.k === 'Flashback')?.cost || d.cost) : d.cost;
     if (opts.kicked) { const k = d.keywords.find(k => k.k === 'Kicker'); if (!k) return false; cost = addCosts(cost, k.cost); }
     if (opts.buyback) { const k = d.keywords.find(k => k.k === 'Buyback'); if (!k) return false; cost = addCosts(cost, k.cost); }
+    if (d.flashTax && !this.sorcerySpeed(p)) cost = addCosts(cost, { pips: [], generic: d.flashTax });   // Rout at instant speed
     cost = this.modifiedCost(p, card, cost);
     if (opts.pitch !== undefined && d.spell?.alternativeCost?.pitch) {
       const pc = this.card(opts.pitch); if (!pc || !p.hand.includes(pc) || pc === card || !pc.def.colors.includes(d.spell.alternativeCost.pitch)) return false;
@@ -859,6 +860,7 @@ export class Duel {
     let cost = fromGrave ? (d.keywords.find(k => k.k === 'Flashback')?.cost || d.cost) : d.cost;
     if (opts.kicked) cost = addCosts(cost, d.keywords.find(k => k.k === 'Kicker').cost);
     if (opts.buyback) cost = addCosts(cost, d.keywords.find(k => k.k === 'Buyback').cost);
+    if (d.flashTax && !this.sorcerySpeed(p)) cost = addCosts(cost, { pips: [], generic: d.flashTax });
     cost = this.modifiedCost(p, card, cost);
     if (opts.pitch !== undefined && d.spell?.alternativeCost?.pitch) { const pc = this.card(opts.pitch); this.moveTo(pc, 'exile'); p.life -= d.spell.alternativeCost.life || 0; this.say(`${p.name} exiles ${pc.def.name} from hand.`); }
     else if (opts.sacLands && d.spell?.alternativeCost?.sacLands) {
@@ -1733,6 +1735,45 @@ export class Duel {
         this.say(`${p.name} keeps ${chosen.length} cards on top and exiles ${all.length - chosen.length}.`);
         break;
       }
+      // Divided damage / prevention: pick the targets and split the amount as it resolves.
+      case 'damageDivided': case 'preventDivided': {
+        const total = this.amount(e.amount, ctx); if (total <= 0) break;
+        const hostile = e.type === 'damageDivided';
+        const cands = [];
+        for (const pl of this.players) for (const c of pl.battlefield) if (isCreature(c) && this.canTarget(p, c, src) && (!e.restrict || this.matchesRestrict(c, e.restrict, p))) cands.push({ id: c.id, card: c, label: `${c.def.name} (${power(c)}/${toughness(c) - c.damage})`, lethal: Math.max(1, toughness(c) - c.damage) });
+        if (!e.creatures) for (const pl of this.players) cands.push({ id: -1 - pl.idx, player: pl, label: pl.name, lethal: Math.max(1, pl.life) });
+        if (!cands.length) { this.say(`${src.def.name} has no targets.`); break; }
+        const max = Math.min(e.max || 99, total, cands.length);
+        let plan = {};
+        if (p.ai) {
+          const opp = this.opponentOf(p); let rem = total;
+          if (hostile) {
+            const kills = cands.filter(t => t.card && t.card.controller !== p.idx).sort((a, b) => ((b.card.def.cmc || 0) + power(b.card)) - ((a.card.def.cmc || 0) + power(a.card)));
+            for (const t of kills) { if (Object.keys(plan).length >= max || rem < t.lethal) continue; plan[t.id] = t.lethal; rem -= t.lethal; }
+            const face = cands.find(t => t.player === opp);
+            if (rem > 0) { if (face && (Object.keys(plan).length < max || plan[face.id])) plan[face.id] = (plan[face.id] || 0) + rem; else { const k = Object.keys(plan)[0] ?? kills[0]?.id ?? cands.find(t => t.player === opp || t.card?.controller !== p.idx)?.id; if (k !== undefined) plan[k] = (plan[k] || 0) + rem; } }
+          } else {
+            const mine = cands.filter(t => (t.card && t.card.controller === p.idx) || t.player === p).sort((a, b) => (a.player ? 1 : 0) - (b.player ? 1 : 0));
+            if (mine[0]) plan[mine[0].id] = rem;
+          }
+        } else {
+          const ids = yield { kind: 'choose', player: p.idx, text: `${src.def.name}: choose up to ${max} target${max > 1 ? 's' : ''} to ${hostile ? 'deal' : 'prevent'} ${total} damage ${hostile ? 'to' : 'for'}`, options: cands.map(t => ({ id: t.id, label: t.label })), min: 1, max };
+          const picked = (ids || []).map(id => cands.find(t => t.id === id)).filter(Boolean).slice(0, max);
+          if (!picked.length) picked.push(cands.find(t => hostile ? (t.player && t.player !== p) : t.player === p) || cands[0]);
+          if (picked.length === 1) plan[picked[0].id] = total;
+          else {
+            const ans = yield { kind: 'divide', player: p.idx, source: src.id, total, trample: false, note: `Divide ${src.def.name}'s ${total} ${hostile ? 'damage' : 'prevention'} among the targets.`, targets: picked.map(t => ({ id: t.id, label: t.label, lethal: t.lethal })) };
+            if (ans && typeof ans === 'object') { let sum = 0; for (const t of picked) { const k = Math.max(0, Number(ans[t.id]) || 0); if (k) { plan[t.id] = k; sum += k; } } if (sum !== total) { plan = {}; picked.forEach((t, i) => { plan[t.id] = Math.floor(total / picked.length) + (i < total % picked.length ? 1 : 0); }); } }
+            else picked.forEach((t, i) => { plan[t.id] = Math.floor(total / picked.length) + (i < total % picked.length ? 1 : 0); });
+          }
+        }
+        for (const [id, k] of Object.entries(plan)) {
+          const t = cands.find(x => String(x.id) === String(id)); if (!t || k <= 0) continue;
+          if (hostile) { if (t.card) { if (t.card.zone === 'battlefield') this.dealDamage(src, t.card, k); } else this.dealDamage(src, t.player, k); }
+          else { (t.card || t.player).shield = ((t.card || t.player).shield || 0) + k; this.say(`The next ${k} damage to ${t.card ? t.card.def.name : t.player.name} this turn is prevented.`); }
+        }
+        break;
+      }
       case 'madness': {   // the discarded card waits in exile: cast it for its madness cost, or it goes to the graveyard
         if (src.zone !== 'exile') break;
         const mad = src.def.keywords.find(k => k.k === 'Madness'); const owner = this.players[src.owner];
@@ -1756,6 +1797,7 @@ export class Duel {
         const newName = pick.type === 'player' ? (pick.label || this.players[pick.idx]?.name) : (pick.label || this.card(pick.id)?.def?.name || 'a new target');
         this.say(`${p.name} changes ${it.card.def.name}'s target to ${newName}.`);
       } break;
+      case 'tutorStack': yield* this.tutorStack(p, e, src); break;
       case 'tutor': yield* this.tutor(e.forThatPlayer && ctx.thatPlayer !== undefined ? this.players[ctx.thatPlayer] : p, e, src); break;   // Pattern of Rebirth searches for the dead creature's controller
       case 'returnSelfToHand': if (src.zone === 'graveyard') { this.moveTo(src, 'hand'); this.say(`${src.def.name} returns to its owner's hand.`); } break;
       // Amplify N: reveal any number of hand cards sharing a creature type with ~, enter with N counters per card.
@@ -1901,6 +1943,18 @@ export class Duel {
     for (const c of revealed) if (c !== found) { c.zone = 'library'; p.library.push(c); this.moveTo(c, 'graveyard'); }
     if (found) this.say(`${found.def.name} goes ${hit === 'hand' ? 'to hand' : 'onto the battlefield'}; ${revealed.length - 1} card${revealed.length === 2 ? '' : 's'} into the graveyard.`);
     else this.say(`No ${what} found; ${revealed.length} card${revealed.length === 1 ? '' : 's'} into the graveyard.`);
+  }
+  // Goblin Recruiter: any number of matching cards, stacked on top in the order you choose.
+  *tutorStack(p, e, src) {
+    const opts = p.library.filter(c => matchCardWhat(c, e.what));
+    let picked;
+    if (p.ai) picked = opts.slice().sort((a, b) => (a.def.cmc || 0) - (b.def.cmc || 0)).slice(0, 6);
+    else { const ids = yield { kind: 'choose', player: p.idx, text: `${src.def.name}: search for any number of ${e.what} cards to put on top`, options: opts.map(c => ({ id: c.id, label: c.def.name })), min: 0, max: opts.length, secret: true }; picked = (ids || []).map(id => this.card(id)).filter((c, i, a) => c && opts.includes(c) && a.indexOf(c) === i); }
+    shuffle(p.library, this.rng);
+    if (picked.length > 1 && !p.ai) { const o = yield { kind: 'order', player: p.idx, text: `Order them (first ends up on top)`, options: picked.map(c => ({ id: c.id, label: c.def.name })), secret: true }; const ord = (o || []).map(id => this.card(id)).filter((c, i, a) => c && picked.includes(c) && a.indexOf(c) === i); for (const c of picked) if (!ord.includes(c)) ord.push(c); picked = ord; }
+    for (const c of picked) removeFrom(p.library, c);
+    for (const c of picked.slice().reverse()) p.library.push(c);
+    this.say(`${p.name} reveals ${picked.length ? picked.map(c => c.def.name).join(', ') : 'nothing'} and puts ${picked.length === 1 ? 'it' : 'them'} on top.`);
   }
   *tutor(p, e, src = null) {
     const what = e.what.replace(/ cards?$/, '');
