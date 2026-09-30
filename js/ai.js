@@ -225,7 +225,11 @@ function mainPhaseAction(duel, p) {
   if (land && duel.canCast(p, land)) return { type: 'cast', card: land };
   // Deck-specific engines (Recurring Nightmare, Survival of the Fittest): run them before generic plays.
   if (plan) { const eng = planEngineAction(duel, p, plan); if (eng) return eng; }
+  // Morph: turn a face-down creature face up as soon as the cost is affordable (before attacking).
+  for (const c of p.battlefield) if (c.faceDown && c.unmorph) { const i = abilitiesOf(c).indexOf(c.unmorph); if (i >= 0 && duel.canActivate(p, c, i)) return { type: 'activate', card: c, index: i, opts: { targets: [] } }; }
   const cands = [];
+  // Morph: a creature we can't afford yet goes down as a 2/2 for {3} (Exalted Angel on turn three).
+  for (const c of p.hand) if (c.def.morph && c.def.kind !== 'unsupported' && !duel.canCast(p, c) && duel.canCast(p, c, { faceDown: true })) cands.push({ c, opts: { faceDown: true }, score: 3 + (c.def.cmc || 0) / 3 });
   for (const c of [...p.hand, ...p.graveyard]) {
     if (c.def.kind === 'land' || c.def.kind === 'unsupported') continue;
     if (c.zone === 'graveyard' && !c.def.keywords.some(k => k.k === 'Flashback') && c.tempFlashback !== duel.turn) continue;

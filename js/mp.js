@@ -5,7 +5,7 @@
 // hydrate(mirror, snap, defOf, localIdx) mutates `mirror` in place (preserving its identity so a mounted
 // view keeps working) to match the snapshot as `localIdx` may see it, then refresh()es and emit()s it.
 
-import { Duel } from './engine.js';
+import { Duel, MORPH_DEF, unmorphAbility } from './engine.js';
 
 // A minimal, render-safe stand-in for a face-down card (opponent hand / either library): it only ever
 // needs to occupy a slot for counts — its contents are never shown.
@@ -25,9 +25,10 @@ export function makeMirror(names = { me: 'You', foe: 'Opponent' }) {
 }
 
 function mkCard(mirror, sc, defOf) {
-  const def = sc.hidden ? FACE_DOWN : (defOf(sc.name) || FACE_DOWN);
+  const def = sc.hidden ? FACE_DOWN : sc.faceDown ? MORPH_DEF : (defOf(sc.name) || FACE_DOWN);
   const c = mirror.instance(def, sc.owner ?? 0);
   c.id = sc.id;
+  if (sc.faceDown) { c.faceDown = true; c.realDef = sc.realName ? defOf(sc.realName) : null; c.unmorph = unmorphAbility(c.realDef); }   // morph: only its controller learns the real card
   if (!sc.hidden) {
     c.controller = sc.controller; c.tapped = !!sc.tapped; c.sick = !!sc.sick; c.damage = sc.damage | 0; c.token = !!sc.token;
     c.counters = { ...sc.counters }; c.temp = { p: sc.temp.p | 0, t: sc.temp.t | 0, kw: [...sc.temp.kw], flags: [...sc.temp.flags] };

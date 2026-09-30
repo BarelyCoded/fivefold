@@ -71,6 +71,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     if (card.def.spell?.alternativeCost?.discardAlt && duel.canCast(me, card, { discardAlt: true })) return true;
     if (card.def.spell?.alternativeCost?.lifeAlt && duel.canCast(me, card, { lifeAlt: true })) return true;
     if (duel.alurenOk?.(card) && duel.canCast(me, card, { aluren: true })) return true;   // Aluren: free creature spells
+    if (card.def.morph && duel.canCast(me, card, { faceDown: true })) return true;   // morph: face down for {3}
     return false;
   }
   function hasAnyPlay() {
@@ -231,6 +232,10 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     if (c.attachedTo) extra += `<div class="card-attachedto">on ${esc(c.attachedTo.def.name)}</div>`;
     const blockedBy = ui.blocks[c.id] || duel.blocks[c.id];
     if (blockedBy && blockedBy.length) extra += `<div class="card-blocked">blocked</div>`;
+    if (c.faceDown) {   // morph: the controller sees what it is; the opponent only sees a face-down 2/2
+      classes.push('facedown');
+      if (owner === me && c.realDef) { extra += `<div class="card-morph" title="Face down — turn it face up for its morph cost">face down · ${esc(costString(c.realDef.morph || { pips: [], generic: 0 }))}</div>`; return cardHtml(c.realDef, { id: c.id, zone: 'bf', counters, classes, pt, ptClass, badge, badgeTitle, extra }); }
+    }
     return cardHtml(c.def, { id: c.id, zone: 'bf', counters, classes, pt, ptClass, badge, badgeTitle, extra });
   }
   function handCard(c) {
@@ -550,6 +555,13 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
   }
   function next(w) {
     const { card, info, opts } = w;
+    if (info.morph && !('faceDown' in opts)) {   // Morph: cast it face down as a 2/2 for {3}, turn it up later
+      if (duel.canCast(me, card, { faceDown: true })) {
+        const normal = duel.canCast(me, card) || card.def.spell?.alternativeCost;
+        ui.menu = { title: `${card.def.name}: cast face down for {3}? (turn it face up later for ${costString(info.morph)})`, items: [{ label: 'Cast face down', primary: !normal, action: () => { ui.menu = null; ui.wizard = null; finishCast({ ...w, opts: { faceDown: true } }); } }, ...(normal ? [{ label: `Cast ${card.def.name} face up`, primary: true, action: () => { opts.faceDown = false; ui.menu = null; next(w); } }] : [])] }; render(); return;
+      }
+      opts.faceDown = false;
+    }
     if (!('modes' in opts) && info.modes) { ui.menu = { title: `${card.def.name}: choose a mode`, items: info.modes.options.map(m => ({ label: m.text, action: () => { opts.modes = [m.index]; ui.menu = null; next(w); } })) }; render(); return; }
     if (info.kicker && !('kicked' in opts)) {
       if (duel.canCast(me, card, { ...opts, kicked: true })) { ui.menu = { title: `Pay kicker ${costString(info.kicker)} for ${card.def.name}?`, items: [{ label: 'Kick it', primary: true, action: () => { opts.kicked = true; ui.menu = null; next(w); } }, { label: 'No kicker', action: () => { opts.kicked = false; ui.menu = null; next(w); } }] }; render(); return; }
@@ -622,7 +634,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
   }
   // Which colours / how much generic the current pool still can't cover (for glow + smart land tapping).
   function neededMana(card) {
-    const cost = card.def.cost || { pips: [], generic: 0 };
+    const cost = (ui.paying?.card === card && ui.paying.opts?.faceDown) ? { pips: [], generic: 3 } : (card.def.cost || { pips: [], generic: 0 });   // morph: face down costs {3}
     const pool = { ...me.pool };
     const colors = new Set();
     for (const pip of (cost.pips || [])) { const col = pip.find(c => pool[c] > 0); if (col) pool[col]--; else pip.forEach(c => colors.add(c)); }
@@ -706,6 +718,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
   // Menu label for an activated ability: cost, then the effect with ~ resolved to the card's own name
   // and a capital first letter — so "{b}: regenerate ~." reads as "Regenerate Drudge Skeletons ({B})".
   function abilityLabel(card, ab) {
+    if (ab.special === 'unmorph') return `Turn face up (${costText(ab.cost)})`;   // morph
     let body = (ab.text || '').split(': ').slice(1).join(': ').replace(/~/g, card.def.name).replace(/\s*\.\s*$/, '').trim();
     if (body) body = body.charAt(0).toUpperCase() + body.slice(1);
     return `${body || 'Ability'} (${costText(ab.cost)})`.slice(0, 90);

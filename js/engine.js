@@ -5,7 +5,14 @@
 // Driving model: call tick() repeatedly. It returns 'over' | 'wait' (human input needed, see
 // duel.pending) | 'job' | 'ai' | 'auto'. AI decisions come from hooks {decide, choose}.
 
-import { needsTarget, COLORS, cmcOf, costString } from './cards.js';
+import { needsTarget, COLORS, cmcOf, costString, compile } from './cards.js';
+
+// Morph: a face-down creature is a nameless, colourless 2/2 with no abilities (cast for {3}, mana value 0).
+export const MORPH_DEF = { ...compile({ name: 'Face-down creature', type_line: 'Creature', oracle_text: '', mana_cost: '{3}', cmc: 0, colors: [], power: '2', toughness: '2', keywords: [] }), cmc: 0, faceDownDef: true };
+// The special action that turns a face-down creature face up for its morph cost (no stack).
+export function unmorphAbility(def) {
+  return def?.morph ? { type: 'activated', special: 'unmorph', cost: { mana: def.morph, tap: false, untap: false, sacSelf: false, sacrifice: null, discard: 0, life: 0, removeCounter: null, exileSelfFromGraveyard: false }, effects: [], optional: false, timing: 'instant', limit: 0, text: `Turn face up (morph ${costString(def.morph)})` } : null;
+}
 
 let uid = 1;
 export function shuffle(a, rng = Math.random) {
@@ -26,7 +33,7 @@ export const isLand = c => c.def.types.includes('Land');
 export const isType = (c, t) => c.def.types.map(x => x.toLowerCase()).includes(t) || (t === 'permanent' && c.def.isPermanent);
 export const hasSubtype = (c, s) => c.def.subtypes.includes(s) || (has(c, 'Changeling') && isCreature(c));
 // Printed abilities plus any granted by statics (Farmstead, Energy Flux, The Tabernacle at Pendrell Vale).
-export const abilitiesOf = c => c.cur?.flags?.has('noAbilities') ? [] : (c.cur?.granted?.length ? [...c.def.abilities, ...c.cur.granted] : c.def.abilities);   // Humility strips them
+export const abilitiesOf = c => c.faceDown ? (c.unmorph ? [c.unmorph] : []) : c.cur?.flags?.has('noAbilities') ? [] : (c.cur?.granted?.length ? [...c.def.abilities, ...c.cur.granted] : c.def.abilities);   // Humility strips them
 
 export class Duel {
   constructor({ player, ai, rng = Math.random, hooks = null, rules = {} }) {
@@ -177,6 +184,7 @@ export class Duel {
   snapshot(forIdx) {
     const serCard = c => ({
       id: c.id, name: c.def.name, controller: c.controller, owner: c.owner,
+      ...(c.faceDown ? { faceDown: true, realName: c.controller === forIdx ? c.realDef?.name : undefined } : {}),
       tapped: !!c.tapped, sick: !!c.sick, damage: c.damage | 0, token: !!c.token,
       counters: { ...c.counters }, temp: { p: c.temp.p | 0, t: c.temp.t | 0, kw: [...c.temp.kw], flags: [...c.temp.flags] },
       flags: [...c.flags], regen: c.regen | 0, shield: c.shield | 0, chosenColor: c.chosenColor || null,
@@ -480,6 +488,7 @@ export class Duel {
   triggerMatches(c, ab, ev) {
     switch (ab.event) {
       case 'etb': return ev.type === 'etb' && ev.card === c;
+      case 'turnedFaceUp': return ev.type === 'turnedFaceUp' && ev.card === c;
       case 'attacks': return ev.type === 'attacks' && ev.card === c;
       case 'unblocked': return ev.type === 'unblocked' && ev.card === c;
       case 'blocks': return ev.type === 'blocks' && ev.card === c;
@@ -724,6 +733,7 @@ export class Duel {
     if (!(card.zone === 'hand' && p.hand.includes(card)) && !(fromGrave && p.graveyard.includes(card))) return false;
     if (opts.cycling) { const cy = d.keywords.find(k => k.k === 'Cycling'); return !!cy && card.zone === 'hand' && this.canPay(p, cy.cost); }
     if (d.kind === 'land') return this.sorcerySpeed(p) && p.landPlayed < this.landLimit(p);
+    if (opts.faceDown) return !!d.morph && card.zone === 'hand' && (this.sorcerySpeed(p) || has0(d, 'Flash')) && !(this.active !== p.idx && this.ownTurnOnly()) && this.canPay(p, this.modifiedCost(p, { def: MORPH_DEF }, MORPH_DEF.cost), 0, opts.poolOnly);   // morph: face down for {3}
     if (d.animateDead && !this.players.some(pl => pl.graveyard.some(c => isCreatureDef(c)))) return false;   // needs a creature in a graveyard to target
     if (this.active !== p.idx && this.ownTurnOnly()) return false;   // City of Solitude
     if (d.castWhen && ((d.castWhen.turn === 'you' && this.active !== p.idx) || (d.castWhen.turn === 'opp' && this.active === p.idx) || (d.castWhen.steps && !d.castWhen.steps.includes(this.step)))) return false;   // Necrologia, combat tricks
@@ -807,7 +817,7 @@ export class Duel {
   castOptions(p, card) {
     const d = card.def;
     const lifeX = !!(d.spell?.additionalCost || d.additionalCost)?.lifeX;
-    const out = { targets: [], x: !!d.cost.x || lifeX, lifeX, kicker: d.keywords.find(k => k.k === 'Kicker')?.cost || null, buyback: d.keywords.find(k => k.k === 'Buyback')?.cost || null, modes: null, additional: d.spell?.additionalCost || d.additionalCost || null, pitch: d.spell?.alternativeCost?.pitch || null, sacLands: d.spell?.alternativeCost?.sacLands || null, bounceLands: d.spell?.alternativeCost?.bounceLands || null, discardAlt: d.spell?.alternativeCost?.discardAlt || null, lifeAlt: d.spell?.alternativeCost?.lifeAlt || null, aluren: this.alurenOk(card), flashback: card.zone === 'graveyard', cycling: d.keywords.find(k => k.k === 'Cycling')?.cost || null };
+    const out = { targets: [], x: !!d.cost.x || lifeX, lifeX, kicker: d.keywords.find(k => k.k === 'Kicker')?.cost || null, buyback: d.keywords.find(k => k.k === 'Buyback')?.cost || null, modes: null, additional: d.spell?.additionalCost || d.additionalCost || null, pitch: d.spell?.alternativeCost?.pitch || null, sacLands: d.spell?.alternativeCost?.sacLands || null, bounceLands: d.spell?.alternativeCost?.bounceLands || null, discardAlt: d.spell?.alternativeCost?.discardAlt || null, lifeAlt: d.spell?.alternativeCost?.lifeAlt || null, aluren: this.alurenOk(card), morph: d.morph || null, flashback: card.zone === 'graveyard', cycling: d.keywords.find(k => k.k === 'Cycling')?.cost || null };
     if (d.spell?.modes) out.modes = { pick: d.spell.modal === 'one' ? 1 : 2, options: this.availableModes(p, card) };
     if (d.aura) out.targets.push({ text: `Enchant ${d.aura}`, options: this.legalTargets(p, { sel: 'permanent', restrict: auraRestrict(d.aura) }, card) });
     return out;
@@ -820,6 +830,10 @@ export class Duel {
   }
   cast(p, card, opts = {}) {
     if (!this.canCast(p, card, opts)) return false;
+    if (opts.faceDown) {   // morph: it is a face-down 2/2 spell from here on; only its controller knows what it is
+      card.realDef = card.def; card.def = MORPH_DEF; card.faceDown = true; card.unmorph = unmorphAbility(card.realDef);
+      opts = { poolOnly: opts.poolOnly };
+    }
     const d = card.def;
     if (opts.cycling) {
       const cy = d.keywords.find(k => k.k === 'Cycling');
@@ -889,7 +903,7 @@ export class Duel {
     card.zone = 'stack'; removeFrom(p.hand, card); removeFrom(p.graveyard, card);
     const item = { id: uid++, kind: 'spell', card, controller: p.idx, targets, x: opts.x || 0, modes: opts.modes || null, kicked: !!opts.kicked, buyback: !!opts.buyback, flashback: fromGrave, effects: this.spellEffects(d, opts), sacrificed: opts._sacrificed || null, flashCast: !this.sorcerySpeed(p) };
     this.stack.push(item);
-    this.say(`${p.name} casts ${d.name}${opts.x ? ` (X=${opts.x})` : ''}${opts.kicked ? ' with kicker' : ''}${this.targetText(targets)}.`);
+    this.say(`${p.name} casts ${card.faceDown ? 'a face-down creature' : d.name}${opts.x ? ` (X=${opts.x})` : ''}${opts.kicked ? ' with kicker' : ''}${this.targetText(targets)}.`);
     this.fx.push({ type: 'cast', id: card.id, controller: p.idx });
     for (const t of targets) if (t.type === 'perm') this.fireEvent({ type: 'targeted', card: this.card(t.id) });
     this.fireEvent({ type: 'cast', player: p.idx, card });
@@ -934,6 +948,13 @@ export class Duel {
   activate(p, card, i, opts = {}) {
     if (!this.canActivate(p, card, i, opts)) return false;
     const ab = abilitiesOf(card)[i]; const c = ab.cost;
+    if (ab.special === 'unmorph') {   // turning face up is a special action: pay the morph cost, no stack
+      this.payMana(p, this.planPayment(p, c.mana, 0));
+      card.def = card.realDef; card.faceDown = false; card.unmorph = null;
+      this.say(`${p.name} turns ${card.def.name} face up.`);
+      this.refresh(); this.fireEvent({ type: 'turnedFaceUp', card });
+      this.passes = 0; this.priority = p.idx; this.emit(); return true;
+    }
     const specs = ab.effects.filter(needsTarget);
     const targets = opts.targets || [];
     for (let k = 0; k < specs.length; k++) { const legal = this.legalTargets(p, specs[k], card); if (!targets[k] || !legal.some(l => sameRef(l, targets[k]))) return false; }
@@ -1957,6 +1978,7 @@ export class Duel {
   // ---- zone changes -----------------------------------------------------------------
   moveTo(c, zone, opts = {}) {
     const from = c.zone;
+    if (c.faceDown && zone !== 'battlefield') { c.def = c.realDef; c.faceDown = false; c.unmorph = null; this.say(`The face-down creature was ${c.def.name}.`); }
     const owner = this.players[c.owner];
     const holder = this.players[c.controller];
     if (from === 'battlefield') {

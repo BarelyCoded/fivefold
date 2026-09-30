@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
 const { compile } = await import(new URL('../../js/cards.js', import.meta.url).href);
-const { Duel, power, toughness, isCreature, has } = await import(new URL('../../js/engine.js', import.meta.url).href);
+const { Duel, power, toughness, isCreature, has, abilitiesOf } = await import(new URL('../../js/engine.js', import.meta.url).href);
 const all = new Map();
 const dir = new URL('../.sets', import.meta.url).pathname;
 for (const f of fs.readdirSync(dir)) for (const c of JSON.parse(fs.readFileSync(dir + '/' + f, 'utf8'))) if (!all.has(c.name)) all.set(c.name, c);
@@ -358,6 +358,36 @@ section('Doomsday: five cards on top, the rest exiled, lose half');
   d.cast(d.players[0], dd, {}); processAndResolve(d, [], y => y.kind === 'choose' ? [g.id, ...y.options.filter(o => o.id !== g.id).slice(0, 4).map(o => o.id)] : undefined);
   ok(d.players[0].library.length === 5 && d.players[0].library.includes(g) && d.players[0].exile.length === 4, `library 5 incl. the graveyard card, 4 exiled (${d.players[0].library.length}, ${d.players[0].exile.length})`);
   ok(d.players[0].life === 10, `lost half (${d.players[0].life})`); }
+
+section('Morph: cast face down for {3}, hidden, turn face up for the morph cost');
+{ const d = newDuel(); mainPhase(d); const ea = hand(d, D('Exalted Angel'), 0); pool(d, 0, { C: 3 });
+  ok(!d.canCast(d.players[0], ea), 'Angel not castable face up with 3 mana'); ok(d.canCast(d.players[0], ea, { faceDown: true }), 'castable face down for {3}');
+  d.cast(d.players[0], ea, { faceDown: true }); processAndResolve(d); d.refresh();
+  ok(ea.zone === 'battlefield' && ea.faceDown && power(ea) === 2 && toughness(ea) === 2 && !has(ea, 'Flying'), `a face-down 2/2 without flying (${power(ea)}/${toughness(ea)})`);
+  const snap = d.snapshot(1).players[0].battlefield.find(c => c.id === ea.id); ok(snap.name === 'Face-down creature' && !snap.realName, 'the opponent snapshot hides it');
+  ok(d.snapshot(0).players[0].battlefield.find(c => c.id === ea.id).realName === 'Exalted Angel', 'its controller sees the real card');
+  ok(!d.log.slice(-6).some(l => /Exalted Angel/.test(typeof l === 'string' ? l : l.text || '')), 'the log does not name it');
+  const i = abilitiesOf(ea).findIndex(a => a.special === 'unmorph'); pool(d, 0, { W: 2, C: 2 });
+  ok(i >= 0 && d.activate(d.players[0], ea, i, {}), 'turn face up for {2}{W}{W}'); d.refresh();
+  ok(!ea.faceDown && power(ea) === 4 && has(ea, 'Flying') && !d.stack.length, `Exalted Angel face up, no stack (${power(ea)}/${toughness(ea)})`); }
+
+section('Morph: "when turned face up" triggers; face-down cards are revealed when they leave');
+{ const d = newDuel(); mainPhase(d); const st = hand(d, D('Skinthinner'), 0); const b = place(d, bears(), 1); pool(d, 0, { C: 3 });
+  d.cast(d.players[0], st, { faceDown: true }); processAndResolve(d);
+  pool(d, 0, { B: 2, C: 3 }); d.activate(d.players[0], st, abilitiesOf(st).findIndex(a => a.special === 'unmorph'), {}); processAndResolve(d, [{ type: 'perm', id: b.id }]);
+  ok(b.zone === 'graveyard', `Skinthinner's face-up trigger destroyed the Bears (${b.zone})`);
+  const d2 = newDuel(); mainPhase(d2); const ea = hand(d2, D('Exalted Angel'), 0); pool(d2, 0, { C: 3 }); d2.cast(d2.players[0], ea, { faceDown: true }); processAndResolve(d2);
+  d2.destroy(ea); ok(ea.zone === 'graveyard' && !ea.faceDown && ea.def.name === 'Exalted Angel', 'revealed as it dies'); }
+
+section('Morph in multiplayer: the mirror hides the opponent\'s face-down card');
+{ const { makeMirror, hydrate } = await import(new URL('../../js/mp.js', import.meta.url).href);
+  const d = newDuel(); mainPhase(d); const ea = hand(d, D('Exalted Angel'), 0); pool(d, 0, { C: 3 }); d.cast(d.players[0], ea, { faceDown: true }); processAndResolve(d);
+  const guest = makeMirror(); hydrate(guest, d.snapshot(1), n => { try { return D(n); } catch { return null; } }, 1);
+  const gc = guest.players[0].battlefield.find(c => c.id === ea.id);
+  ok(gc && gc.faceDown && gc.def.name === 'Face-down creature' && !gc.realDef, 'guest sees only a face-down 2/2');
+  const host = makeMirror(); hydrate(host, d.snapshot(0), n => { try { return D(n); } catch { return null; } }, 0);
+  const hc = host.players[0].battlefield.find(c => c.id === ea.id);
+  ok(hc && hc.faceDown && hc.realDef?.name === 'Exalted Angel' && hc.unmorph, 'its controller\'s mirror knows the card and can turn it up'); }
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

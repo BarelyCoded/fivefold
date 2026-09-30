@@ -807,7 +807,8 @@ function parseKeywordLine(line, def) {
       else def.notes.push(`${p} ignored`);
     }
     else if ((m = p.match(/^Rampage (\d+)$/))) found.push({ k: 'Rampage', n: Number(m[1]) });
-    else if (/^Morph (\{.+\}|\S.*)$/.test(p)) def.notes.push('Morph ignored: the creature is cast face up only');   // Dwarven Blastminer & co. keep their other abilities
+    else if ((m = p.match(/^Morph (\{[^}]+\}(?:\{[^}]+\})*)$/))) def.morph = parseCost(m[1]);   // cast face down for {3}, turn face up for this
+    else if (/^Morph[—\s-]/.test(p)) def.notes.push('Morph ignored: the creature is cast face up only (non-mana morph cost)');
     else if (UNSUPPORTED_KW.has(p) || UNSUPPORTED_KW.has(p.split(' ')[0])) { def.unsupportedReason = `${p} is not supported`; }
     else if ((m = p.match(/^Protection from (.+)$/))) {
       const from = m[1].toLowerCase();
@@ -1244,7 +1245,7 @@ function parseEvent(w) {
   if ((m = w.match(/^you cast (?:a|an) (\w+) spell$/))) { const k = m[1]; return { event: 'youCast', kind: ['noncreature', 'creature', 'artifact', 'enchantment', 'instant', 'sorcery'].includes(k) ? k : 'any' }; }
   if (/^an opponent casts a spell$/.test(w)) return { event: 'anyCast', who: 'opp' };
   if (/^a player casts a spell$/.test(w)) return { event: 'anyCast' };
-  if (/^~ is turned face up$/.test(w)) return null;
+  if (/^~ is turned face up$/.test(w)) return { event: 'turnedFaceUp' };
   return null;
 }
 
