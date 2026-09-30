@@ -418,5 +418,45 @@ section('Rout costs {2} more at instant speed; Goblin Recruiter stacks Goblins o
   const gr = hand(d2, D('Goblin Recruiter'), 0); pool(d2, 0, { R: 1, C: 1 }); d2.cast(d2.players[0], gr, {}); processAndResolve(d2, [], y => [g2.id, g1.id]);
   const L = d2.players[0].library; ok(L[L.length - 1] === g2 && L[L.length - 2] === g1, `Warchief on top, then Piledriver (${L.slice(-2).map(c => c.def.name).join(', ')})`); }
 
+section('Lairs: three-colour mana, bounce a non-Lair land or sacrifice');
+{ const d = newDuel(); mainPhase(d); const f = place(d, D('Island'), 0); const cc = hand(d, D("Crosis's Catacombs"), 0);
+  d.cast(d.players[0], cc); processAndResolve(d, [], y => y.options.map(o => o.id).slice(0, 1));
+  ok(cc.zone === 'battlefield' && f.zone === 'hand', `Island returned, Lair stays (${cc.zone}, ${f.zone})`);
+  ok(JSON.stringify(cc.def.manaAbilities.find(m => m.produces.length === 3)?.produces) === '["U","B","R"]', 'taps for U, B or R');
+  const d2 = newDuel(); mainPhase(d2); const c2 = hand(d2, D("Crosis's Catacombs"), 0); d2.cast(d2.players[0], c2); processAndResolve(d2); ok(c2.zone === 'graveyard', 'no other land: sacrificed'); }
+
+section('Sanctuaries scale with your colours');
+{ const d = newDuel(); mainPhase(d); place(d, D('Dega Sanctuary'), 0); place(d, D('Hypnotic Specter'), 0);
+  d.fireEvent({ type: 'upkeep', player: 0 }); processAndResolve(d); ok(d.players[0].life === 22, `black permanent: +2 (${d.players[0].life})`);
+  place(d, D('Goblin Piledriver'), 0); d.fireEvent({ type: 'upkeep', player: 0 }); processAndResolve(d); ok(d.players[0].life === 26, `black and red: +4 (${d.players[0].life})`);
+  const d2 = newDuel(); mainPhase(d2); place(d2, D('Dega Sanctuary'), 0); d2.fireEvent({ type: 'upkeep', player: 0 }); processAndResolve(d2); ok(d2.players[0].life === 20, 'no trigger without the colours'); }
+
+section('Sphere of Law cuts red damage; Chaoslace recolours');
+{ const d = newDuel(); mainPhase(d); place(d, D('Sphere of Law'), 0); const bolt = hand(d, D('Lightning Bolt'), 1); d.priority = 1; pool(d, 1, { R: 1 });
+  d.cast(d.players[1], bolt, { targets: [{ type: 'player', idx: 0 }] }); processAndResolve(d); ok(d.players[0].life === 19, `3 - 2 = 1 damage (${d.players[0].life})`);
+  const d2 = newDuel(); mainPhase(d2); const b = place(d2, bears(), 1); const cl = hand(d2, D('Chaoslace'), 0); pool(d2, 0, { R: 1 });
+  d2.cast(d2.players[0], cl, { targets: [{ type: 'perm', id: b.id }] }); processAndResolve(d2);
+  ok(d2.legalTargets(d2.players[0], { sel: 'creature', restrict: { types: ['creature'], colors: ['R'] } }, null).some(t => t.id === b.id), 'the Bears are red now'); }
+
+section('Opal Champion animates when the opponent casts a creature');
+{ const d = newDuel(); mainPhase(d); const oc = place(d, D('Opal Champion'), 0); d.active = 1; d.priority = 1; const b = hand(d, bears(), 1); pool(d, 1, { G: 2 });
+  d.cast(d.players[1], b, {}); processAndResolve(d); d.refresh(); ok(isCreature(oc) && power(oc) === 3 && has(oc, 'First strike'), `a 3/3 first striker (${power(oc)})`); }
+
+section('Planeswalker\'s Fury: random card, damage equal to its mana value');
+{ const d = newDuel(); mainPhase(d); const pf = place(d, D("Planeswalker's Fury"), 0); hand(d, D('Hill Giant'), 1); pool(d, 0, { R: 1, C: 3 });
+  d.activate(d.players[0], pf, abIdx(pf.def, a => a.type === 'activated'), { targets: [{ type: 'player', idx: 1 }] }); processAndResolve(d);
+  ok(d.players[1].life === 16, `4 damage for Hill Giant (${d.players[1].life})`); }
+
+section('Chosen-opponent creatures and Cursed Rack');
+{ const d = newDuel(); mainPhase(d); const es = place(d, D('Entropic Specter'), 0); for (let k = 0; k < 3; k++) hand(d, bears(), 1); const lo = place(d, D('Lost Order of Jarkeld'), 0); place(d, bears(), 1); d.refresh();
+  ok(power(es) === 3 && power(lo) === 2, `Specter 3/3 (opp hand), Lost Order 2/2 (1 + opp creatures) (${power(es)}, ${power(lo)})`); }
+
+section('Time Ebb puts a creature on top; Submerge is free against a Forest');
+{ const d = newDuel(); mainPhase(d); const b = place(d, bears(), 1); lib(d, D('Forest'), 1); const te = hand(d, D('Time Ebb'), 0); pool(d, 0, { U: 1, C: 2 });
+  d.cast(d.players[0], te, { targets: [{ type: 'perm', id: b.id }] }); processAndResolve(d); const L = d.players[1].library; ok(L[L.length - 1] === b, 'Bears on top of the library');
+  const d2 = newDuel(); mainPhase(d2); const b2 = place(d2, bears(), 1); place(d2, D('Forest'), 1); const sm = hand(d2, D('Submerge'), 0); pool(d2, 0, {});
+  ok(!d2.canCast(d2.players[0], sm, { freeIf: true, targets: [{ type: 'perm', id: b2.id }] }), 'needs my Island'); place(d2, D('Island'), 0);
+  ok(d2.cast(d2.players[0], sm, { freeIf: true, targets: [{ type: 'perm', id: b2.id }] }), 'free with an Island vs their Forest'); }
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

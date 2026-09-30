@@ -93,7 +93,8 @@ function buildCastOpts(duel, p, card) {
   if (info.sacLands && !duel.canPay(p, d.cost) && duel.canCast(p, card, { sacLands: true })) opts.sacLands = true;   // Fireblast for free
   if (info.bounceLands && !duel.canPay(p, d.cost) && duel.canCast(p, card, { bounceLands: true })) opts.bounceLands = true;   // Daze / Gush for free
   if (info.discardAlt && !duel.canPay(p, d.cost) && duel.canCast(p, card, { discardAlt: true })) opts.discardAlt = true;   // Foil for free
-  if (info.aluren && duel.canCast(p, card, { aluren: true })) opts.aluren = true;   // Aluren: creatures for free
+  if (info.aluren && duel.canCast(p, card, { aluren: true })) opts.aluren = true;
+  if (info.freeIf && duel.canCast(p, card, { freeIf: true })) opts.freeIf = true;   // Submerge for free   // Aluren: creatures for free
   if (info.lifeAlt && !duel.canPay(p, d.cost) && p.life > 8 && duel.canCast(p, card, { lifeAlt: true })) opts.lifeAlt = true;   // Snuff Out for free
   if (info.lifeX) {   // Hatred / Necrologia: X is paid in life — spend what can safely be spared
     const spend = Math.min(6, p.life - 8);

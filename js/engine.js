@@ -25,7 +25,7 @@ const emptyPool = () => ({ W: 0, U: 0, B: 0, R: 0, G: 0, C: 0 });
 const kwName = k => (typeof k === 'string' ? k : k.k);
 
 export const has = (c, kw) => !!c.cur && c.cur.kw.has(kw);
-export const colorsOf = c => (c.temp?.color ? [c.temp.color] : (c.def.colors || []));   // Wild Mongrel: "becomes the color of your choice until end of turn"
+export const colorsOf = c => (c.temp?.color ? [c.temp.color] : c.setColor ? [c.setColor] : (c.def.colors || []));   // Wild Mongrel: "becomes the color of your choice until end of turn"
 export const power = c => (c.cur ? c.cur.p : c.def.power || 0);
 export const toughness = c => (c.cur ? c.cur.t : c.def.toughness || 0);
 export const isCreature = c => c.cur ? c.cur.types.has('creature') : c.def.types.includes('Creature');
@@ -377,7 +377,7 @@ export class Duel {
           break;
         }
         case 'cleanup': {
-          const caps = ap.battlefield.flatMap(c => c.def.abilities.filter(ab => ab.type === 'static' && ab.kind === 'maxHand').map(ab => ab.n));
+          const caps = [...ap.battlefield.flatMap(c => c.def.abilities.filter(ab => ab.type === 'static' && ab.kind === 'maxHand').map(ab => ab.n)), ...this.opponentOf(ap).battlefield.flatMap(c => c.def.abilities.filter(ab => ab.type === 'static' && ab.kind === 'maxHandOpp').map(ab => ab.n))];   // Recycle; Cursed Rack
           const maxHand = ap.battlefield.some(c => c.def.abilities.some(ab => ab.type === 'static' && ab.kind === 'noMaxHand')) ? Infinity : caps.length ? Math.min(...caps) : 7;
           if (ap.hand.length > maxHand) {
             const n = ap.hand.length - maxHand;
@@ -755,6 +755,8 @@ export class Duel {
     } else if (opts.discardAlt && d.spell?.alternativeCost?.discardAlt) {
       const alt = d.spell.alternativeCost.discardAlt; const hand = p.hand.filter(c => c !== card);   // Foil: a named-type card + N others
       if (!hand.some(c => hasSubtype(c, alt.land)) || hand.length < 1 + alt.others) return false;
+    } else if (opts.freeIf && d.spell?.alternativeCost?.freeIf) {
+      const f = d.spell.alternativeCost.freeIf; if (!this.opponentOf(p).battlefield.some(l => hasSubtype(l, f.oppLand)) || !p.battlefield.some(l => hasSubtype(l, f.youLand))) return false;   // Submerge
     } else if (opts.lifeAlt && d.spell?.alternativeCost?.lifeAlt) {
       const alt = d.spell.alternativeCost.lifeAlt; if (p.life < alt.life || !p.battlefield.some(l => hasSubtype(l, alt.land))) return false;   // Snuff Out
     } else if (aluren) { /* Aluren: free */ }
@@ -818,7 +820,7 @@ export class Duel {
   castOptions(p, card) {
     const d = card.def;
     const lifeX = !!(d.spell?.additionalCost || d.additionalCost)?.lifeX;
-    const out = { targets: [], x: !!d.cost.x || lifeX, lifeX, kicker: d.keywords.find(k => k.k === 'Kicker')?.cost || null, buyback: d.keywords.find(k => k.k === 'Buyback')?.cost || null, modes: null, additional: d.spell?.additionalCost || d.additionalCost || null, pitch: d.spell?.alternativeCost?.pitch || null, sacLands: d.spell?.alternativeCost?.sacLands || null, bounceLands: d.spell?.alternativeCost?.bounceLands || null, discardAlt: d.spell?.alternativeCost?.discardAlt || null, lifeAlt: d.spell?.alternativeCost?.lifeAlt || null, aluren: this.alurenOk(card), morph: d.morph || null, flashback: card.zone === 'graveyard', cycling: d.keywords.find(k => k.k === 'Cycling')?.cost || null };
+    const out = { targets: [], x: !!d.cost.x || lifeX, lifeX, kicker: d.keywords.find(k => k.k === 'Kicker')?.cost || null, buyback: d.keywords.find(k => k.k === 'Buyback')?.cost || null, modes: null, additional: d.spell?.additionalCost || d.additionalCost || null, pitch: d.spell?.alternativeCost?.pitch || null, sacLands: d.spell?.alternativeCost?.sacLands || null, bounceLands: d.spell?.alternativeCost?.bounceLands || null, discardAlt: d.spell?.alternativeCost?.discardAlt || null, lifeAlt: d.spell?.alternativeCost?.lifeAlt || null, freeIf: d.spell?.alternativeCost?.freeIf || null, aluren: this.alurenOk(card), morph: d.morph || null, flashback: card.zone === 'graveyard', cycling: d.keywords.find(k => k.k === 'Cycling')?.cost || null };
     if (d.spell?.modes) out.modes = { pick: d.spell.modal === 'one' ? 1 : 2, options: this.availableModes(p, card) };
     if (d.aura) out.targets.push({ text: `Enchant ${d.aura}`, options: this.legalTargets(p, { sel: 'permanent', restrict: auraRestrict(d.aura) }, card) });
     return out;
@@ -890,6 +892,7 @@ export class Duel {
       this.discardCards(p, chosen);
       this.say(`${p.name} discards ${chosen.map(c => c.def.name).join(' and ')} to cast ${d.name}.`);
     }
+    else if (opts.freeIf && d.spell?.alternativeCost?.freeIf) this.say(`${p.name} casts ${d.name} without paying its mana cost.`);
     else if (opts.lifeAlt && d.spell?.alternativeCost?.lifeAlt) { const k = d.spell.alternativeCost.lifeAlt.life; p.life -= k; this.say(`${p.name} pays ${k} life to cast ${d.name}.`); }
     else if (opts.aluren && this.alurenOk(card)) this.say(`${p.name} casts ${d.name} without paying its mana cost (Aluren).`);
     else this.payMana(p, this.planPayment(p, cost, opts.x || 0, opts.poolOnly));
@@ -1201,6 +1204,8 @@ export class Duel {
       else if (v.calc === 'maxCmc') { const perms = this.permanents().filter(c => v.control !== 'you' || c.controller === who.idx); n = (v.base || 0) + (perms.length ? Math.max(...perms.map(c => c.def.cmc || 0)) : 0); }
       else if (v.calc === 'handKind') n = (v.base || 0) + (v.mult || 1) * who.hand.filter(c => matchCardWhat(c, v.what)).length;   // Metalworker
       else if (v.calc === 'counters') n = (v.base || 0) + (((ctx.item?.sacCounters) ?? ctx.source?.counters ?? {})[v.kind] || 0);   // Powder Keg (counters as they were when it was sacrificed)
+      else if (v.calc === 'sanctuary') { const has1 = who.battlefield.some(x => colorsOf(x).includes(v.colors[0])), has2 = who.battlefield.some(x => colorsOf(x).includes(v.colors[1])); n = has1 && has2 ? v.high : has1 || has2 ? v.low : 0; }
+      else if (v.calc === 'revealed') n = ctx.revealedCmc || 0;   // Planeswalker's Mirth / Fury
       else if (v.calc === 'paidLife') n = (v.base || 0) + (ctx.source?.paidLife || 0);   // Phyrexian Processor
       else if (v.calc === 'stat') {
         const c = v.of === 'sacrificed' ? ctx.item?.sacrificed : v.of === 'castSpell' ? ctx.item?.ev?.card : v.of === 'self' ? ctx.source : sub?.card || this.prevCard(ctx);
@@ -1616,7 +1621,8 @@ export class Duel {
       // Show and Tell: each player (active first) may put an artifact, creature, enchantment or land card onto the battlefield, all at once.
       case 'showAndTell': {
         const picks = [];
-        for (const pl of [this.activePlayer, this.opponentOf(this.activePlayer)]) {
+        const who = e.only === 'prevOwner' ? [this.players[this.prevCard(ctx)?.owner ?? this.opponentOf(p).idx]] : [this.activePlayer, this.opponentOf(this.activePlayer)];   // Metamorphose: only that opponent
+        for (const pl of who) {
           const opts = pl.hand.filter(c => c.def.isPermanent && c.def.kind !== 'unsupported' && ['artifact', 'creature', 'enchantment', 'land'].some(t => isType(c, t) || (t === 'creature' && isCreatureDef(c))));
           if (!opts.length) continue;
           let pick = null;
@@ -1774,6 +1780,20 @@ export class Duel {
         }
         break;
       }
+      // Lairs: return a non-Lair land you control or sacrifice it.
+      case 'unlessReturnLand': {
+        const opts = p.battlefield.filter(c => c !== src && isLand(c) && !hasSubtype(c, e.not));
+        let c = null;
+        if (opts.length) { if (p.ai) c = opts.slice().sort((a, b) => (b.tapped ? 1 : 0) - (a.tapped ? 1 : 0) || (b.def.basic ? 1 : 0) - (a.def.basic ? 1 : 0))[0]; else { const ids = yield { kind: 'choose', player: p.idx, text: `${src.def.name}: return a non-${e.not} land you control to its owner's hand (or sacrifice ${src.def.name})`, options: opts.map(x => ({ id: x.id, label: x.def.name })), min: 0, max: 1 }; c = this.card((ids || [])[0]); if (c && !opts.includes(c)) c = null; } }
+        if (c) { this.moveTo(c, 'hand'); this.say(`${p.name} returns ${c.def.name} to hand.`); }
+        else yield* this.runEffects(e.effects, ctx, false);
+        break;
+      }
+      case 'unanimateSelf': if (src.animatePerm) { src.animatePerm = null; this.say(`${src.def.name} becomes an enchantment again.`); this.refresh(); } break;   // Opal Acrolith
+      case 'setColor': for (const s of subs) if (s.card) { s.card.setColor = e.color; this.say(`${s.card.def.name} becomes ${({ W: 'white', U: 'blue', B: 'black', R: 'red', G: 'green' })[e.color]}.`); this.refresh(); } break;   // Chaoslace
+      case 'revealRandom': for (const s of subs) if (s.player) { const h = s.player.hand; ctx.thatPlayer = s.player.idx; if (!h.length) { ctx.revealedCmc = 0; this.say(`${s.player.name} has no cards in hand.`); continue; } const c = h[Math.floor(this.rng() * h.length)]; ctx.revealedCmc = c.def.cmc || 0; this.say(`${s.player.name} reveals ${c.def.name} at random.`); } break;
+      case 'pumpRevealed': for (const s of subs) if (s.card && isCreature(s.card)) { const k = (ctx.revealedCmc || 0) * e.sign; s.card.temp.p += k; s.card.temp.t += k; this.say(`${s.card.def.name} gets ${k >= 0 ? '+' : ''}${k}/${k >= 0 ? '+' : ''}${k} until end of turn.`); } break;
+      case 'toLibraryTop': for (const s of subs) if (s.card && s.card.zone === 'battlefield') { const c = s.card, ow = this.players[c.owner]; this.moveTo(c, 'library'); if (c.zone === 'library') { removeFrom(ow.library, c); ow.library.push(c); } this.say(`${c.def.name} is put on top of ${ow.name}'s library.`); } break;
       case 'madness': {   // the discarded card waits in exile: cast it for its madness cost, or it goes to the graveyard
         if (src.zone !== 'exile') break;
         const mad = src.def.keywords.find(k => k.k === 'Madness'); const owner = this.players[src.owner];
@@ -2055,7 +2075,7 @@ export class Duel {
     else if (from === 'sideboard') removeFrom(owner.sideboard || [], c);
     else if (from === 'stack') { const i = this.stack.findIndex(it => it.card === c); if (i >= 0) this.stack.splice(i, 1); }
     // reset state
-    c.tapped = false; c.damage = 0; c.temp = { p: 0, t: 0, kw: [], flags: [], animate: null }; c.regen = 0; c.flags = new Set(); c.counters = {}; c.controlUntilEot = null; c.damaged = new Set(); c.attachedTo = null; c.shield = 0; c.linked = []; c.controlLink = null; c.animatePerm = null;
+    c.tapped = false; c.damage = 0; c.temp = { p: 0, t: 0, kw: [], flags: [], animate: null }; c.regen = 0; c.flags = new Set(); c.counters = {}; c.controlUntilEot = null; c.damaged = new Set(); c.attachedTo = null; c.shield = 0; c.linked = []; c.controlLink = null; c.animatePerm = null; c.setColor = null;
     if (zone !== 'battlefield') c.controller = c.owner;   // a card off the battlefield belongs to its owner again
     if (c.token && zone !== 'battlefield') { c.zone = 'gone'; return; }
     if (zone === 'battlefield' && c.def.entersSacrifice) {
@@ -2238,6 +2258,9 @@ export class Duel {
     if (source.flags?.has('dealsNoDamage')) return 0;
     const ci = noPrev ? -1 : pl.cop.findIndex(f => f === 'any' || (Array.isArray(f) ? f.some(x => (source.def?.colors || []).includes(x)) : f === 'artifact' ? isType(source, 'artifact') : (source.def?.colors || []).includes(f)));
     if (ci >= 0) { pl.cop.splice(ci, 1); this.say(`${pl.name}'s circle of protection prevents ${source.def.name}'s damage.`); return 0; }
+    // Spheres: reduce damage from sources of a colour
+    if (!noPrev) for (const k of pl.battlefield) for (const ab of k.def.abilities) if (ab.type === 'static' && ab.kind === 'reduceColorDamage' && colorsOf(source).includes(ab.color)) { const cut = Math.min(n, ab.n); n -= cut; if (cut) this.say(`${k.def.name} prevents ${cut} damage.`); }
+    if (n <= 0) return 0;
     // Solitary Confinement / Energy Field: prevent damage dealt to you (Energy Field: only from sources you don't control)
     if (!noPrev && pl.battlefield.some(k => k.def.abilities.some(ab => ab.type === 'static' && ab.kind === 'preventDamageToYou' && (!ab.fromOpp || (source.controller ?? -1) !== pl.idx)) && !k.cur?.flags.has('noAbilities'))) { this.say(`Damage to ${pl.name} is prevented.`); return 0; }
     if (!noPrev && pl.shield > 0) { const used = Math.min(pl.shield, n); pl.shield -= used; n -= used; this.say(`${used} damage to ${pl.name} is prevented.`); if (n <= 0) return 0; }
@@ -2426,7 +2449,9 @@ export class Duel {
     if (cond.didntAttack && src.attackedThisTurn) ok = false;
     if (cond.attackedOrBlocked && !(src.attackedThisTurn || src.blockedThisTurn)) ok = false;
     if (cond.threshold && me.graveyard.length < 7) ok = false;
-    if (cond.selfCreature && !isCreature(src)) ok = false;   // Spawning Pool's regeneration only while it's a creature
+    if (cond.selfCreature && !isCreature(src)) ok = false;
+    if (cond.notCreature && isCreature(src)) ok = false;   // Opal Champion: only while it is still just an enchantment
+    if (cond.anyColorPerm && !me.battlefield.some(x => cond.anyColorPerm.some(col => colorsOf(x).includes(col)))) ok = false;   // Sanctuaries   // Spawning Pool's regeneration only while it's a creature
     if (cond.onlyCreatureInGy && !(src.zone === 'graveyard' && me.graveyard.filter(isCreatureDef).length === 1)) ok = false;   // Nether Spirit
     if (cond.noSubtype && this.permanents().some(x => hasSubtype(x, cond.noSubtype))) ok = false;   // Sarcomancy
     if (cond.controlsCreature && !me.battlefield.some(isCreature)) ok = false;   // Worship
@@ -2456,6 +2481,11 @@ export class Duel {
   cdaCount(c, cda) {
     const pl = this.players[c.controller];
     const w = cda.count;
+    const opp = this.opponentOf(pl), plus = cda.plus || 0;   // "choose an opponent" cards: the chosen player is the opponent
+    if (w === 'oppHand') return plus + opp.hand.length;
+    if (w === 'oppNonbasic') return plus + opp.battlefield.filter(l => isLand(l) && !l.def.basic).length;
+    if (w === 'oppCreatures') return plus + opp.battlefield.filter(isCreature).length;
+    if (typeof w === 'string' && w.startsWith('gy:opp:')) return plus + opp.graveyard.filter(g => matchCardWhat(g, w.slice(7))).length;
     if (cda.restrict) return (cda.base || 0) + this.permanents().filter(x => !(cda.restrict.other && x === c) && this.matchesRestrict(x, cda.restrict, pl)).length;
     if (typeof w === 'string' && w.startsWith('bfgy:')) { const sub = cap(w.slice(5)); return this.permanents().filter(x => hasSubtype(x, sub)).length + this.players.reduce((a, x) => a + x.graveyard.filter(g => (g.def.subtypes || []).includes(sub)).length, 0); }
     if (typeof w === 'string' && w.startsWith('gy:')) { const [, who, what] = w.split(':'); const pls = who === 'all' ? this.players : [pl]; return pls.reduce((a, x) => a + x.graveyard.filter(g => matchCardWhat(g, what)).length, 0); }

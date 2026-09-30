@@ -411,6 +411,20 @@ const rules = [
   [/^put the chosen cards on top of your library in any order$/, () => []],
   // Goblin Recruiter: stack any number of Goblins on top in any order.
   [/^search your library for any number of (\w+?) cards, reveal them, then shuffle and put (?:them|those cards) on top(?: of your library)? in any order$/, m => [{ type: 'tutorStack', what: m[1] }]],
+  // Lairs: "sacrifice it unless you return a non-Lair land you control to its owner's hand"
+  [/^sacrifice (?:it|~) unless you return a non-(\w+) land you control to its owner's hand$/, m => [{ type: 'unlessReturnLand', not: capSub(m[1]), effects: [{ type: 'sacrificeSelf' }] }]],
+  // Chaoslace & co.: "target spell or permanent becomes red" (permanents only here)
+  [/^target spell or permanent becomes (white|blue|black|red|green)$/, m => [{ type: 'setColor', color: COLOR_WORD[m[1]], sel: 'permanent', restrict: {}, note: 'only permanents can be targeted (not spells)' }]],
+  // Planeswalker's Mirth / Fury / Scorn / Favor
+  [/^target opponent reveals a card at random from their hand$/, () => [{ type: 'revealRandom', sel: 'opponent' }]],
+  [/^you gain life equal to that card's mana value$/, () => [{ type: 'gain', amount: { calc: 'revealed' }, sel: 'you' }]],
+  [/^~ deals damage equal to that card's mana value to that player$/, () => [{ type: 'damage', amount: { calc: 'revealed' }, sel: 'thatPlayer' }]],
+  [/^(target creature) gets ([+-])x\/([+-])x until end of turn, where x is the revealed card's mana value$/, m => tgt({ type: 'pumpRevealed', sign: m[2] === '-' ? -1 : 1 }, m[1])],
+  // Time Ebb / Repel / Submerge / Ether Well
+  [/^put (target .+?) on top of its owner's library$/, m => tgt({ type: 'toLibraryTop' }, m[1])],
+  [/^if that creature is (?:white|blue|black|red|green), you may put it on the bottom of its owner's library instead$/, () => []],
+  [/^that opponent may put an artifact, creature, enchantment, or land card from their hand onto the battlefield$/, () => [{ type: 'showAndTell', only: 'prevOwner' }]],   // Metamorphose
+  [/^~ becomes an enchantment$/, () => [{ type: 'unanimateSelf' }]],   // Opal Acrolith
   [/^choose a color$/, () => [{ type: 'chooseColorSelf' }]],
   [/^~ becomes the color of your choice until end of turn$/, () => [{ type: 'chooseColorSelf', temp: true }]],
   [/^~ gets \+(\d+)\/\+(\d+) and becomes the color of your choice until end of turn$/, m => [{ type: 'pump', p: Number(m[1]), t: Number(m[2]), sel: 'self', restrict: {} }, { type: 'chooseColorSelf', temp: true }]],   // Wild Mongrel
@@ -858,6 +872,14 @@ function parseStatic(t) {
   if ((m = t.match(/^(?:threshold — )?as long as (?:there are )?seven or more cards (?:are )?in your graveyard, (.+)$/))) { const inner = parseStatic(m[1]); if (!inner) return null; for (const o of inner) o.condition = { ...(o.condition || {}), threshold: true }; return inner; }
   // Effect-first threshold wording: "~ gets +2/+2 as long as there are seven or more cards in your graveyard." (Nimble Mongoose, Werebear, Krosan Beast).
   if ((m = t.match(/^(?:threshold — )?(.+?) as long as (?:there are )?seven or more cards (?:are )?in your graveyard$/))) { const inner = parseStatic(m[1]); if (!inner) return null; for (const o of inner) o.condition = { ...(o.condition || {}), threshold: true }; return inner; }
+  // Spheres: "If a green source would deal damage to you, prevent 2 of that damage."
+  if ((m = t.match(/^if a (white|blue|black|red|green) source would deal damage to you, prevent (\d+) of that damage$/))) return [{ type: 'static', kind: 'reduceColorDamage', color: COLOR_WORD[m[1]], n: Number(m[2]), scope: { who: 'self' } }];
+  // "Choose an opponent" cards (two players: the chosen player is the opponent)
+  if ((m = t.match(/^the chosen player's maximum hand size is (\w+)$/))) return [{ type: 'static', kind: 'maxHandOpp', n: amt(m[1]), scope: { who: 'self' } }];   // Cursed Rack
+  if (/^~'s power and toughness are each equal to the number of cards in the chosen player's hand$/.test(t)) return [{ type: 'static', kind: 'cda', count: 'oppHand', scope: { who: 'self' } }];
+  if (/^~'s power and toughness are each equal to the number of nonbasic lands the chosen player controls$/.test(t)) return [{ type: 'static', kind: 'cda', count: 'oppNonbasic', scope: { who: 'self' } }];
+  if (/^~'s power and toughness are each equal to 1 plus the number of creatures the chosen player controls$/.test(t)) return [{ type: 'static', kind: 'cda', count: 'oppCreatures', plus: 1, scope: { who: 'self' } }];
+  if ((m = t.match(/^~'s power is equal to 1 plus the number of (.+?) cards in the chosen player's graveyard$/))) return [{ type: 'static', kind: 'cda', count: 'gy:opp:' + m[1], plus: 1, which: 'p', scope: { who: 'self' } }];
   // Energy Field / Solitary Confinement / Opalescence / Aluren
   if ((m = t.match(/^prevent all damage that would be dealt to you( by sources you don't control)?$/))) return [{ type: 'static', kind: 'preventDamageToYou', fromOpp: !!m[1], scope: { who: 'self' } }];
   if (/^skip your draw step$/.test(t)) return [{ type: 'static', kind: 'skipDraw', scope: { who: 'self' } }];
@@ -1091,7 +1113,7 @@ function parseAbilityLine(line, ctx) {
     // "Add {G} for each creature you control" (Gaea's Cradle, Priest of Titania, Rofellos, Serra's Sanctum).
     if ((mm = body.match(/^add (\{[wubrgc]\}) for each (.+?)\.?$/))) { const phrase = mm[2].replace(/ on the battlefield$/, ''); const k = parseTarget('all ' + phrase); if (k && k.restrict) return { type: 'mana', cost, produces: [mm[1][1].toUpperCase()], amount: { calc: 'count', restrict: k.restrict }, ...manaExtra }; }
     if ((mm = body.match(/^add ((?:\{[wubrgc]\})+)\.?$/))) return { type: 'mana', cost, produces: [...new Set([...mm[1].matchAll(/\{(\w)\}/g)].map(x => x[1].toUpperCase()))] , amount: [...mm[1].matchAll(/\{(\w)\}/g)].length, ...manaExtra };
-    if ((mm = body.match(/^add (\{[wubrgc]\})(?: or (\{[wubrgc]\}))+\.?$/))) return { type: 'mana', cost, produces: [...body.matchAll(/\{(\w)\}/g)].map(x => x[1].toUpperCase()), amount: 1, ...manaExtra };
+    if ((mm = body.match(/^add (\{[wubrgc]\})(?:,? or (\{[wubrgc]\})|, (\{[wubrgc]\}))+\.?$/))) return { type: 'mana', cost, produces: [...body.matchAll(/\{(\w)\}/g)].map(x => x[1].toUpperCase()), amount: 1, ...manaExtra };
     if ((mm = body.match(/^add ((?:\{[wubrgc]\})(?: or \{[wubrgc]\})*)\. put a (\w+) counter on ~\.?$/))) return { type: 'mana', cost, produces: [...mm[1].matchAll(/\{(\w)\}/g)].map(x => x[1].toUpperCase()), amount: 1, counter: mm[2] };
     if ((mm = body.match(/^add (\{[wubrgc]\}) for each (\w+) counter removed this way\.?$/)) && cost.removeCounter?.n === 'all') return { type: 'mana', cost, produces: [mm[1][1].toUpperCase()], amount: 1 };
     if ((mm = body.match(/^add (\S+) mana of any one color\.?$/))) return { type: 'mana', cost, produces: COLORS.slice(), amount: amt(mm[1]), sameColor: true };
@@ -1115,6 +1137,8 @@ function parseAbilityLine(line, ctx) {
       let rest = m[3];
       if (/^enchanted/.test(ev.event)) rest = rest.replace(/\b(?:it|that creature) (gets|gains|has|deals|can't|doesn't)\b/g, 'enchanted creature $1').replace(/\bon it\b/g, 'on enchanted creature').replace(/^(?:tap|untap) it$/, w => w.replace(' it', ' enchanted creature'));
       if (/^if it wasn't sacrificed, /.test(rest)) { rest = rest.replace(/^if it wasn't sacrificed, /, ''); ev.notSacrificed = true; }
+      // Opal Champion / Veil of Birds: "if ~ is an enchantment, it becomes a 3/3 Knight creature with first strike"
+      if (/^if ~ is an enchantment, it becomes /.test(rest)) { ev.condition = { notCreature: true }; rest = rest.replace(/^if ~ is an enchantment, it becomes (.+)$/, "~ becomes $1 that's still a land"); }
       const pay = parsePay(rest);
       const eff = parseEffects(pay.body);
       if (eff.effects.length) return { type: 'triggered', ...ev, effects: eff.effects, optional: eff.optional, pay: pay.cost, payer: pay.payer, notes: eff.notes, text: line };
@@ -1151,6 +1175,20 @@ function parseAbilityLine(line, ctx) {
     if (/^that player chooses target player who controls more creatures than they do and is their opponent\. the first player may reveal cards from the top of their library until they reveal a creature card/.test(rest)) return { type: 'triggered', ...ev, effects: [{ type: 'oathDruids' }], text: line };
     if (/^that player chooses target player whose graveyard has fewer creature cards in it than their graveyard does and is their opponent\. the first player may return a creature card from their graveyard to their hand$/.test(rest)) return { type: 'triggered', ...ev, effects: [{ type: 'oathGhouls' }], text: line };
     if (/^that player untaps a land they control$/.test(rest)) return { type: 'triggered', ...ev, effects: [{ type: 'untapOneLand', sel: 'thatPlayer' }], text: line };   // Rising Waters
+    // Sanctuaries: "if you control a C1 or C2 permanent, <small>. If you control a C1 permanent and a C2 permanent, <big> instead."
+    if ((cm = rest.match(/^if you control a (white|blue|black|red|green) or (white|blue|black|red|green) permanent, (.+?)\. if you control a \1 permanent and a \2 permanent, (.+)$/))) {
+      const eff = parseEffects(cm[3]); const hi = cm[4].match(/(\d+|two|three|four|five)\b/);
+      const colors = [COLOR_WORD[cm[1]], COLOR_WORD[cm[2]]];
+      if (eff.effects.length && hi) {
+        const high = amt(hi[1]); let done = false;
+        for (const e of eff.effects) {
+          if (done) break;
+          if (e.type === 'pump' && typeof e.p === 'number') { const lowP = e.p, lowT = e.t; e.p = { calc: 'sanctuary', colors, low: lowP, high }; e.t = { calc: 'sanctuary', colors, low: lowT, high }; done = true; }
+          else if (typeof e.amount === 'number') { e.amount = { calc: 'sanctuary', colors, low: e.amount, high }; done = true; }
+        }
+        if (done) return { type: 'triggered', ...ev, condition: { anyColorPerm: colors }, effects: eff.effects, text: line };
+      }
+    }
     let zoneGy = false;
     if ((cm = rest.match(/^if ~ is the only creature card in your graveyard, (?:you may )?return ~ to the battlefield$/))) return { type: 'triggered', ...ev, condition: { onlyCreatureInGy: true }, zone: 'graveyard', effects: [{ type: 'selfFromGraveyard', to: 'battlefield' }], optional: true, text: line };   // Nether Spirit
     if ((cm = rest.match(/^if ~ is in your graveyard, (.+)$/))) { zoneGy = true; rest = cm[1]; }   // Genesis
@@ -1376,6 +1414,9 @@ export function compile(c) {
       continue;
     }
     if ((m = lower.match(/^you may (?:pay (\d+) life and )?(?:exile|remove) (?:a|an) (white|blue|black|red|green) card from your hand rather than pay (?:this spell's|~'s) mana cost\.?$/))) { alternativeCost = { pitch: COLOR_WORD[m[2]], life: m[1] ? Number(m[1]) : 0 }; continue; }
+    if (/^as ~ enters(?: the battlefield)?, choose an opponent\.?$/.test(lower)) continue;   // two players: the chosen player is the opponent
+    // Submerge: "If an opponent controls a Forest and you control an Island, you may cast this spell without paying its mana cost."
+    if ((m = lower.match(/^if an opponent controls (?:a|an) (plains|island|swamp|mountain|forest) and you control (?:a|an) (plains|island|swamp|mountain|forest), you may cast (?:this spell|~) without paying its mana cost\.?$/))) { alternativeCost = { ...(alternativeCost || {}), freeIf: { oppLand: cap(m[1]), youLand: cap(m[2]) } }; continue; }
     // Snuff Out: "If you control a Swamp, you may pay 4 life rather than pay this spell's mana cost."
     if ((m = lower.match(/^if you control (?:a|an) (plains|island|swamp|mountain|forest), you may pay (\d+) life rather than pay (?:this spell's|~'s) mana cost\.?$/))) { alternativeCost = { ...(alternativeCost || {}), lifeAlt: { life: Number(m[2]), land: cap(m[1]) } }; continue; }
     // Fireblast: "You may sacrifice two Mountains rather than pay this spell's mana cost."
@@ -1432,6 +1473,8 @@ export function compile(c) {
     def.notes.push('Ignored: ' + line.slice(0, 80));
   }
   if (def.unsupportedReason) return unsupported(def.unsupportedReason);
+  // A random reveal whose follow-up wasn't understood does nothing useful (Planeswalker's Mischief, Reviving Vapors).
+  if (/"(?:revealRandom|revealed)"/.test(JSON.stringify([spellEffects, def.abilities])) && def.notes.some(n => n.startsWith('Ignored: '))) return unsupported('Reveal follow-up is not supported');
   // Basic land types carry an intrinsic mana ability.
   if (def.kind === 'land' && def.produces.length) {
     const intrinsic = def.produces.filter(col => !def.manaAbilities.some(ma => ma.produces.includes(col)));
