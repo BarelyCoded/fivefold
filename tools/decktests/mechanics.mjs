@@ -465,5 +465,34 @@ section('Daze does nothing free if you control no Island');
 { const d = newDuel(); mainPhase(d); const daze = hand(d, D('Daze'), 0); pool(d, 0, {});
   ok(!d.canCast(d.players[0], daze, { bounceLands: true }), 'not castable for free without an Island'); }
 
+section('Gush: return two Islands rather than pay, draw two');
+{ const d = newDuel(); mainPhase(d); const i1 = place(d, D('Island'), 0), i2 = place(d, D('Island'), 0); place(d, D('Island'), 0);
+  for (let k = 0; k < 3; k++) lib(d, bears(), 0); const gush = hand(d, D('Gush'), 0); pool(d, 0, {});
+  ok(d.canCast(d.players[0], gush, { bounceLands: true }), 'Gush castable for free with two Islands');
+  const before = d.players[0].hand.length - 1;   // minus Gush leaving hand
+  ok(d.cast(d.players[0], gush, { bounceLands: true }), 'cast Gush for free'); while (d.stack.length) drive(d.resolveTop());
+  const islandsBack = d.players[0].hand.filter(c => c.def.name === 'Island').length;
+  ok(islandsBack === 2, `two Islands returned to hand (${islandsBack})`);
+  ok(d.players[0].hand.filter(c => c.def.name === 'Grizzly Bears').length === 2, `drew two cards (${d.players[0].hand.filter(c => c.def.name === 'Grizzly Bears').length})`); }
+
+section('Gush needs two Islands to cast for free');
+{ const d = newDuel(); mainPhase(d); place(d, D('Island'), 0); const gush = hand(d, D('Gush'), 0); pool(d, 0, {});
+  ok(!d.canCast(d.players[0], gush, { bounceLands: true }), 'not free with only one Island'); }
+
+section('Foil: discard an Island and another card rather than pay, counter a spell');
+{ const d = newDuel(); mainPhase(d); const foil = hand(d, D('Foil'), 0); const isl = hand(d, D('Island'), 0); const extra = hand(d, D('Grizzly Bears'), 0); pool(d, 0, {});
+  d.active = 1; d.priority = 1; const bolt = hand(d, D('Lightning Bolt'), 1); pool(d, 1, { R: 1 });
+  d.cast(d.players[1], bolt, { targets: [{ type: 'player', idx: 0 }] }); const item = d.stack[d.stack.length - 1];
+  d.priority = 0;
+  ok(d.canCast(d.players[0], foil, { discardAlt: true }), 'Foil castable for free with an Island and another card');
+  ok(d.cast(d.players[0], foil, { discardAlt: true, targets: [{ type: 'spell', id: item.id }] }), 'cast Foil for free');
+  ok(isl.zone === 'graveyard' && extra.zone === 'graveyard', `an Island and another card discarded (${isl.zone}/${extra.zone})`);
+  while (d.stack.length) drive(d.resolveTop());
+  ok(d.card(bolt.id)?.zone === 'graveyard' && d.players[0].life === 20, `Bolt countered, no damage (${d.card(bolt.id)?.zone})`); }
+
+section('Foil needs an Island plus another card to cast for free');
+{ const d = newDuel(); mainPhase(d); const foil = hand(d, D('Foil'), 0); hand(d, D('Island'), 0); pool(d, 0, {});
+  ok(!d.canCast(d.players[0], foil, { discardAlt: true }), 'not free with only the Island (no second card to discard)'); }
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

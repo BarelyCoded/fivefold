@@ -68,6 +68,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     if (pitchCandidates(card).some(c => duel.canCast(me, card, { pitch: c.id }))) return true;
     if (card.def.spell?.alternativeCost?.sacLands && duel.canCast(me, card, { sacLands: true })) return true;
     if (card.def.spell?.alternativeCost?.bounceLands && duel.canCast(me, card, { bounceLands: true })) return true;
+    if (card.def.spell?.alternativeCost?.discardAlt && duel.canCast(me, card, { discardAlt: true })) return true;
     return false;
   }
   function hasAnyPlay() {
@@ -568,10 +569,17 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
       if (lands.length >= info.sacLands.n) { const canPayMana = duel.canPay(me, card.def.cost); ui.menu = { title: `Sacrifice ${info.sacLands.n} ${info.sacLands.land}s instead of paying?`, items: [{ label: `Sacrifice ${info.sacLands.n} ${info.sacLands.land}s`, primary: !canPayMana, action: () => { opts.sacLands = true; ui.menu = null; next(w); } }, ...(canPayMana ? [{ label: 'Pay mana instead', primary: true, action: () => { opts.sacLands = false; ui.menu = null; next(w); } }] : [])] }; render(); return; }
       opts.sacLands = false;
     }
-    if (info.bounceLands && !('bounceLands' in opts)) {   // Daze: return an Island rather than pay
+    if (info.bounceLands && !('bounceLands' in opts)) {   // Daze / Gush: return Island(s) rather than pay
       const lands = me.battlefield.filter(c => isLand(c) && c.def.subtypes.includes(info.bounceLands.land));
-      if (lands.length >= info.bounceLands.n) { const canPayMana = duel.canPay(me, card.def.cost); ui.menu = { title: `Return ${info.bounceLands.n} ${info.bounceLands.land} to hand instead of paying?`, items: [{ label: `Return ${info.bounceLands.n} ${info.bounceLands.land}`, primary: !canPayMana, action: () => { opts.bounceLands = true; ui.menu = null; next(w); } }, ...(canPayMana ? [{ label: 'Pay mana instead', primary: true, action: () => { opts.bounceLands = false; ui.menu = null; next(w); } }] : [])] }; render(); return; }
+      const n = info.bounceLands.n, plural = n > 1 ? info.bounceLands.land + 's' : info.bounceLands.land;
+      if (lands.length >= n) { const canPayMana = duel.canPay(me, card.def.cost); ui.menu = { title: `Return ${n} ${plural} to hand instead of paying?`, items: [{ label: `Return ${n} ${plural}`, primary: !canPayMana, action: () => { opts.bounceLands = true; ui.menu = null; next(w); } }, ...(canPayMana ? [{ label: 'Pay mana instead', primary: true, action: () => { opts.bounceLands = false; ui.menu = null; next(w); } }] : [])] }; render(); return; }
       opts.bounceLands = false;
+    }
+    if (info.discardAlt && !('discardAlt' in opts)) {   // Foil: discard an Island and another card rather than pay
+      const hand = me.hand.filter(c => c !== card);
+      const can = hand.some(c => c.def.subtypes.includes(info.discardAlt.land)) && hand.length >= 1 + info.discardAlt.others;
+      if (can) { const canPayMana = duel.canPay(me, card.def.cost); ui.menu = { title: `Discard ${info.discardAlt.land} and ${info.discardAlt.others} other card instead of paying?`, items: [{ label: `Discard ${info.discardAlt.land} + ${info.discardAlt.others}`, primary: !canPayMana, action: () => { opts.discardAlt = true; ui.menu = null; next(w); } }, ...(canPayMana ? [{ label: 'Pay mana instead', primary: true, action: () => { opts.discardAlt = false; ui.menu = null; next(w); } }] : [])] }; render(); return; }
+      opts.discardAlt = false;
     }
     if (info.x && !('x' in opts)) { let maxX = 0; for (let x = 20; x >= 0; x--) if (duel.canPay(me, card.def.cost, x)) { maxX = x; break; } w.maxX = maxX; w.stage = 'x'; render(); return; }
     if (info.additional && !w.extraDone) {

@@ -730,7 +730,10 @@ export class Duel {
     } else if (opts.sacLands && d.spell?.alternativeCost?.sacLands) {
       const alt = d.spell.alternativeCost.sacLands; if (p.battlefield.filter(l => isLand(l) && hasSubtype(l, alt.land)).length < alt.n) return false;   // Fireblast
     } else if (opts.bounceLands && d.spell?.alternativeCost?.bounceLands) {
-      const alt = d.spell.alternativeCost.bounceLands; if (p.battlefield.filter(l => isLand(l) && hasSubtype(l, alt.land)).length < alt.n) return false;   // Daze
+      const alt = d.spell.alternativeCost.bounceLands; if (p.battlefield.filter(l => isLand(l) && hasSubtype(l, alt.land)).length < alt.n) return false;   // Daze / Gush
+    } else if (opts.discardAlt && d.spell?.alternativeCost?.discardAlt) {
+      const alt = d.spell.alternativeCost.discardAlt; const hand = p.hand.filter(c => c !== card);   // Foil: a named-type card + N others
+      if (!hand.some(c => hasSubtype(c, alt.land)) || hand.length < 1 + alt.others) return false;
     } else if (!this.canPay(p, cost, opts.x || 0, opts.poolOnly)) return false;
     const fbSac = fromGrave ? d.keywords.find(k => k.k === 'Flashback')?.sacrifice : null;   // Cabal Therapy's flashback
     const add = (fbSac ? { sacrifice: fbSac } : null) || d.spell?.additionalCost || d.additionalCost;
@@ -784,7 +787,7 @@ export class Duel {
   // Describe everything the caster must decide before casting.
   castOptions(p, card) {
     const d = card.def;
-    const out = { targets: [], x: !!d.cost.x, kicker: d.keywords.find(k => k.k === 'Kicker')?.cost || null, buyback: d.keywords.find(k => k.k === 'Buyback')?.cost || null, modes: null, additional: d.spell?.additionalCost || d.additionalCost || null, pitch: d.spell?.alternativeCost?.pitch || null, sacLands: d.spell?.alternativeCost?.sacLands || null, flashback: card.zone === 'graveyard', cycling: d.keywords.find(k => k.k === 'Cycling')?.cost || null };
+    const out = { targets: [], x: !!d.cost.x, kicker: d.keywords.find(k => k.k === 'Kicker')?.cost || null, buyback: d.keywords.find(k => k.k === 'Buyback')?.cost || null, modes: null, additional: d.spell?.additionalCost || d.additionalCost || null, pitch: d.spell?.alternativeCost?.pitch || null, sacLands: d.spell?.alternativeCost?.sacLands || null, bounceLands: d.spell?.alternativeCost?.bounceLands || null, discardAlt: d.spell?.alternativeCost?.discardAlt || null, flashback: card.zone === 'graveyard', cycling: d.keywords.find(k => k.k === 'Cycling')?.cost || null };
     if (d.spell?.modes) out.modes = { pick: d.spell.modal === 'one' ? 1 : 2, options: this.availableModes(p, card) };
     if (d.aura) out.targets.push({ text: `Enchant ${d.aura}`, options: this.legalTargets(p, { sel: 'permanent', restrict: auraRestrict(d.aura) }, card) });
     return out;
@@ -830,13 +833,24 @@ export class Duel {
       for (const l of chosen) this.sacrifice(l);
       this.say(`${p.name} sacrifices ${chosen.map(l => l.def.name).join(' and ')} to cast ${d.name}.`);
     }
-    else if (opts.bounceLands && d.spell?.alternativeCost?.bounceLands) {   // Daze: return an Island to hand instead of paying
+    else if (opts.bounceLands && d.spell?.alternativeCost?.bounceLands) {   // Daze / Gush: return Island(s) to hand instead of paying
       const alt = d.spell.alternativeCost.bounceLands;
       const chosen = [].concat(opts.bounceLands === true ? [] : opts.bounceLands).map(id => this.card(id)).filter(l => l && p.battlefield.includes(l) && isLand(l) && hasSubtype(l, alt.land));
       const rest = p.battlefield.filter(l => isLand(l) && hasSubtype(l, alt.land) && !chosen.includes(l)).sort((a, b) => (a.tapped ? 0 : 1) - (b.tapped ? 0 : 1));
       while (chosen.length < alt.n && rest.length) chosen.push(rest.shift());
       for (const l of chosen) this.moveTo(l, 'hand');
       this.say(`${p.name} returns ${chosen.map(l => l.def.name).join(' and ')} to hand to cast ${d.name}.`);
+    }
+    else if (opts.discardAlt && d.spell?.alternativeCost?.discardAlt) {   // Foil: discard an Island and another card instead of paying
+      const alt = d.spell.alternativeCost.discardAlt; const pick = [].concat(opts.discardAlt === true ? [] : opts.discardAlt).map(id => this.card(id)).filter(c => c && p.hand.includes(c) && c !== card);
+      const chosen = [];
+      const named = pick.find(c => hasSubtype(c, alt.land)) || p.hand.find(c => c !== card && hasSubtype(c, alt.land));
+      if (named) chosen.push(named);
+      for (const c of pick) if (!chosen.includes(c) && chosen.length < 1 + alt.others) chosen.push(c);
+      const others = p.hand.filter(c => c !== card && !chosen.includes(c)).sort((a, b) => (isLand(a) ? 0 : 1) - (isLand(b) ? 0 : 1) || (a.def.cmc || 0) - (b.def.cmc || 0));
+      while (chosen.length < 1 + alt.others && others.length) chosen.push(others.shift());
+      this.discardCards(p, chosen);
+      this.say(`${p.name} discards ${chosen.map(c => c.def.name).join(' and ')} to cast ${d.name}.`);
     }
     else this.payMana(p, this.planPayment(p, cost, opts.x || 0, opts.poolOnly));
     if (fromGrave) { const fl = d.keywords.find(k => k.k === 'Flashback')?.life; if (fl) { p.life -= fl; this.say(`${p.name} pays ${fl} life for flashback.`); } }
