@@ -548,5 +548,40 @@ section('Rhystic Syphon and Rethink');
   d2.priority = 0; const rt = hand(d2, D('Rethink'), 0); pool(d2, 0, { U: 1, C: 2 }); d2.cast(d2.players[0], rt, { targets: [{ type: 'spell', id: it.id }] }); processAndResolve(d2);
   ok(hg.zone === 'graveyard', 'Rethink counters when they can\'t pay the mana value'); }
 
+section('Blood Moon: nonbasic lands tap for R only and lose other abilities');
+{ const d = newDuel(); mainPhase(d); place(d, D('Blood Moon'), 1); const w = place(d, D('Wasteland'), 0); const t = place(d, D('Tundra'), 0); const f = place(d, D('Forest'), 0); d.refresh(); pool(d, 0, {});
+  const src = d.manaSources(d.players[0]); ok(src.find(x => x.card === t)?.produces.join('') === 'R' && src.find(x => x.card === f)?.produces.join('') === 'G', 'Tundra makes R, Forest still G');
+  ok(!d.canActivate(d.players[0], w, 0, {}) && abilitiesOf(w).length === 0, 'Wasteland has no ability');
+  d.activateMana(d.players[0], t, 0, 'W'); ok(d.players[0].pool.R === 1 && d.players[0].pool.W === 0, 'tapping Tundra gives R'); }
+
+section('Cursed Totem shuts off creature abilities, including mana');
+{ const d = newDuel(); mainPhase(d); place(d, D('Cursed Totem'), 1); const bop = place(d, D('Birds of Paradise'), 0); const ps = place(d, D('Prodigal Sorcerer'), 0); d.refresh();
+  ok(!d.manaSources(d.players[0]).some(x => x.card === bop), 'Birds make no mana'); ok(!d.canActivate(d.players[0], ps, abIdx(ps.def, a => a.type === 'activated'), { targets: [{ type: 'player', idx: 1 }] }), 'Tim can\'t ping'); }
+
+section('Root Maze, Uphill Battle, Arcane Laboratory, Stabilizer');
+{ const d = newDuel(); mainPhase(d); place(d, D('Root Maze'), 1); const f = hand(d, D('Forest'), 0); d.cast(d.players[0], f); ok(f.tapped, 'lands enter tapped');
+  const d2 = newDuel(); mainPhase(d2); place(d2, D('Uphill Battle'), 1); const b = hand(d2, bears(), 0); pool(d2, 0, { G: 2 }); d2.cast(d2.players[0], b, {}); processAndResolve(d2); ok(b.tapped, 'opposing creature enters tapped');
+  const d3 = newDuel(); mainPhase(d3); place(d3, D('Arcane Laboratory'), 1); const x = hand(d3, bears(), 0), y = hand(d3, bears(), 0); pool(d3, 0, { G: 4 }); d3.cast(d3.players[0], x, {}); processAndResolve(d3); ok(!d3.canCast(d3.players[0], y), 'only one spell a turn');
+  const d4 = newDuel(); mainPhase(d4); place(d4, D('Stabilizer'), 1); const c = hand(d4, D('Krosan Tusker'), 0); pool(d4, 0, { G: 1, C: 2 }); ok(!d4.canCast(d4.players[0], c, { cycling: true }), 'no cycling'); }
+
+section('Dense Foliage, Earnest Fellowship, Darkest Hour');
+{ const d = newDuel(); mainPhase(d); place(d, D('Dense Foliage'), 1); const b = place(d, bears(), 1); const bolt = hand(d, D('Lightning Bolt'), 0); pool(d, 0, { R: 1 });
+  ok(!d.cast(d.players[0], bolt, { targets: [{ type: 'perm', id: b.id }] }), 'creatures can\'t be targeted by spells');
+  const d2 = newDuel(); mainPhase(d2); place(d2, D('Earnest Fellowship'), 1); const g = place(d2, bears(), 1); const gi = hand(d2, D('Giant Growth'), 0); pool(d2, 0, { G: 1 });
+  ok(!d2.cast(d2.players[0], gi, { targets: [{ type: 'perm', id: g.id }] }), 'a green creature has protection from green');
+  const d3 = newDuel(); mainPhase(d3); place(d3, D('Darkest Hour'), 1); const g3 = place(d3, bears(), 0); d3.refresh(); const tb = hand(d3, D('Terror'), 1); d3.priority = 1; pool(d3, 1, { B: 2 });
+  ok(!d3.cast(d3.players[1], tb, { targets: [{ type: 'perm', id: g3.id }] }), 'Terror can\'t hit a creature that is now black'); }
+
+section('Armor auras and protection auras');
+{ const d = newDuel(); mainPhase(d); const b = place(d, bears(), 0); const ba = place(d, D('Blanchwood Armor'), 0); ba.attachedTo = b; for (let k = 0; k < 3; k++) place(d, D('Forest'), 0); d.refresh();
+  ok(power(b) === 5 && toughness(b) === 5, `Blanchwood: +3/+3 (${power(b)}/${toughness(b)})`);
+  const ea = place(d, D('Empyrial Armor'), 0); ea.attachedTo = b; hand(d, D('Island'), 0); hand(d, D('Island'), 0); d.refresh(); ok(power(b) === 7, `Empyrial: +2 more (${power(b)})`);
+  const d2 = newDuel(); mainPhase(d2); const c = place(d2, bears(), 0); const mk = place(d2, D('Mask of Law and Grace'), 0); mk.attachedTo = c; d2.refresh(); const bolt = hand(d2, D('Lightning Bolt'), 1); d2.priority = 1; pool(d2, 1, { R: 1 });
+  ok(!d2.cast(d2.players[1], bolt, { targets: [{ type: 'perm', id: c.id }] }), 'protection from red'); }
+
+section('Vernal Bloom and Fluctuator');
+{ const d = newDuel(); mainPhase(d); place(d, D('Vernal Bloom'), 1); const f = place(d, D('Forest'), 0); pool(d, 0, {}); d.activateMana(d.players[0], f, 0, 'G'); ok(d.players[0].pool.G === 2, 'Forest makes GG');
+  const d2 = newDuel(); mainPhase(d2); place(d2, D('Fluctuator'), 0); const c = hand(d2, D('Krosan Tusker'), 0); pool(d2, 0, { G: 1 }); ok(d2.canCast(d2.players[0], c, { cycling: true }), 'Tusker cycles for just {G}'); }
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

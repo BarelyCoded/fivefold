@@ -25,15 +25,18 @@ const emptyPool = () => ({ W: 0, U: 0, B: 0, R: 0, G: 0, C: 0 });
 const kwName = k => (typeof k === 'string' ? k : k.k);
 
 export const has = (c, kw) => !!c.cur && c.cur.kw.has(kw);
-export const colorsOf = c => (c.temp?.color ? [c.temp.color] : c.setColor ? [c.setColor] : (c.def.colors || []));   // Wild Mongrel: "becomes the color of your choice until end of turn"
+export const colorsOf = c => (c.temp?.color ? [c.temp.color] : c.setColor ? [c.setColor] : c.cur?.colors ? c.cur.colors : (c.def.colors || []));
+// A land that "is a Mountain" (Blood Moon) or "is a Swamp" (Evil Presence) only taps for that colour.
+const BASIC_OF = { Plains: 'W', Island: 'U', Swamp: 'B', Mountain: 'R', Forest: 'G' };
+export const manaAbilitiesOf = c => c.cur?.landAs ? [{ type: 'mana', cost: { mana: { pips: [], generic: 0, x: false }, tap: true }, produces: [BASIC_OF[c.cur.landAs]], amount: 1, intrinsic: true }] : (c.cur?.flags?.has('cursedTotem') ? [] : c.def.manaAbilities);   // Wild Mongrel: "becomes the color of your choice until end of turn"
 export const power = c => (c.cur ? c.cur.p : c.def.power || 0);
 export const toughness = c => (c.cur ? c.cur.t : c.def.toughness || 0);
 export const isCreature = c => c.cur ? c.cur.types.has('creature') : c.def.types.includes('Creature');
 export const isLand = c => c.def.types.includes('Land');
 export const isType = (c, t) => c.def.types.map(x => x.toLowerCase()).includes(t) || (t === 'permanent' && c.def.isPermanent);
-export const hasSubtype = (c, s) => c.def.subtypes.includes(s) || (has(c, 'Changeling') && isCreature(c));
+export const hasSubtype = (c, s) => (c.cur?.landAs ? (s === c.cur.landAs || !['Plains', 'Island', 'Swamp', 'Mountain', 'Forest'].includes(s) && c.def.subtypes.includes(s)) : c.def.subtypes.includes(s)) || (has(c, 'Changeling') && isCreature(c));
 // Printed abilities plus any granted by statics (Farmstead, Energy Flux, The Tabernacle at Pendrell Vale).
-export const abilitiesOf = c => c.faceDown ? (c.unmorph ? [c.unmorph] : []) : c.cur?.flags?.has('noAbilities') ? [] : (c.cur?.granted?.length ? [...c.def.abilities, ...c.cur.granted] : c.def.abilities);   // Humility strips them
+export const abilitiesOf = c => c.faceDown ? (c.unmorph ? [c.unmorph] : []) : (c.cur?.flags?.has('noAbilities') || c.cur?.landAs) ? [] : (c.cur?.granted?.length ? [...c.def.abilities, ...c.cur.granted] : c.def.abilities);   // Humility strips them
 
 export class Duel {
   constructor({ player, ai, rng = Math.random, hooks = null, rules = {} }) {
@@ -578,7 +581,7 @@ export class Duel {
     const nullRod = this.nullRod();
     for (const c of p.battlefield) {
       if (c.cur?.flags.has('noAbilities') || (nullRod && isType(c, 'artifact'))) continue;   // Humility / Null Rod
-      c.def.manaAbilities.forEach((ma, i) => {
+      manaAbilitiesOf(c).forEach((ma, i) => {
         // Only free-to-use abilities are planned automatically: tap abilities, or counter-cost ones like Wall of Roots.
         if (!((ma.cost.tap || ma.cost.addCounter) && !ma.cost.sacSelf && !ma.cost.sacrifice && !ma.cost.life && !ma.cost.mana.pips.length && !ma.cost.mana.generic)) return;
         if (ma.cost.tap && (c.tapped || (isCreature(c) && c.sick && !has(c, 'Haste')))) return;
@@ -643,7 +646,7 @@ export class Duel {
     if (!plan) return;
     for (const [col, n] of Object.entries(plan.usePool)) p.pool[col] -= n;
     for (const t of plan.taps) {
-      const ma = t.src.card.def.manaAbilities[t.src.index];
+      const ma = manaAbilitiesOf(t.src.card)[t.src.index];
       if (!ma || ma.cost.tap) this.tap(t.src.card);
       if (t.spare > 0) p.pool[t.color] += t.spare;
       if (ma?.cost.removeCounter?.n === 'all') t.src.card.counters[ma.cost.removeCounter.kind] = 0;
@@ -662,7 +665,7 @@ export class Duel {
     if (ma?.damage) this.dealDamage(card, p, ma.damage);
     if (isLand(card)) {
       for (const src of this.permanents()) for (const ab of src.def.abilities) {
-        if (ab.type !== 'static' || ab.kind !== 'manaBonus' || !this.inScope(ab.scope, src, card)) continue;
+        if (ab.type !== 'static' || ab.kind !== 'manaBonus' || (ab.landType ? !hasSubtype(card, ab.landType) : !this.inScope(ab.scope, src, card))) continue;
         let col = ab.mana === 'same' ? color : ab.mana;
         if (col === 'any') {   // Fertile Ground: the colour your hand is shortest on, else the one just tapped
           const have = new Set(p.battlefield.flatMap(l => l.def.produces || [])); const need = {};
@@ -704,7 +707,7 @@ export class Duel {
   }
   sacOptions(p, card, cost) { return p.battlefield.filter(x => this.sacMatches(x, cost.sacrifice, cost) && x !== card); }
   activateMana(p, card, i, color) {
-    const ma = card.def.manaAbilities[i]; if (!ma || card.controller !== p.idx || card.zone !== 'battlefield') return false;
+    const ma = manaAbilitiesOf(card)[i]; if (!ma || card.controller !== p.idx || card.zone !== 'battlefield') return false;
     if (card.cur?.flags.has('noAbilities') || (isType(card, 'artifact') && this.nullRod())) return false;
     if (ma.cost.tap && (card.tapped || (isCreature(card) && card.sick && !has(card, 'Haste')))) return false;
     if (ma.cost.mana.pips.length || ma.cost.mana.generic) { const plan = this.planPayment(p, ma.cost.mana); if (!plan) return false; this.payMana(p, plan); }
@@ -738,11 +741,12 @@ export class Duel {
     if (d.kind === 'unsupported') return false;
     const fromGrave = card.zone === 'graveyard' && (d.keywords.some(k => k.k === 'Flashback') || card.tempFlashback === this.turn);   // Recoup grants flashback for a turn
     if (!(card.zone === 'hand' && p.hand.includes(card)) && !(fromGrave && p.graveyard.includes(card))) return false;
-    if (opts.cycling) { const cy = d.keywords.find(k => k.k === 'Cycling'); return !!cy && card.zone === 'hand' && this.canPay(p, cy.cost); }
+    if (opts.cycling) { const cy = d.keywords.find(k => k.k === 'Cycling'); if (this.permanents().some(x => x.def.abilities.some(ab => ab.type === 'static' && ab.kind === 'noCycling'))) return false; return !!cy && card.zone === 'hand' && this.canPay(p, this.cyclingCost(p, cy.cost)); }   // Stabilizer
     if (d.kind === 'land') return this.sorcerySpeed(p) && p.landPlayed < this.landLimit(p);
     if (opts.faceDown) return !!d.morph && card.zone === 'hand' && (this.sorcerySpeed(p) || has0(d, 'Flash')) && !(this.active !== p.idx && this.ownTurnOnly()) && this.canPay(p, this.modifiedCost(p, { def: MORPH_DEF }, MORPH_DEF.cost), 0, opts.poolOnly);   // morph: face down for {3}
     if (d.animateDead && !this.players.some(pl => pl.graveyard.some(c => isCreatureDef(c)))) return false;   // needs a creature in a graveyard to target
     if (this.active !== p.idx && this.ownTurnOnly()) return false;   // City of Solitude
+    if (p.castTurn === this.turn && (p.castN || 0) >= 1 && this.permanents().some(x => x.def.abilities.some(ab => ab.type === 'static' && ab.kind === 'oneSpellPerTurn'))) return false;   // Arcane Laboratory
     if (d.castWhen && ((d.castWhen.turn === 'you' && this.active !== p.idx) || (d.castWhen.turn === 'opp' && this.active === p.idx) || (d.castWhen.steps && !d.castWhen.steps.includes(this.step)))) return false;   // Necrologia, combat tricks
     const aluren = opts.aluren && this.alurenOk(card);
     if (opts.aluren && !aluren) return false;
@@ -786,7 +790,9 @@ export class Duel {
     return true;
   }
   // Spells cast this turn (all players) — Storm counts the ones cast before it. Returns the count before this one.
-  noteCast() { if (this.castTurn !== this.turn) { this.castTurn = this.turn; this.castThisTurn = 0; } return this.castThisTurn++; }
+  noteCast(p) { if (p) { if (p.castTurn !== this.turn) { p.castTurn = this.turn; p.castN = 0; } p.castN++; } if (this.castTurn !== this.turn) { this.castTurn = this.turn; this.castThisTurn = 0; } return this.castThisTurn++; }
+  // Fluctuator: cycling costs {2} less per Fluctuator you control.
+  cyclingCost(p, cost) { const k = p.battlefield.reduce((a, x) => a + x.def.abilities.filter(ab => ab.type === 'static' && ab.kind === 'cyclingDiscount').reduce((b, ab) => b + ab.n, 0), 0); return k ? { ...cost, generic: Math.max(0, (cost.generic || 0) - k) } : cost; }
   // Aluren: creature spells with mana value 3 or less cost nothing and have flash, for every player.
   alurenOk(card) {
     if (!isCreatureDef(card) || card.zone !== 'hand') return false;
@@ -850,7 +856,7 @@ export class Duel {
     const d = card.def;
     if (opts.cycling) {
       const cy = d.keywords.find(k => k.k === 'Cycling');
-      this.payMana(p, this.planPayment(p, cy.cost));
+      this.payMana(p, this.planPayment(p, this.cyclingCost(p, cy.cost)));
       this.moveTo(card, 'graveyard');
       if (cy.search) { this.stack.push({ id: uid++, kind: 'ability', card, controller: p.idx, targets: [], x: 0, effects: [{ type: 'tutor', what: cy.search, to: 'hand' }], text: `${cy.search}cycling` }); this.say(`${p.name} cycles ${d.name} (${cy.search}cycling).`); }   // Eternal Dragon
       else { this.drawCards(p, 1); this.say(`${p.name} cycles ${d.name}.`); }
@@ -923,7 +929,7 @@ export class Duel {
     this.fx.push({ type: 'cast', id: card.id, controller: p.idx });
     for (const t of targets) if (t.type === 'perm') this.fireEvent({ type: 'targeted', card: this.card(t.id) });
     this.fireEvent({ type: 'cast', player: p.idx, card });
-    const before = this.noteCast();
+    const before = this.noteCast(p);
     if (d.keywords.includes('Storm') && before > 0) this.pushTrigger(card, { effects: [{ type: 'stormCopies', item, n: before }], text: `Storm (${before} cop${before === 1 ? 'y' : 'ies'})` });
     for (const c of p.battlefield) if (has(c, 'Prowess') && !isCreatureDef(card)) this.pushTrigger(c, { effects: [{ type: 'pump', p: 1, t: 1, sel: 'self' }], text: 'Prowess' });
     this.passes = 0; this.priority = p.idx; this.emit(); return true;
@@ -933,6 +939,7 @@ export class Duel {
   canActivate(p, card, i, opts = {}) {
     if (this.winner !== null || this.priority !== p.idx) return false;
     const ab = abilitiesOf(card)[i]; if (!ab || ab.type !== 'activated') return false;
+    if (card.cur?.flags?.has('cursedTotem') && !ab.special) return false;   // Cursed Totem
     if (ab.zone === 'graveyard') { if (card.zone !== 'graveyard' || card.owner !== p.idx) return false; }   // Ashen Ghoul
     else if (card.zone !== 'battlefield' || card.controller !== p.idx) return false;
     if (isType(card, 'artifact') && this.nullRod()) return false;
@@ -1070,6 +1077,7 @@ export class Duel {
   }
   canTarget(p, c, source) {
     if (has(c, 'Shroud')) return false;
+    if (isCreature(c) && source?.def && source.zone !== 'battlefield' && this.permanents().some(x => x.def.abilities.some(ab => ab.type === 'static' && ab.kind === 'creaturesUntargetableBySpells'))) return false;   // Dense Foliage
     if (source?.def?.aura && c.cur?.flags.has('noAuras')) return false;
     if (has(c, 'Hexproof') && c.controller !== p.idx) return false;
     if (source && this.protectedFrom(c, source)) return false;
@@ -1077,6 +1085,7 @@ export class Duel {
   }
   protectedFrom(c, source) {
     if (!c.cur) return false;
+    if (isCreature(c) && source?.def && this.permanents().some(x => x.def.abilities.some(ab => ab.type === 'static' && ab.kind === 'protectionFromOwnColors')) && colorsOf(c).some(col => colorsOf(source).includes(col))) return true;   // Earnest Fellowship
     for (const k of c.cur.kw) {
       if (typeof k !== 'object' || k.k !== 'Protection') continue;
       const f = k.from;
@@ -2186,6 +2195,7 @@ export class Duel {
       ctrl.battlefield.push(c);
       c.sick = true; c.enteredTurn = this.turn; c.echoPaid = false;
       if (c.def.entersTapped) c.tapped = true;
+      for (const k of this.permanents()) for (const ab of k.def.abilities) if (ab.type === 'static' && ab.kind === 'entersTappedAll' && k !== c && (!ab.opp || k.controller !== c.controller) && ab.types.some(t => t === 'creature' ? isCreatureDef(c) : isType(c, t))) c.tapped = true;   // Root Maze, Uphill Battle
       if (!c.def.entersTapped && this.permanents().some(k => k !== c && k.controller !== c.controller && k.def.abilities.some(ab => ab.type === 'static' && ab.kind === 'oppEntersTapped'))) { c.tapped = true; this.say(`${c.def.name} enters tapped.`); }
       for (const ab of c.def.abilities) if (ab.kind === 'entersWithCounters') c.counters[ab.counter] = (c.counters[ab.counter] || 0) + ab.amount;
       const fading = c.def.keywords.find(k => k.k === 'Fading'); if (fading) c.counters.fade = fading.n;
@@ -2277,7 +2287,7 @@ export class Duel {
     this.fx.push({ type: 'cast', id: card.id, controller: p.idx });
     for (const t of targets) if (t.type === 'perm') this.fireEvent({ type: 'targeted', card: this.card(t.id) });
     this.fireEvent({ type: 'cast', player: p.idx, card });
-    this.noteCast();
+    this.noteCast(p);
     return true;
   }
   tap(c) { if (c.tapped) return; c.tapped = true; this.fireEvent({ type: 'tapped', card: c }); }
@@ -2334,7 +2344,7 @@ export class Duel {
     if (target.def) { // creature
       if (this.protectedFrom(target, source)) { this.say(`${target.def.name} is protected from ${source.def.name}.`); return 0; }
       if (!noPrev && opts.combat && (this.fog || target.flags.has('noCombatDamage') || source.flags?.has('noCombatDamage') || target.cur?.flags.has('noCombatDamage') || source.cur?.flags.has('noCombatDamage') || source.flags?.has('dealsNoCombatDamage') || target.cur?.flags.has('noCombatDamageTo'))) return 0;
-      if (!noPrev && (target.flags.has('noDamage') || target.cur?.flags.has('preventAllDamage') || source.flags?.has('dealsNoDamage'))) { this.say(`Damage to ${target.def.name} is prevented.`); return 0; }
+      if (!noPrev && (target.flags.has('noDamage') || target.cur?.flags.has('preventAllDamage') || source.flags?.has('dealsNoDamage') || source.cur?.flags?.has('dealsNoDamage'))) { this.say(`Damage to ${target.def.name} is prevented.`); return 0; }
       if (!noPrev && target.cur?.preventFrom && target.cur.preventFrom.some(f => f === 'artifact' ? isType(source, 'artifact') : (source.def?.colors || []).includes(f))) { this.say(`${target.def.name} is shielded from ${source.def.name}.`); return 0; }
       if (!noPrev && target.cur?.flags.has('phantom')) { if ((target.counters['+1/+1'] || 0) > 0) target.counters['+1/+1']--; this.say(`Damage to ${target.def.name} is prevented; it loses a +1/+1 counter.`); this.refresh(); return 0; }   // Phantom Nishoba
       if (!noPrev && target.shield > 0) { const used = Math.min(target.shield, n); target.shield -= used; n -= used; this.say(`${used} damage to ${target.def.name} is prevented.`); if (n <= 0) return 0; }
@@ -2350,7 +2360,7 @@ export class Duel {
     }
     const pl = target;
     if (opts.combat && (this.fog || source.flags?.has('noCombatDamage') || source.cur?.flags.has('noCombatDamage') || source.flags?.has('dealsNoCombatDamage'))) return 0;
-    if (source.flags?.has('dealsNoDamage')) return 0;
+    if (source.flags?.has('dealsNoDamage') || source.cur?.flags?.has('dealsNoDamage')) return 0;
     const ci = noPrev ? -1 : pl.cop.findIndex(f => f === 'any' || (Array.isArray(f) ? f.some(x => (source.def?.colors || []).includes(x)) : f === 'artifact' ? isType(source, 'artifact') : (source.def?.colors || []).includes(f)));
     if (ci >= 0) { pl.cop.splice(ci, 1); this.say(`${pl.name}'s circle of protection prevents ${source.def.name}'s damage.`); return 0; }
     // Spheres: reduce damage from sources of a colour
@@ -2516,6 +2526,12 @@ export class Duel {
           case 'animateLand': if (isLand(c)) { c.cur.types.add('creature'); c.cur.p += ab.p; c.cur.t += ab.t; } break;
           case 'preventFrom': (c.cur.preventFrom ||= []).push(ab.from); break;
           case 'preventAllDamage': c.cur.flags.add('preventAllDamage'); break;
+          case 'dealsNoDamageStatic': c.cur.flags.add('dealsNoDamage'); break;   // Muzzle
+          case 'landAs': if (isLand(c) && !(ab.nonbasicOnly && c.def.basic)) c.cur.landAs = ab.land; break;   // Blood Moon, Evil Presence
+          case 'colorAs': if (!ab.creaturesOnly || isCreature(c)) c.cur.colors = ab.colors; break;   // Darkest Hour, Thran Lens, Sinister Strength
+          case 'cursedTotem': if (isCreature(c)) c.cur.flags.add('cursedTotem'); break;
+          case 'ptPer': { const pl = this.players[src.controller]; const k = this.amount(ab.per, { p: pl, source: src }); c.cur.p += ab.p * k; c.cur.t += ab.t * k; break; }   // Empyrial / Blanchwood Armor
+          case 'animateEnchanted': if (isLand(c)) { c.cur.types.add('creature'); c.cur.p = ab.p; c.cur.t = ab.t; } break;   // Living Terrain
           case 'phantom': c.cur.flags.add('phantom'); break;
         }
       }

@@ -1,6 +1,6 @@
 // Duel screen for the rules core: renders state, drives the engine loop, collects human decisions,
 // and plays the engine's visual-effect events (attacks, blocks, strikes, damage).
-import { has, power, toughness, isCreature, isLand, isType, STEP_NAME, costText, abilitiesOf } from './engine.js';
+import { has, power, toughness, isCreature, isLand, isType, STEP_NAME, costText, abilitiesOf, manaAbilitiesOf } from './engine.js';
 import { flagIssue } from './gamelog.js';
 import { artFor, hasOwnArt } from './collection.js';
 import { costString, manaHtml, COLORS } from './cards.js';
@@ -216,8 +216,8 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     const req = duel.pending?.req;
     if (req?.kind === 'attackers' && owner === me && req.options.includes(c.id)) classes.push('can-attack');
     if (req?.kind === 'blockers' && owner === me && isCreature(c) && !c.tapped) classes.push('can-block');
-    if (owner === me && duel.pending?.type === 'priority' && (abilitiesOf(c).some((ab, i) => ab.type === 'activated' && duel.canActivate(me, c, i)) || c.def.manaAbilities.length)) classes.push('usable');
-    if (ui.paying && owner === me && !c.tapped && c.def.manaAbilities.length) classes.push('pay-source');
+    if (owner === me && duel.pending?.type === 'priority' && (abilitiesOf(c).some((ab, i) => ab.type === 'activated' && duel.canActivate(me, c, i)) || manaAbilitiesOf(c).length)) classes.push('usable');
+    if (ui.paying && owner === me && !c.tapped && manaAbilitiesOf(c).length) classes.push('pay-source');
     let pt = '', ptClass = '';
     if (isCreature(c)) { pt = `${power(c)}/${toughness(c) - c.damage}`; if (c.damage || power(c) !== c.def.power || toughness(c) !== c.def.toughness) ptClass = 'mod'; }
     const kws = [...c.cur.kw].filter(k => typeof k === 'string' ? !['Changeling'].includes(k) : true);
@@ -290,7 +290,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
       if (targeting() && g.all.some(c => isLegal({ type: 'perm', id: c.id }))) cls.push('targetable');
       const target = targeting() ? (g.all.find(c => isLegal({ type: 'perm', id: c.id })) || first) : first;
       if (p === me && duel.pending?.type === 'priority' && untapped.length) cls.push('usable');
-      if (ui.paying && p === me && untapped.length && g.def.manaAbilities.length) cls.push('pay-source');
+      if (ui.paying && p === me && untapped.length && manaAbilitiesOf(g).length) cls.push('pay-source');
       return `<div class="${cls.join(' ')}" data-id="${target.id}" data-zone="bf" data-name="${esc(g.name)}" data-preview="${esc(g.name)}"${g.counters ? ` data-counters="${esc(g.counters)}"` : ''}><i></i>${esc(g.name)}<b>${untapped.length}/${g.all.length}</b>${g.counters ? `<span class="pill-counters" title="Counters on this land">${esc(g.counters)}</span>` : ''}</div>`;
     });
     return `<div class="lands"><div class="lands-title">Lands</div>${items.join('') || '<div class="small">none</div>'}</div>`;
@@ -652,7 +652,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     if (!ui.paying) return;
     const need = neededMana(ui.paying.card);
     let choice = null;
-    card.def.manaAbilities.forEach((ma, i) => { if (choice || (ma.cost.tap && card.tapped)) return; const col = ma.produces.find(c => need.colors.has(c)) || ma.produces[0]; choice = { i, col }; });
+    manaAbilitiesOf(card).forEach((ma, i) => { if (choice || (ma.cost.tap && card.tapped)) return; const col = ma.produces.find(c => need.colors.has(c)) || ma.produces[0]; choice = { i, col }; });
     if (!choice) return;
     act.mana(card, choice.i, choice.col);
     if (duel.canCast(me, ui.paying.card, { ...ui.paying.opts, poolOnly: true })) castPoolOnly(ui.paying.card, ui.paying.opts);
@@ -681,7 +681,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
   // Llanowar Elves). Anything more (a choice of colours or several abilities) still opens the menu.
   function permDblClick(card) {
     if (duel.pending?.type !== 'priority' || card.controller !== localIdx) return;
-    const manas = []; card.def.manaAbilities.forEach((ma, i) => { if (!card.tapped || !ma.cost.tap) manas.push({ i, ma }); });
+    const manas = []; manaAbilitiesOf(card).forEach((ma, i) => { if (!card.tapped || !ma.cost.tap) manas.push({ i, ma }); });
     const acts = []; abilitiesOf(card).forEach((ab, i) => { if (ab.type === 'activated' && duel.canActivate(me, card, i)) acts.push({ i, ab }); });
     if (acts.length === 1 && manas.length === 0) { startActivate(card, acts[0].i); return; }
     if (manas.length === 1 && acts.length === 0 && manas[0].ma.produces.length === 1) { act.mana(card, manas[0].i, manas[0].ma.produces[0]); render(); return; }
@@ -730,7 +730,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
   }
   function permMenu(card) {
     const items = [];
-    card.def.manaAbilities.forEach((ma, i) => { const ok = !card.tapped || !ma.cost.tap; for (const col of (ma.produces.length > 1 ? ma.produces : [ma.produces[0]])) items.push({ label: `Add ${ma.amount || 1} ${col} mana (${costText(ma.cost)})`, disabled: !ok, mana: true, action: () => { ui.menu = null; act.mana(card, i, col); render(); } }); });
+    manaAbilitiesOf(card).forEach((ma, i) => { const ok = !card.tapped || !ma.cost.tap; for (const col of (ma.produces.length > 1 ? ma.produces : [ma.produces[0]])) items.push({ label: `Add ${ma.amount || 1} ${col} mana (${costText(ma.cost)})`, disabled: !ok, mana: true, action: () => { ui.menu = null; act.mana(card, i, col); render(); } }); });
     abilitiesOf(card).forEach((ab, i) => { if (ab.type !== 'activated') return; items.push({ label: abilityLabel(card, ab), disabled: !duel.canActivate(me, card, i), action: () => { ui.menu = null; startActivate(card, i); } }); });
     if (!items.length) return;
     // A land / mana rock with a single unambiguous mana ability: tap it straight for mana, no menu.
@@ -759,7 +759,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     if (ui.paying) {   // manual-mana mode: tap your own lands to pay for the pending spell
       if (btn.id === 'b-pay-cancel') { ui.paying = null; render(); return; }
       if (btn.id === 'b-pay-cast') { castPoolOnly(ui.paying.card, ui.paying.opts); return; }
-      if ((btn.classList.contains('card') || btn.classList.contains('pill')) && btn.dataset.zone === 'bf') { const c = cardOf(btn.dataset.id); if (c && c.controller === localIdx && !c.tapped && c.def.manaAbilities.length) tapToward(c); }
+      if ((btn.classList.contains('card') || btn.classList.contains('pill')) && btn.dataset.zone === 'bf') { const c = cardOf(btn.dataset.id); if (c && c.controller === localIdx && !c.tapped && manaAbilitiesOf(c).length) tapToward(c); }
       return;
     }
     if (cardChoiceActive()) {   // card-picker overlay: click cards to select, then Confirm

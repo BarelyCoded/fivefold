@@ -1,5 +1,5 @@
 // Opponent AI for the rules core: priority decisions and choice answers. Greedy, no lookahead.
-import { has, power, toughness, isCreature, isLand, isType, has0, isCreatureDef, abilitiesOf, addCosts } from './engine.js';
+import { has, power, toughness, isCreature, isLand, isType, has0, isCreatureDef, abilitiesOf, addCosts, manaAbilitiesOf } from './engine.js';
 import { needsTarget } from './cards.js';
 import { planFor } from './ai-plans.js';
 
@@ -466,7 +466,7 @@ const manaTotal = m => (m ? (m.generic || 0) + (m.pips?.length || 0) : 0);
 function availMana(p) {
   let n = 0;
   if (p.pool) for (const k in p.pool) n += p.pool[k];
-  for (const c of p.battlefield) if (!c.tapped && c.def.manaAbilities && c.def.manaAbilities.length) n++;
+  for (const c of p.battlefield) if (!c.tapped && manaAbilitiesOf(c) && manaAbilitiesOf(c).length) n++;
   return n;
 }
 // Upper bound on the extra power p could pump onto `a` this turn (self-pump abilities like Vampire

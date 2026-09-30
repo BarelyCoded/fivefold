@@ -925,6 +925,28 @@ function parseStatic(t) {
   if ((m = t.match(/^(?:threshold — )?as long as (?:there are )?seven or more cards (?:are )?in your graveyard, (.+)$/))) { const inner = parseStatic(m[1]); if (!inner) return null; for (const o of inner) o.condition = { ...(o.condition || {}), threshold: true }; return inner; }
   // Effect-first threshold wording: "~ gets +2/+2 as long as there are seven or more cards in your graveyard." (Nimble Mongoose, Werebear, Krosan Beast).
   if ((m = t.match(/^(?:threshold — )?(.+?) as long as (?:there are )?seven or more cards (?:are )?in your graveyard$/))) { const inner = parseStatic(m[1]); if (!inner) return null; for (const o of inner) o.condition = { ...(o.condition || {}), threshold: true }; return inner; }
+  // ---- global / aura statics (coverage sweep) ----
+  if (/^nonbasic lands are mountains$/.test(t)) return [{ type: 'static', kind: 'landAs', land: 'Mountain', nonbasicOnly: true, scope: { who: 'all' } }];   // Blood Moon
+  if ((m = t.match(/^enchanted land is (?:a|an) (plains|island|swamp|mountain|forest)$/))) return [{ type: 'static', kind: 'landAs', land: cap(m[1]), scope: { who: 'enchanted' } }];   // Evil Presence, Lingering Mirage
+  if ((m = t.match(/^all (creatures|permanents) are (white|blue|black|red|green|colorless)$/))) return [{ type: 'static', kind: 'colorAs', colors: m[2] === 'colorless' ? [] : [COLOR_WORD[m[2]]], creaturesOnly: m[1] === 'creatures', scope: { who: 'all' } }];   // Darkest Hour, Thran Lens
+  if ((m = t.match(/^enchanted creature gets ([+-]\d+)\/([+-]\d+) and is (white|blue|black|red|green)$/))) return [{ type: 'static', kind: 'pt', p: Number(m[1]), t: Number(m[2]), scope: { who: 'enchanted' } }, { type: 'static', kind: 'colorAs', colors: [COLOR_WORD[m[3]]], scope: { who: 'enchanted' } }];   // Sinister Strength
+  if (/^players can't cycle cards$/.test(t)) return [{ type: 'static', kind: 'noCycling', scope: { who: 'self' } }];   // Stabilizer
+  if ((m = t.match(/^(artifacts and lands|artifacts|lands|creatures) enter tapped$/))) return [{ type: 'static', kind: 'entersTappedAll', types: m[1].replace(/s\b/g, '').split(' and '), scope: { who: 'self' } }];   // Root Maze
+  if (/^creatures played by your opponents enter tapped$/.test(t)) return [{ type: 'static', kind: 'entersTappedAll', types: ['creature'], opp: true, scope: { who: 'self' } }];   // Uphill Battle
+  if (/^creatures can't be the targets of spells$/.test(t)) return [{ type: 'static', kind: 'creaturesUntargetableBySpells', scope: { who: 'self' } }];   // Dense Foliage
+  if (/^each creature has protection from its colors$/.test(t)) return [{ type: 'static', kind: 'protectionFromOwnColors', scope: { who: 'self' } }];   // Earnest Fellowship
+  if (/^activated abilities of creatures can't be activated$/.test(t)) return [{ type: 'static', kind: 'cursedTotem', scope: { who: 'all' } }];   // Cursed Totem
+  if (/^each player can't cast more than one spell each turn$/.test(t)) return [{ type: 'static', kind: 'oneSpellPerTurn', scope: { who: 'self' } }];   // Arcane Laboratory
+  if ((m = t.match(/^cycling abilities you activate cost \{(\d+)\} less to activate$/))) return [{ type: 'static', kind: 'cyclingDiscount', n: Number(m[1]), scope: { who: 'self' } }];   // Fluctuator
+  if ((m = t.match(/^whenever (?:a|an) (plains|island|swamp|mountain|forest) is tapped for mana, its controller adds an additional \{([wubrg])\}$/))) return [{ type: 'static', kind: 'manaBonus', mana: m[2].toUpperCase(), landType: cap(m[1]), scope: { who: 'all' } }];   // Vernal Bloom
+  if ((m = t.match(/^enchanted creature gets \+(\d)\/\+(\d) for each (card in your hand|(?:plains|island|swamp|mountain|forest) you control|other creature you control)$/))) {   // Empyrial / Blanchwood Armor, Granite Grip, Bravado
+    const per = m[3] === 'card in your hand' ? { calc: 'hand', sign: 1 } : m[3] === 'other creature you control' ? { calc: 'count', base: -1, restrict: { types: ['creature'], control: 'you' } } : { calc: 'lands', land: cap(m[3].split(' ')[0]) };
+    return [{ type: 'static', kind: 'ptPer', p: Number(m[1]), t: Number(m[2]), per, scope: { who: 'enchanted' } }];
+  }
+  if ((m = t.match(/^enchanted creature has protection from (white|blue|black|red|green) and from (white|blue|black|red|green)$/))) return [m[1], m[2]].map(c => ({ type: 'static', kind: 'keyword', keyword: { k: 'Protection', from: COLOR_WORD[c] }, scope: { who: 'enchanted' } }));   // Mask of Law and Grace
+  if (/^prevent all damage that would be dealt to enchanted creature$/.test(t)) return [{ type: 'static', kind: 'preventAllDamage', scope: { who: 'enchanted' } }];   // Inviolability
+  if (/^prevent all damage that would be dealt by enchanted creature$/.test(t)) return [{ type: 'static', kind: 'dealsNoDamageStatic', scope: { who: 'enchanted' } }];   // Muzzle
+  if ((m = t.match(/^enchanted land is a (\d+)\/(\d+) .+? creature that's still a land$/))) return [{ type: 'static', kind: 'animateEnchanted', p: Number(m[1]), t: Number(m[2]), scope: { who: 'enchanted' } }];   // Living Terrain
   // Spheres: "If a green source would deal damage to you, prevent 2 of that damage."
   if ((m = t.match(/^if a (white|blue|black|red|green) source would deal damage to you, prevent (\d+) of that damage$/))) return [{ type: 'static', kind: 'reduceColorDamage', color: COLOR_WORD[m[1]], n: Number(m[2]), scope: { who: 'self' } }];
   // "Choose an opponent" cards (two players: the chosen player is the opponent)
@@ -996,7 +1018,7 @@ function parseStatic(t) {
   if (/^prevent all damage that would be dealt to ~ by creatures it's blocking$/.test(t)) return [{ type: 'static', kind: 'noCombatDamageTo', scope: { who: 'self' } }];
   if (/^prevent all damage that would be dealt to ~$/.test(t)) return [{ type: 'static', kind: 'preventAllDamage', scope: { who: 'self' } }];   // Cho-Manno, Dawn Elemental, Glittering Lion
   if ((m = t.match(/^prevent all damage that would be dealt to (enchanted creature|~) by (artifact|white|blue|black|red|green) sources$/))) return [{ type: 'static', kind: 'preventFrom', from: COLOR_WORD[m[2]] || 'artifact', scope: parseScope(m[1]) }];
-  if ((m = t.match(/^you control enchanted (creature|land|artifact|permanent)$/))) return [{ type: 'static', kind: 'control', scope: { who: 'enchanted' } }];
+  if ((m = t.match(/^you control enchanted (creature|land|artifact|permanent|enchantment)$/))) return [{ type: 'static', kind: 'control', scope: { who: 'enchanted' } }];
   if ((m = t.match(/^(~|enchanted creature) has shroud as long as it's untapped$/))) return [{ type: 'static', kind: 'keyword', keyword: 'Shroud', scope: parseScope(m[1]), condition: m[1] === '~' ? { selfUntapped: true } : { enchantedUntapped: true } }];
   if ((m = t.match(/^(~|enchanted creature|enchanted land) can't be enchanted by other auras$/))) return [{ type: 'static', kind: 'noop', scope: { who: 'self' } }];
   if ((m = t.match(/^(~|enchanted creature) can't be the target of spells(?: and can't be enchanted by other auras)?$/))) return [{ type: 'static', kind: 'keyword', keyword: 'Shroud', scope: parseScope(m[1]), note: 'abilities cannot target it either' }];
