@@ -608,5 +608,33 @@ section('Upkeep / end-step conditions, Altar of Dementia, Xanthic Statue');
   const d4 = newDuel(); mainPhase(d4); const xs = place(d4, D('Xanthic Statue'), 0); pool(d4, 0, { C: 5 }); d4.activate(d4.players[0], xs, abIdx(xs.def, a => a.type === 'activated'), {}); processAndResolve(d4); d4.refresh();
   ok(isCreature(xs) && power(xs) === 8 && has(xs, 'Trample'), 'Xanthic Statue is an 8/8 trampler'); }
 
+section('Clone copies a creature and is itself again off the battlefield');
+{ const d = newDuel(); mainPhase(d); const vf = place(d, D('Verdant Force'), 1); const cl = hand(d, D('Clone'), 0); pool(d, 0, { U: 1, C: 3 });
+  d.cast(d.players[0], cl, {}); processAndResolve(d, [], y => [vf.id]); d.refresh();
+  ok(cl.def.name === 'Verdant Force' && power(cl) === 7, `Clone is a Verdant Force (${cl.def.name})`); d.destroy(cl); ok(cl.def.name === 'Clone', 'back to Clone in the graveyard'); }
+
+section('Grave Pact, Mana Breach, Destructive Flow, Burgeoning, Hesitation');
+{ const d = newDuel(); mainPhase(d); place(d, D('Grave Pact'), 0); const m = place(d, bears(), 0); const t = place(d, bears(), 1); d.destroy(m); processAndResolve(d); ok(t.zone === 'graveyard', 'Grave Pact: opponent sacrifices');
+  const d2 = newDuel(); mainPhase(d2); place(d2, D('Mana Breach'), 1); const f = place(d2, D('Forest'), 0); const b = hand(d2, bears(), 0); pool(d2, 0, { G: 2 }); d2.cast(d2.players[0], b, {}); processAndResolve(d2); ok(f.zone === 'hand', 'Mana Breach bounced my land');
+  const d3 = newDuel(); mainPhase(d3); place(d3, D('Destructive Flow'), 1); const w = place(d3, D('Wasteland'), 0); place(d3, D('Forest'), 0); d3.fireEvent({ type: 'upkeep', player: 0 }); processAndResolve(d3); ok(w.zone === 'graveyard', 'Destructive Flow ate the nonbasic');
+  const d4 = newDuel(); mainPhase(d4); place(d4, D('Burgeoning'), 1); const l2 = hand(d4, D('Forest'), 1); const l1 = hand(d4, D('Island'), 0); d4.cast(d4.players[0], l1); processAndResolve(d4, [], y => [l2.id]); ok(l2.zone === 'battlefield', 'Burgeoning put a land in');
+  const d5 = newDuel(); mainPhase(d5); const h = place(d5, D('Hesitation'), 1); const b5 = hand(d5, bears(), 0); pool(d5, 0, { G: 2 }); d5.cast(d5.players[0], b5, {}); processAndResolve(d5); ok(b5.zone === 'graveyard' && h.zone === 'graveyard', 'Hesitation countered the spell and went away'); }
+
+section('Mutilate, Stampede, Harmonic Convergence, Morality Shift, Biorhythm, Excise');
+{ const d = newDuel(); mainPhase(d); for (let k = 0; k < 2; k++) place(d, D('Swamp'), 0); const a = place(d, bears(), 1); const mu = hand(d, D('Mutilate'), 0); pool(d, 0, { B: 2, C: 2 }); d.cast(d.players[0], mu, {}); processAndResolve(d); ok(a.zone === 'graveyard', 'Mutilate -2/-2 kills the Bears');
+  const d2 = newDuel(); mainPhase(d2); const e = place(d2, D('Worship'), 1); lib(d2, bears(), 1); const hc = hand(d2, D('Harmonic Convergence'), 0); pool(d2, 0, { G: 1, C: 2 }); d2.cast(d2.players[0], hc, {}); processAndResolve(d2); const L = d2.players[1].library; ok(L[L.length - 1] === e, 'enchantment on top');
+  const d3 = newDuel(); mainPhase(d3); gy(d3, D('Verdant Force'), 0); lib(d3, bears(), 0); lib(d3, bears(), 0); const ms = hand(d3, D('Morality Shift'), 0); pool(d3, 0, { B: 2, C: 5 }); d3.cast(d3.players[0], ms, {}); processAndResolve(d3);
+  ok(d3.players[0].library.length === 1 && d3.players[0].graveyard.filter(c => c.def.name === 'Grizzly Bears').length === 2, 'graveyard and library swapped');
+  const d4 = newDuel(); mainPhase(d4); place(d4, bears(), 0); const br = hand(d4, D('Biorhythm'), 0); pool(d4, 0, { G: 2, C: 6 }); d4.cast(d4.players[0], br, {}); processAndResolve(d4); ok(d4.players[0].life === 1 && d4.winner === 0, `Biorhythm: I go to 1, they go to 0 (${d4.players[0].life}/${d4.players[1].life})`);
+  const d5 = newDuel(); mainPhase(d5); d5.active = 1; const at = place(d5, bears(), 1); d5.attackers = [at.id]; d5.priority = 0; const ex = hand(d5, D('Excise'), 0); pool(d5, 0, { W: 1, C: 3 }); d5.cast(d5.players[0], ex, { x: 3, targets: [{ type: 'perm', id: at.id }] }); processAndResolve(d5);
+  ok(at.zone === 'exile', 'Excise: they can\'t pay, exiled'); }
+
+section('Death Pits of Rath, Bubble Matrix, Urza\'s Armor, Intervene');
+{ const d = newDuel(); mainPhase(d); place(d, D('Death Pits of Rath'), 0); const g = place(d, D('Hill Giant'), 1); const s = hand(d, D('Shock'), 0); pool(d, 0, { R: 1 }); d.cast(d.players[0], s, { targets: [{ type: 'perm', id: g.id }] }); processAndResolve(d); ok(g.zone === 'graveyard', 'Shock + Death Pits kills Hill Giant');
+  const d2 = newDuel(); mainPhase(d2); place(d2, D('Bubble Matrix'), 1); const b = place(d2, bears(), 1); const s2 = hand(d2, D('Shock'), 0); pool(d2, 0, { R: 1 }); d2.cast(d2.players[0], s2, { targets: [{ type: 'perm', id: b.id }] }); processAndResolve(d2); ok(b.zone === 'battlefield' && b.damage === 0, 'Bubble Matrix prevents it');
+  const d3 = newDuel(); mainPhase(d3); place(d3, D("Urza's Armor"), 1); const s3 = hand(d3, D('Shock'), 0); pool(d3, 0, { R: 1 }); d3.cast(d3.players[0], s3, { targets: [{ type: 'player', idx: 1 }] }); processAndResolve(d3); ok(d3.players[1].life === 19, 'Urza\'s Armor prevents 1');
+  const d4 = newDuel(); mainPhase(d4); d4.active = 1; d4.priority = 1; const x = place(d4, bears(), 0); const s4 = hand(d4, D('Shock'), 1); pool(d4, 1, { R: 1 }); d4.cast(d4.players[1], s4, { targets: [{ type: 'player', idx: 0 }] }); const it = d4.stack[d4.stack.length - 1];
+  d4.priority = 0; const iv = hand(d4, D('Intervene'), 0); pool(d4, 0, { U: 1 }); d4.cast(d4.players[0], iv, { targets: [{ type: 'spell', id: it.id }] }); processAndResolve(d4); ok(d4.players[0].life === 18, 'Intervene can\'t counter a Shock aimed at a player'); }
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

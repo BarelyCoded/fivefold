@@ -478,6 +478,37 @@ const rules = [
   [/^you gain life equal to its toughness$/, () => [{ type: 'gainEqualPrev', stat: 'toughness' }]],   // Angelic Chorus
   [/^(target player) mills cards equal to the sacrificed creature's power$/, m => tgt({ type: 'mill', amount: { calc: 'stat', stat: 'power', of: 'sacrificed' } }, m[1])],   // Altar of Dementia
   [/^put (target (?:creature )?card from your graveyard) on top of your library$/, m => tgt({ type: 'gyToTop' }, m[1])],   // Haunted Crossroads
+  // ---- coverage sweep: more one-liners ----
+  [/^each other player sacrifices a creature(?: of their choice)?$/, () => [{ type: 'sacrifice', what: 'creature', sel: 'each', restrict: { players: 'opp' } }]],   // Grave Pact
+  [/^that player returns a land they control to its owner's hand$/, () => [{ type: 'returnOwn', restrict: { types: ['land'] }, who: 'thatPlayer' }]],   // Mana Breach
+  [/^(?:you may )?put a land card from your hand onto the battlefield$/, () => [{ type: 'putFromHand', filter: { types: ['land'] } }]],   // Burgeoning
+  [/^return all (enchantment|artifact|creature) cards from your graveyard to your hand$/, m => [{ type: 'massReturn', what: m[1], to: 'hand' }]],   // Crystal Chimes
+  [/^(target opponent) discards a card at random, then discards a card$/, m => tgt({ type: 'discard', amount: 1, random: true, then: 1 }, m[1])],   // Stupor
+  [/^each player returns a creature they control to its owner's hand$/, () => [{ type: 'returnOwn', restrict: { types: ['creature'] }, who: 'each' }]],   // Curfew
+  [/^attacking creatures get \+(\d+)\/\+(\d+) and gain trample until end of turn$/, m => [{ type: 'pump', p: Number(m[1]), t: Number(m[2]), sel: 'each', restrict: { types: ['creature'], state: 'attacking' } }, { type: 'grant', keyword: 'Trample', sel: 'each', restrict: { types: ['creature'], state: 'attacking' } }]],   // Stampede
+  [/^all creatures get -1\/-1 until end of turn for each (plains|island|swamp|mountain|forest) you control$/, m => [{ type: 'pumpPer', p: -1, t: -1, per: { calc: 'lands', land: cap(m[1]) }, sel: 'each', restrict: { types: ['creature'] } }]],   // Mutilate
+  [/^attacking creatures with flying get -2\/-2 and lose flying until end of turn$/, () => [{ type: 'pumpPer', p: -2, t: -2, sel: 'each', restrict: { types: ['creature'], state: 'attacking', flying: true } }, { type: 'loseTemp', keyword: 'Flying', sel: 'each', restrict: { types: ['creature'], state: 'attacking', flying: true } }]],   // Wind Shear
+  [/^put all enchantments on top of their owners' libraries$/, () => [{ type: 'toLibraryTop', sel: 'each', restrict: { types: ['enchantment'] } }]],   // Harmonic Convergence
+  [/^(target player) exiles all (land cards|cards with flashback) from their graveyard$/, m => tgt({ type: 'exileGyFiltered', what: m[2] === 'land cards' ? 'land' : 'flashback' }, m[1])],   // Mudhole, Tombfire
+  [/^(target player) untaps all basic lands they control$/, m => tgt({ type: 'untapBasics' }, m[1])],   // Early Harvest
+  [/^you gain (\d+) life for each creature attacking you$/, m => [{ type: 'gain', sel: 'you', amount: { calc: 'attackers', mult: Number(m[1]) } }]],   // Blessed Reversal
+  [/^you gain (\d+) life for each (white|blue|black|red|green) creature target opponent controls$/, m => [{ type: 'pickPlayer', sel: 'opponent' }, { type: 'gain', sel: 'you', amount: { calc: 'count', restrict: { types: ['creature'], colors: [COLOR_WORD[m[2]]], control: 'opp' }, mult: Number(m[1]) } }]],   // Starlight
+  [/^exchange your graveyard and library$/, () => [{ type: 'swapGyLibrary' }]],   // Morality Shift (shuffles as part of the swap)
+  [/^then shuffle your library$/, () => []],
+  [/^each player's life total becomes the number of creatures they control$/, () => [{ type: 'biorhythm' }]],
+  [/^all lands (you control )?become (\d+)\/(\d+) creatures until end of turn$/, m => [{ type: 'animateLandTarget', p: Number(m[2]), t: Number(m[3]), sel: 'each', restrict: { types: ['land'], ...(m[1] ? { control: 'you' } : {}) } }]],   // Natural Affinity, Life // Death
+  [/^they're still lands$/, () => []],
+  [/^exile (target attacking creature) unless its controller pays \{x\}$/, m => tgt({ type: 'unlessPayTarget', pay: 'X', effects: [{ type: 'exile', sel: 'prev' }] }, m[1])],   // Excise
+  [/^search your library for a card, then shuffle and put that card third from the top$/, () => [{ type: 'tutor', what: 'card', to: 'third' }]],   // Long-Term Plans
+  [/^search (target player)'s library for up to seven cards and exile them$/, m => tgt({ type: 'extract', n: 7 }, m[1])],   // Denying Wind
+  [/^shuffle (target nontoken permanent you control) into its owner's library$/, m => tgt({ type: 'oblation', noDraw: true }, m[1])],   // Rishadan Pawnshop
+  [/^draw a card for each creature you control$/, () => [{ type: 'draw', sel: 'you', amount: { calc: 'count', restrict: { types: ['creature'], control: 'you' } } }]],   // Slate of Ancestry
+  [/^each player creates a 1\/1 green cat creature token for each untapped forest they control$/, () => [{ type: 'weeds' }]],   // Waiting in the Weeds
+  [/^destroy it\. it can't be regenerated$/, () => [{ type: 'destroy', sel: 'prev', noRegen: true }]],   // Death Pits of Rath
+  [/^destroy it$/, () => [{ type: 'destroy', sel: 'prev' }]],
+  [/^sacrifice ~ and counter that spell$/, () => [{ type: 'sacrificeSelf' }, { type: 'counter', sel: 'castSpell', unlessPay: null }]],   // Hesitation
+  [/^counter (target spell) if it was kicked$/, m => { const k = T(m[1]); return k ? [{ type: 'counter', unlessPay: null, onlyKicked: true, ...k }] : null; }],   // Ertai's Trickery
+  [/^counter (target spell) that targets a creature$/, m => { const k = T(m[1]); return k ? [{ type: 'counter', unlessPay: null, onlyIfTargetsCreature: true, ...k }] : null; }],   // Intervene
   [/^choose a color$/, () => [{ type: 'chooseColorSelf' }]],
   [/^~ becomes the color of your choice until end of turn$/, () => [{ type: 'chooseColorSelf', temp: true }]],
   [/^~ gets \+(\d+)\/\+(\d+) and becomes the color of your choice until end of turn$/, m => [{ type: 'pump', p: Number(m[1]), t: Number(m[2]), sel: 'self', restrict: {} }, { type: 'chooseColorSelf', temp: true }]],   // Wild Mongrel
@@ -854,6 +885,7 @@ function parseAbilityCost(text) {
     else if ((m = p.match(/^remove any number of (\w+) counters from ~$/i))) cost.removeCounter = { kind: m[1].toLowerCase(), n: 'all' };
     else if ((m = p.match(/^discard (a|an|\w+) (?:(nonblack|black|white|blue|red|green|colorless|land|nonland|creature|artifact|nonartifact) )?cards?(?: at random)?$/i))) { cost.discard = amt(m[1].toLowerCase()) || 1; if (m[2]) cost.discardFilter = m[2].toLowerCase(); }
     else if (/^discard ~$/i.test(p)) cost.discardSelf = true;
+    else if (/^discard your hand$/i.test(p)) cost.discardHand = true;   // Slate of Ancestry, Null Brooch
     else if ((m = p.match(/^pay (\d+) life$/i))) cost.life = Number(m[1]);
     else if ((m = p.match(/^remove (a|an|\w+) ([+-]1\/[+-]1|\w+) counters? from ~$/i))) cost.removeCounter = { kind: m[2].toLowerCase(), n: amt(m[1].toLowerCase()) || 1 };
     else if (/^exile ~ from your graveyard$/i.test(p)) cost.exileSelfFromGraveyard = true;
@@ -942,6 +974,9 @@ function parseStatic(t) {
   // Effect-first threshold wording: "~ gets +2/+2 as long as there are seven or more cards in your graveyard." (Nimble Mongoose, Werebear, Krosan Beast).
   if ((m = t.match(/^(?:threshold — )?(.+?) as long as (?:there are )?seven or more cards (?:are )?in your graveyard$/))) { const inner = parseStatic(m[1]); if (!inner) return null; for (const o of inner) o.condition = { ...(o.condition || {}), threshold: true }; return inner; }
   // ---- global / aura statics (coverage sweep) ----
+  if (/^if a source would deal damage to you, prevent 1 of that damage$/.test(t)) return [{ type: 'static', kind: 'reduceColorDamage', color: 'any', n: 1, scope: { who: 'self' } }];   // Urza's Armor
+  if (/^prevent all damage that would be dealt to creatures$/.test(t)) return [{ type: 'static', kind: 'preventAllDamage', scope: { who: 'all', types: ['creature'] } }];   // Bubble Matrix
+  if ((m = t.match(/^enchanted creature gets \+(\d)\/\+(\d) for each other enchantment on the battlefield$/))) return [{ type: 'static', kind: 'ptPer', p: Number(m[1]), t: Number(m[2]), per: { calc: 'count', base: -1, restrict: { types: ['enchantment'] } }, scope: { who: 'enchanted' } }];   // Ancestral Mask
   if (/^nonbasic lands are mountains$/.test(t)) return [{ type: 'static', kind: 'landAs', land: 'Mountain', nonbasicOnly: true, scope: { who: 'all' } }];   // Blood Moon
   if ((m = t.match(/^enchanted land is (?:a|an) (plains|island|swamp|mountain|forest)$/))) return [{ type: 'static', kind: 'landAs', land: cap(m[1]), scope: { who: 'enchanted' } }];   // Evil Presence, Lingering Mirage
   if ((m = t.match(/^all (creatures|permanents) are (white|blue|black|red|green|colorless)$/))) return [{ type: 'static', kind: 'colorAs', colors: m[2] === 'colorless' ? [] : [COLOR_WORD[m[2]]], creaturesOnly: m[1] === 'creatures', scope: { who: 'all' } }];   // Darkest Hour, Thran Lens
@@ -1275,6 +1310,7 @@ function parseAbilityLine(line, ctx) {
     if (/^that player may pay \{3\}\. if they don't, ~ deals 2 damage to that player and you tap that creature$/.test(rest)) return { type: 'triggered', ...ev, effects: [{ type: 'unlessPayAura', pay: parseCost('{3}'), effects: [{ type: 'damage', amount: 2, sel: 'thatPlayer' }, { type: 'tap', sel: 'enchanted' }] }], text: line };
     if (/^that player reveals the top card of their library\. if that card is a land card, destroy that creature\. otherwise, it gets \+3\/\+3 until end of turn$/.test(rest)) return { type: 'triggered', ...ev, effects: [{ type: 'paroxysm' }], text: line };
     if (/^~ deals damage equal to that creature's power to that player unless they sacrifice another creature of their choice$/.test(rest)) return { type: 'triggered', ...ev, effects: [{ type: 'unnaturalHunger' }], text: line };
+    if (/^that player sacrifices a nonbasic land of their choice$/.test(rest)) return { type: 'triggered', ...ev, effects: [{ type: 'sacrificeFiltered', restrict: { types: ['land'], not: ['basic'] }, sel: 'thatPlayer' }], text: line };   // Destructive Flow
     if (/^that player untaps a land they control$/.test(rest)) return { type: 'triggered', ...ev, effects: [{ type: 'untapOneLand', sel: 'thatPlayer' }], text: line };   // Rising Waters
     // Sanctuaries: "if you control a C1 or C2 permanent, <small>. If you control a C1 permanent and a C2 permanent, <big> instead."
     if ((cm = rest.match(/^if you control a (white|blue|black|red|green) or (white|blue|black|red|green) permanent, (.+?)\. if you control a \1 permanent and a \2 permanent, (.+)$/))) {
@@ -1378,6 +1414,13 @@ function parseEvent(w) {
   if (/^a creature you control enters(?: the battlefield)?$/.test(w)) return { event: 'anyCreatureEtb', yours: true };   // Aura Shards, Angelic Chorus
   if ((m = w.match(/^a creature with power (\d+) or greater enters(?: the battlefield)?$/))) return { event: 'anyCreatureEtb', powerGE: Number(m[1]) };   // Kavu Lair
   if (/^a player plays a land$/.test(w)) return { event: 'anyPlaysLand' };   // Horn of Greed
+  if (/^an opponent plays a land$/.test(w)) return { event: 'anyPlaysLand', opp: true };   // Burgeoning
+  if (/^a creature you control dies$/.test(w)) return { event: 'anyDies', restrict: { types: ['creature'] }, ownerYou: true };   // Grave Pact
+  if (/^a player casts a spell$/.test(w)) return { event: 'anyCast' };
+  if ((m = w.match(/^an opponent casts a (white|blue|black|red|green) or (white|blue|black|red|green) spell$/))) return { event: 'anyCast', who: 'opp', colorsAny: [COLOR_WORD[m[1]], COLOR_WORD[m[2]]] };   // Snake Pit
+  if (/^a creature is dealt damage$/.test(w)) return { event: 'anyDealtDamage' };   // Death Pits of Rath
+  if (/^enchanted creature is dealt damage$/.test(w)) return { event: 'enchantedDealtDamage' };   // Mortal Wound
+  if (/^a creature you control becomes blocked$/.test(w)) return { event: 'anyBecomesBlocked', yours: true };   // Close Quarters
   if (/^a creature deals damage to you$/.test(w)) return { event: 'creatureDamagesYou' };   // No Mercy
   if ((m = w.match(/^an? (white|blue|black|red|green) creature dies$/))) return { event: 'anyDies', restrict: { types: ['creature'], colors: [COLOR_WORD[m[1]]] } };   // Bereavement
   if (/^an opponent discards a card$/.test(w)) return { event: 'oppDiscards' };   // Megrim
@@ -1510,6 +1553,8 @@ export function compile(c) {
   // A kicker rider can share a line with the main effect ("Destroy target artifact. If this spell was kicked,
   // draw two cards."): split it off so the line-level kicker handler below sees it.
   const lines = normalizeOracle(c.oracle_text || '', c.name, def.legendary).flatMap(l => l.split(/(?<=\.)\s+(?=if (?:~|this spell) was kicked,)/i));
+  // Clone: "You may have this creature enter as a copy of any creature on the battlefield." (plain copies only)
+  if (/^you may have (?:this creature|~|[^.]+?) enter as a copy of any creature on the battlefield\.?$/i.test((c.oracle_text || '').trim())) { def.cloneAny = true; def.status = 'full'; return def; }
   if (/enters? (?:the battlefield )?as a copy of/i.test(c.oracle_text || '')) return unsupported('Copy effects are not supported');
   const spellEffects = [];
   const modes = [];
