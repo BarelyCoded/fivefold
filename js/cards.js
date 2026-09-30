@@ -432,6 +432,38 @@ const rules = [
   // Extract / Lobotomy / Haunting Echoes
   [/^search (target player)'s library for a card and exile it$/, m => tgt({ type: 'extract' }, m[1])],
   [/^then that player shuffles$/, () => []],
+  // ---- single-sentence spells (coverage sweep) ----
+  [/^(target player)'s life total becomes (\d+)$/, m => tgt({ type: 'setLife', amount: Number(m[2]) }, m[1])],   // Blessed Wind
+  [/^target player takes (an|two) extra turns? after this one$/, m => [{ type: 'extraTurn', n: m[1] === 'two' ? 2 : 1 }]],   // Time Warp, Time Stretch
+  [/^(?:you may )?play up to (\w+) additional lands? this turn$/, m => [{ type: 'extraLandsTurn', n: amt(m[1]) }]],   // Summer Bloom
+  [/^(target player) mills half their library, rounded down$/, m => tgt({ type: 'mill', amount: { calc: 'halfLibrary', of: 'subject' } }, m[1])],   // Traumatize
+  [/^add \{([wubrg])\} for each (\w+?) on the battlefield$/, m => [{ type: 'addMana', mana: [m[1].toUpperCase()], times: { calc: 'count', restrict: { subtypes: [capSub(m[2])], types: ['permanent'] } } }]],   // Brightstone Ritual
+  [/^creatures without flying can't block this turn$/, () => [{ type: 'flag', flag: 'cantBlock', sel: 'each', restrict: { types: ['creature'], flying: false } }]],   // Falter
+  [/^each player loses 1 life for each creature they control$/, () => [{ type: 'lose', sel: 'each', restrict: { players: 'all' }, amount: { calc: 'count', restrict: { types: ['creature'], control: 'you' }, of: 'subject' } }]],   // Stronghold Discipline
+  [/^(target player) discards a card for each (plains|island|swamp|mountain|forest) you control$/, m => tgt({ type: 'discard', amount: { calc: 'lands', land: cap(m[2]) } }, m[1])],   // Mind Sludge
+  [/^(target player) shuffles their graveyard into their library$/, m => tgt({ type: 'shuffleGraveyard' }, m[1])],   // Reminisce
+  [/^(target creature) deals damage to itself equal to its power$/, m => tgt({ type: 'selfDamagePower' }, m[1])],   // Repentance
+  [/^each creature deals damage to itself equal to its power$/, () => [{ type: 'selfDamagePower', sel: 'each', restrict: { types: ['creature'] } }]],   // Wave of Reckoning
+  [/^put (target card from your graveyard) on top of your library$/, m => tgt({ type: 'gyToTop' }, m[1])],   // Reclaim
+  [/^(target player) gains (\d+) life for each creature on the battlefield$/, m => tgt({ type: 'gain', amount: { calc: 'count', restrict: { types: ['creature'] }, mult: Number(m[2]) } }, m[1])],   // Congregate
+  [/^each player draws a card for each creature card in their graveyard$/, () => [{ type: 'draw', sel: 'each', restrict: { players: 'all' }, amount: { calc: 'graveyard', what: 'creature', of: 'subject' } }]],   // Nature's Resurgence
+  [/^you gain life equal to the number of creature cards in (all graveyards|your graveyard)$/, m => [{ type: 'gain', sel: 'you', amount: m[1] === 'all graveyards' ? { calc: 'graveyardAll', what: 'creature' } : { calc: 'graveyard', what: 'creature' } }]],   // Invigorating Falls, Blossoming Wreath
+  [/^create a 1\/1 (\w+) (\w+) creature token for each card in your hand$/, m => [{ type: 'token', count: { calc: 'hand', sign: 1 }, p: 1, t: 1, colors: COLOR_WORD[m[1]] ? [COLOR_WORD[m[1]]] : [], types: ['creature'], subtypes: [cap(m[2])], keywords: [] }]],   // Spontaneous Generation
+  [/^destroy all creatures that aren't enchanted$/, () => [{ type: 'destroyAll', restrict: { types: ['creature'], notEnchanted: true } }]],   // Winds of Rath
+  [/^prevent all damage that would be dealt this turn to creatures you control$/, () => [{ type: 'flag', flag: 'noDamage', sel: 'each', restrict: { types: ['creature'], control: 'you' } }]],   // Divine Light
+  [/^prevent all damage that would be dealt this turn to (target creature)$/, m => tgt({ type: 'flag', flag: 'noDamage' }, m[1])],   // Redeem (split)
+  [/^domain — you gain (\d+) life for each basic land type among lands you control$/, m => [{ type: 'gain', sel: 'you', amount: { calc: 'domain', mult: Number(m[1]) } }]],   // Wandering Stream
+  [/^until end of turn, (target land) becomes a (\d+)\/(\d+) creature that's still a land$/, m => tgt({ type: 'animateLandTarget', p: Number(m[2]), t: Number(m[3]) }, m[1])],   // Animate Land
+  [/^unless (target player|target opponent) pays ((?:\{[^}]+\})+), that player (.+)$/, m => { const k = T(m[1]); const inner = parseSentence('that player ' + m[3]); return k && inner ? [{ type: 'pickPlayer', ...k }, { type: 'unlessPay', cost: parseCost(m[2].toUpperCase()), payer: 'thatPlayer', effects: inner }] : null; }],   // Rhystic Syphon
+  [/^that player loses (\d+) life and you gain (\d+) life$/, m => [{ type: 'lose', amount: Number(m[1]), sel: 'thatPlayer' }, { type: 'gain', amount: Number(m[2]), sel: 'you' }]],
+  [/^counter (target spell) unless its controller pays \{x\}, where x is its mana value$/, m => { const k = T(m[1]); return k ? [{ type: 'counter', unlessPay: 'CMC', ...k }] : null; }],   // Rethink
+  [/^(creatures|lands|creatures and lands) (target player|target opponent) controls? don't untap during (?:their|that player's) next untap step$/, m => tgt({ type: 'noUntapNextAll', what: m[1] === 'creatures and lands' ? ['creature', 'land'] : [m[1].replace(/s$/, '')] }, m[2])],   // Misstep, Mana Vapors, Exhaustion
+  [/^the owner of (target nonland permanent) shuffles it into their library, then draws two cards$/, m => tgt({ type: 'oblation' }, m[1])],   // Oblation
+  [/^exile (target nontoken permanent), then return it to the battlefield under its owner's control$/, m => tgt({ type: 'flicker' }, m[1])],   // Flicker
+  [/^put (target creature card from an opponent's graveyard) onto the battlefield under your control$/, m => { const k = T(m[1]); return k ? [{ type: 'fromGraveyard', to: 'battlefield', ...k, restrict: { ...k.restrict, who: 'opp' } }] : null; }],   // Ashen Powder
+  [/^until end of turn, (target creature) loses all abilities and has base power and toughness 0\/1$/, m => tgt({ type: 'humble' }, m[1])],   // Humble
+  [/^(target player) gains 4 life, then gains 4 life for each card named ~ in each graveyard$/, m => tgt({ type: 'gain', amount: { calc: 'graveyardNameAll', base: 4, mult: 4 } }, m[1])],   // Life Burst
+  [/^you gain x plus (\d+) life$/, m => [{ type: 'gain', sel: 'you', amount: { calc: 'x', base: Number(m[1]) } }]],   // Vitalizing Cascade
   [/^choose a color$/, () => [{ type: 'chooseColorSelf' }]],
   [/^~ becomes the color of your choice until end of turn$/, () => [{ type: 'chooseColorSelf', temp: true }]],
   [/^~ gets \+(\d+)\/\+(\d+) and becomes the color of your choice until end of turn$/, m => [{ type: 'pump', p: Number(m[1]), t: Number(m[2]), sel: 'self', restrict: {} }, { type: 'chooseColorSelf', temp: true }]],   // Wild Mongrel
@@ -662,6 +694,15 @@ function parseSentence(s) {
   const one = parseClause(t);
   if (one) return one;
   let um;
+  // "Destroy two target lands" / "Two target creatures each get -1/-1": the single-target effect, once per target.
+  if ((um = t.match(/^(.*?)\b(?:up to )?(two|three) target (lands|artifacts|creatures|enchantments|permanents|creature cards|cards)\b(.*)$/))) {
+    const n = amt(um[2]);
+    const single = (um[1] + 'target ' + um[3].replace(/s$/, '').replace(/ cards$/, ' card') + um[4])
+      .replace(/^(target .+?) each get /, '$1 gets ').replace(/ to their owners' hands$/, " to its owner's hand").replace(/ on top of their owners' libraries$/, " on top of its owner's library")
+      .replace(/ from your graveyard to your hand$/, ' from your graveyard to your hand').replace(/^(target .+?) can't block this turn$/, "$1 can't block this turn");
+    const inner = single !== t ? parseClause(single) : null;
+    if (inner && inner.length && inner.every(e => needsTarget(e))) { const out = []; for (let i = 0; i < n; i++) for (const e of inner) out.push({ ...e, ...(i ? { distinct: true } : {}) }); return out; }
+  }
   if ((um = t.match(/^(.+?) unless (you|they|that player) pays? ((?:\{[^}]+\})+)$/)) || (um = t.match(/^unless (you) pay ((?:\{[^}]+\})+), (.+)$/))) {
     const pre = um[3].startsWith('{') ? false : true;
     const body = pre ? um[3] : um[1], cost = pre ? um[2] : um[3], payer = pre ? 'you' : um[2];

@@ -780,6 +780,7 @@ export class Duel {
     if (d.spell) {
       const effects = this.spellEffects(d, opts);
       for (const e of effects) if (needsTarget(e) && !this.legalTargets(p, e, card).length) return false;
+      const dist = effects.filter(e => needsTarget(e) && e.distinct).length; if (dist) { const first = effects.find(e => needsTarget(e)); if (this.legalTargets(p, first, card).length < dist + 1) return false; }
       if (d.spell.modes && !opts.modes && !this.availableModes(p, card).length) return false;
     }
     return true;
@@ -809,7 +810,7 @@ export class Duel {
     return { ...cost, generic: Math.max(0, (cost.generic || 0) + delta) };
   }
   landLimit(p) {
-    let n = 1;
+    let n = 1 + (p.extraLandsTurn === this.turn ? p.extraLandsN || 0 : 0);   // Summer Bloom
     for (const src of this.permanents()) for (const ab of src.def.abilities) if (ab.type === 'static' && ab.kind === 'extraLands' && (ab.who === 'all' || src.controller === p.idx)) n = ab.any ? 99 : n + ab.n;
     return n;
   }
@@ -866,6 +867,7 @@ export class Duel {
     for (let i = 0; i < specs.length; i++) {
       const legal = this.legalTargets(p, specs[i].effect, card);
       if (!targets[i] || !legal.some(l => sameRef(l, targets[i]))) return false;
+      if (specs[i].effect.distinct && targets.slice(0, i).some(t => sameRef(t, targets[i]))) return false;   // "two target lands": different ones
     }
     const fromGrave = card.zone === 'graveyard';
     let cost = fromGrave ? (d.keywords.find(k => k.k === 'Flashback')?.cost || d.cost) : d.cost;
@@ -1059,7 +1061,7 @@ export class Duel {
         }
         break;
       case 'card': {
-        const zones = r.who === 'you' ? [p] : this.players;
+        const zones = r.who === 'you' ? [p] : r.who === 'opp' ? [this.opponentOf(p)] : this.players;
         for (const pl of zones) for (const c of pl.graveyard) if (matchCardWhat(c, r.what)) out.push({ type: 'card', id: c.id, label: c.def.name });
         break;
       }
@@ -1101,6 +1103,7 @@ export class Duel {
     }
     if (r.colors && !r.colors.some(col => colorsOf(c).includes(col))) return false;
     if (r.subtypes && !r.subtypes.some(s => hasSubtype(c, s))) return false;
+    if (r.notEnchanted && this.permanents().some(a => a.attachedTo === c && a.def.aura)) return false;   // Winds of Rath
     if (r.state === 'attacking' && !this.attackers.includes(c.id)) return false;
     if (r.state === 'blocking' && !Object.values(this.blocks).flat().includes(c.id)) return false;
     if (r.state === 'combat' && !this.attackers.includes(c.id) && !Object.values(this.blocks).flat().includes(c.id)) return false;
@@ -1211,11 +1214,13 @@ export class Duel {
       else if (v.calc === 'count') { const src = ctx.source; const r = v.restrict?.control === 'targetPlayer' ? { ...v.restrict, control: 'you' } : v.restrict; n = (v.base || 0) + (v.mult || 1) * this.permanents().filter(c => c !== (v.restrict?.other ? src : null) && this.matchesRestrict(c, r, who)).length; }
       else if (v.calc === 'graveyard') n = (v.base || 0) + who.graveyard.filter(c => matchCardWhat(c, v.what)).length;
       else if (v.calc === 'attackers') n = (v.base || 0) + this.attackers.length;
-      else if (v.calc === 'domain') { const T = ['Plains', 'Island', 'Swamp', 'Mountain', 'Forest']; n = (v.base || 0) + T.filter(t => who.battlefield.some(l => isLand(l) && hasSubtype(l, t))).length; }
-      else if (v.calc === 'graveyardNameAll') { const nm = ctx.source?.def?.name; n = (v.base || 0) + this.players.reduce((a, pl) => a + pl.graveyard.filter(c => c.def.name === nm).length, 0); }
+      else if (v.calc === 'domain') { const T = ['Plains', 'Island', 'Swamp', 'Mountain', 'Forest']; n = (v.base || 0) + (v.mult || 1) * T.filter(t => who.battlefield.some(l => isLand(l) && hasSubtype(l, t))).length; }
+      else if (v.calc === 'graveyardNameAll') { const nm = ctx.source?.def?.name; n = (v.base || 0) + (v.mult || 1) * this.players.reduce((a, pl) => a + pl.graveyard.filter(c => c.def.name === nm).length, 0); }
       else if (v.calc === 'maxCmc') { const perms = this.permanents().filter(c => v.control !== 'you' || c.controller === who.idx); n = (v.base || 0) + (perms.length ? Math.max(...perms.map(c => c.def.cmc || 0)) : 0); }
       else if (v.calc === 'handKind') n = (v.base || 0) + (v.mult || 1) * who.hand.filter(c => matchCardWhat(c, v.what)).length;   // Metalworker
       else if (v.calc === 'counters') n = (v.base || 0) + (((ctx.item?.sacCounters) ?? ctx.source?.counters ?? {})[v.kind] || 0);   // Powder Keg (counters as they were when it was sacrificed)
+      else if (v.calc === 'halfLibrary') n = Math.floor(who.library.length / 2);   // Traumatize
+      else if (v.calc === 'graveyardAll') n = (v.base || 0) + this.players.reduce((a, pl) => a + pl.graveyard.filter(c => matchCardWhat(c, v.what)).length, 0);
       else if (v.calc === 'sanctuary') { const has1 = who.battlefield.some(x => colorsOf(x).includes(v.colors[0])), has2 = who.battlefield.some(x => colorsOf(x).includes(v.colors[1])); n = has1 && has2 ? v.high : has1 || has2 ? v.low : 0; }
       else if (v.calc === 'revealed') n = ctx.revealedCmc || 0;   // Planeswalker's Mirth / Fury
       else if (v.calc === 'paidLife') n = (v.base || 0) + (ctx.source?.paidLife || 0);   // Phyrexian Processor
@@ -1607,7 +1612,7 @@ export class Duel {
         if (e.maxMv != null) { const lim = ctx.item?.kicked && e.kickedMaxMv != null ? e.kickedMaxMv : e.maxMv; if ((s.item.card?.def.cmc ?? 0) > lim) { this.say(`${s.item.card.def.name} has mana value over ${lim}; it isn't countered.`); continue; } }   // Prohibit
         if (e.toTop) s.item._toTop = true;
         const ctrl = this.players[s.item.controller];
-        if (e.unlessPay) { const pay = this.amount(e.unlessPay, ctx); const cost = { pips: [], generic: pay, x: false }; if (this.canPay(ctrl, cost)) { const yes = yield { kind: 'yesno', player: ctrl.idx, text: `Pay {${pay}} to stop ${s.item.card.def.name} from being countered?`, value: 'pay' }; if (yes) { this.payMana(ctrl, this.planPayment(ctrl, cost)); this.say(`${ctrl.name} pays ${pay}.`); continue; } } }
+        if (e.unlessPay) { const pay = e.unlessPay === 'CMC' ? (s.item.card?.def.cmc || 0) : this.amount(e.unlessPay, ctx); /* Rethink */ const cost = { pips: [], generic: pay, x: false }; if (this.canPay(ctrl, cost)) { const yes = yield { kind: 'yesno', player: ctrl.idx, text: `Pay {${pay}} to stop ${s.item.card.def.name} from being countered?`, value: 'pay' }; if (yes) { this.payMana(ctrl, this.planPayment(ctrl, cost)); this.say(`${ctrl.name} pays ${pay}.`); continue; } } }
         if (e.drawController) this.delayed.push({ player: s.item.controller, type: 'draw', amount: e.drawController });
         ctx.prevItemController = s.item.controller;
         this.counterItem(s.item);
@@ -1874,6 +1879,15 @@ export class Duel {
       case 'unnaturalHunger': { const host = src.attachedTo; if (!host) break; const pl = this.players[host.controller]; const others = pl.battlefield.filter(c => isCreature(c) && c !== host);
         let sac = false; if (others.length) sac = pl.ai ? power(host) >= 3 : yield { kind: 'yesno', player: pl.idx, text: `${src.def.name}: sacrifice another creature (otherwise take ${power(host)} damage)?`, card: src.id, value: 'unlessSacrifice' };
         if (sac) yield* this.sacrificeChoice(pl, 'creature', host); else this.dealDamage(src, pl, power(host)); break; }
+      case 'setLife': for (const s of subs) if (s.player) { s.player.life = this.amount(e.amount, ctx); this.say(`${s.player.name}'s life total becomes ${s.player.life}.`); } break;   // Blessed Wind
+      case 'extraLandsTurn': p.extraLandsTurn = this.turn; p.extraLandsN = (p.extraLandsTurn === this.turn ? p.extraLandsN || 0 : 0) + e.n; this.say(`${p.name} may play ${e.n} additional land${e.n > 1 ? 's' : ''} this turn.`); break;
+      case 'selfDamagePower': for (const s of subs) if (s.card && isCreature(s.card) && power(s.card) > 0) this.dealDamage(s.card, s.card, power(s.card)); break;   // Repentance, Wave of Reckoning
+      case 'gyToTop': for (const s of subs) if (s.card && s.card.zone === 'graveyard') { const ow = this.players[s.card.owner]; this.moveTo(s.card, 'library'); removeFrom(ow.library, s.card); ow.library.push(s.card); this.say(`${s.card.def.name} is put on top of ${ow.name}'s library.`); } break;   // Reclaim
+      case 'animateLandTarget': for (const s of subs) if (s.card && isLand(s.card)) { s.card.temp.animate = { types: ['creature'], p: e.p, t: e.t, kw: [] }; this.refresh(); this.say(`${s.card.def.name} becomes a ${e.p}/${e.t} creature until end of turn.`); } break;   // Animate Land
+      case 'noUntapNextAll': for (const s of subs) if (s.player) { for (const c of s.player.battlefield) if (e.what.some(w => w === 'creature' ? isCreature(c) : isType(c, w))) c.flags.add('noUntapNext'); this.say(`${s.player.name}'s ${e.what.join(' and ')}s won't untap during their next untap step.`); } break;   // Misstep, Exhaustion
+      case 'oblation': for (const s of subs) if (s.card && s.card.zone === 'battlefield') { const ow = this.players[s.card.owner]; this.moveTo(s.card, 'library'); shuffle(ow.library, this.rng); this.drawCards(ow, 2); this.say(`${s.card.def.name} is shuffled into ${ow.name}'s library; they draw two.`); } break;
+      case 'flicker': for (const s of subs) if (s.card && s.card.zone === 'battlefield' && !s.card.token) { const c = s.card; this.moveTo(c, 'exile'); this.moveTo(c, 'battlefield', { controller: c.owner }); this.say(`${c.def.name} is exiled and returns.`); } break;
+      case 'humble': for (const s of subs) if (s.card && isCreature(s.card)) { s.card.temp.flags.push('humbled'); this.refresh(); this.say(`${s.card.def.name} loses all abilities and becomes 0/1 until end of turn.`); } break;
       case 'madness': {   // the discarded card waits in exile: cast it for its madness cost, or it goes to the graveyard
         if (src.zone !== 'exile') break;
         const mad = src.def.keywords.find(k => k.k === 'Madness'); const owner = this.players[src.owner];
@@ -1987,7 +2001,7 @@ export class Duel {
         break;
       }
       case 'peek': for (const s of subs) if (s.player) yield* this.peek(p, s.player, n, e.mode, e.mayShuffle); break;
-      case 'extraTurn': this.extraTurns++; break;
+      case 'extraTurn': this.extraTurns += e.n || 1; break;
       case 'skipTurn': { const pls = e.sel === 'each' ? this.players : e.sel === 'opponent' ? [this.opponentOf(p)] : subs.filter(s => s.player).map(s => s.player); (pls.length ? pls : [p]).forEach(pl => { pl.skipTurns = (pl.skipTurns || 0) + 1; }); this.say(`${(pls[0] || p).name} will skip a turn.`); break; }
       case 'token': { if (e.threshold && p.graveyard.length < 7) break; const cnt = this.amount(e.count ?? e.amount ?? 1, ctx) || 1; const spec = (typeof e.p === 'object' || typeof e.t === 'object') ? { ...e, p: this.amount(e.p, ctx), t: this.amount(e.t, ctx) } : e; for (let i = 0; i < cnt; i++) this.createToken(p, spec); break; }
       case 'exileGraveyard': { const pls = e.who === 'you' ? [p] : e.who === 'each' ? this.players : subs.filter(s => s.player).map(s => s.player); for (const pl of pls) for (const c of pl.graveyard.slice()) this.moveTo(c, 'exile'); break; }
@@ -2472,6 +2486,7 @@ export class Duel {
       for (const k of c.temp.kw) cur.kw.add(k);
       const cda = d.abilities.find(ab => ab.kind === 'cda');
       if (cda) { const n = this.cdaCount(c, cda); if (cda.which !== 't') cur.p = n; if (cda.which !== 'p') cur.t = n + (cda.plusT || 0); }
+      if (c.temp.flags.includes('humbled')) { cur.p = 0; cur.t = 1; cur.kw = new Set(); cur.flags.add('noAbilities'); }   // Humble
       for (const [k, n] of Object.entries(c.counters)) { const mm = k.match(/^([+-]\d+)\/([+-]\d+)$/); if (mm && n > 0) { cur.p += Number(mm[1]) * n; cur.t += Number(mm[2]) * n; } }
       cur.p += c.temp.p; cur.t += c.temp.t;
       for (const a of [c.temp.animate, c.animatePerm]) if (a) { for (const t of a.types) cur.types.add(t); cur.p += a.p; cur.t += a.t; for (const k of a.kw || []) cur.kw.add(k); }   // manland animated (until end of turn, or for good: Stalking Stones)

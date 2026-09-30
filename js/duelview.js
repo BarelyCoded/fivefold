@@ -199,7 +199,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
   const cardOf = id => duel.card(Number(id));
   const targeting = () => ui.wizard?.stage === 'targets' || duel.pending?.req?.kind === 'target';
   function legalNow() {
-    if (ui.wizard?.stage === 'targets') return ui.wizard.specs[ui.wizard.targets.length].options;
+    if (ui.wizard?.stage === 'targets') { const w = ui.wizard, sp = w.specs[w.targets.length]; return sp.effect?.distinct ? sp.options.filter(o => !w.targets.some(t => t && t.type === o.type && t.id === o.id && t.idx === o.idx)) : sp.options; }   // "two target lands": different ones
     if (duel.pending?.req?.kind === 'target') return duel.pending.req.options;
     return [];
   }

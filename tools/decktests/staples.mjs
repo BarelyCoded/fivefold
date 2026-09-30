@@ -511,5 +511,42 @@ section('Mortuary and Angelic Renewal');
   const d2 = newDuel(); mainPhase(d2); const ar = place(d2, D('Angelic Renewal'), 0); const b2 = place(d2, bears(), 0); d2.destroy(b2); processAndResolve(d2);
   ok(b2.zone === 'battlefield' && ar.zone === 'graveyard', `Angelic Renewal brings it back (${b2.zone}, ${ar.zone})`); }
 
+section('Two-target spells need two different targets (Rain of Salt, Symbiosis)');
+{ const d = newDuel(); mainPhase(d); const a = place(d, D('Forest'), 1), b = place(d, D('Island'), 1); const rs = hand(d, D('Rain of Salt'), 0); pool(d, 0, { R: 2, C: 4 });
+  ok(!d.cast(d.players[0], rs, { targets: [{ type: 'perm', id: a.id }, { type: 'perm', id: a.id }] }), 'the same land twice is refused');
+  ok(d.cast(d.players[0], rs, { targets: [{ type: 'perm', id: a.id }, { type: 'perm', id: b.id }] }), 'two different lands'); processAndResolve(d);
+  ok(a.zone === 'graveyard' && b.zone === 'graveyard', 'both destroyed');
+  const d2 = newDuel(); mainPhase(d2); place(d2, D('Forest'), 1); const r2 = hand(d2, D('Rain of Salt'), 0); pool(d2, 0, { R: 2, C: 4 }); ok(!d2.canCast(d2.players[0], r2), 'not castable with one land to hit');
+  const d3 = newDuel(); mainPhase(d3); const x = place(d3, bears(), 0), y = place(d3, bears(), 0); const sy = hand(d3, D('Symbiosis'), 0); pool(d3, 0, { G: 1, C: 1 });
+  d3.cast(d3.players[0], sy, { targets: [{ type: 'perm', id: x.id }, { type: 'perm', id: y.id }] }); processAndResolve(d3); ok(power(x) === 4 && power(y) === 4, 'both +2/+2'); }
+
+section('Single-sentence spells: Blessed Wind, Time Stretch, Summer Bloom, Traumatize, Brightstone Ritual');
+{ const d = newDuel(); mainPhase(d); d.players[0].life = 3; const bw = hand(d, D('Blessed Wind'), 0); pool(d, 0, { W: 2, C: 7 }); d.cast(d.players[0], bw, { targets: [{ type: 'player', idx: 0 }] }); processAndResolve(d); ok(d.players[0].life === 20, 'life becomes 20');
+  const ts = hand(d, D('Time Stretch'), 0); pool(d, 0, { U: 2, C: 8 }); d.cast(d.players[0], ts, { targets: [{ type: 'player', idx: 0 }] }); processAndResolve(d); ok(d.extraTurns === 2, 'two extra turns');
+  const sb = hand(d, D('Summer Bloom'), 0); pool(d, 0, { G: 1, C: 1 }); d.cast(d.players[0], sb, {}); processAndResolve(d); ok(d.landLimit(d.players[0]) === 4, `four land drops (${d.landLimit(d.players[0])})`);
+  for (let k = 0; k < 9; k++) lib(d, bears(), 1); const tr = hand(d, D('Traumatize'), 0); pool(d, 0, { U: 2, C: 3 }); d.cast(d.players[0], tr, { targets: [{ type: 'player', idx: 1 }] }); processAndResolve(d); ok(d.players[1].graveyard.length === 4, 'mills half rounded down');
+  place(d, D('Goblin Piledriver'), 0); place(d, D('Goblin Piledriver'), 1); const br = hand(d, D('Brightstone Ritual'), 0); pool(d, 0, { R: 1 }); d.cast(d.players[0], br, {}); processAndResolve(d); ok(d.players[0].pool.R === 2, `R per Goblin (${d.players[0].pool.R})`); }
+
+section('Falter, Winds of Rath, Humble, Flicker, Oblation, Misstep');
+{ const d = newDuel(); mainPhase(d); const bird = place(d, D('Birds of Paradise'), 1), b = place(d, bears(), 1); const f = hand(d, D('Falter'), 0); pool(d, 0, { R: 1, C: 1 }); d.cast(d.players[0], f, {}); processAndResolve(d);
+  ok(b.flags.has('cantBlock') && !bird.flags.has('cantBlock'), 'ground creatures can\'t block');
+  const d2 = newDuel(); mainPhase(d2); const e = place(d2, bears(), 0), n = place(d2, bears(), 1); const r = place(d2, D('Rancor'), 0); r.attachedTo = e; const wr = hand(d2, D('Winds of Rath'), 0); pool(d2, 0, { W: 2, C: 3 }); d2.cast(d2.players[0], wr, {}); processAndResolve(d2);
+  ok(e.zone === 'battlefield' && n.zone === 'graveyard', 'only the unenchanted creature dies');
+  const d3 = newDuel(); mainPhase(d3); const g = place(d3, D('Exalted Angel'), 1); const hm = hand(d3, D('Humble'), 0); pool(d3, 0, { W: 1, C: 1 }); d3.cast(d3.players[0], hm, { targets: [{ type: 'perm', id: g.id }] }); processAndResolve(d3); d3.refresh();
+  ok(power(g) === 0 && toughness(g) === 1 && !has(g, 'Flying'), `Humbled Angel is a 0/1 with no flying (${power(g)}/${toughness(g)})`);
+  const d4 = newDuel(); mainPhase(d4); const t = place(d4, bears(), 0); t.tapped = true; t.counters['+1/+1'] = 1; const fl = hand(d4, D('Flicker'), 0); pool(d4, 0, { W: 1, C: 1 }); d4.cast(d4.players[0], fl, { targets: [{ type: 'perm', id: t.id }] }); processAndResolve(d4);
+  ok(t.zone === 'battlefield' && !t.tapped && !t.counters['+1/+1'], 'flickered: back fresh');
+  const d5 = newDuel(); mainPhase(d5); lib(d5, bears(), 1); lib(d5, bears(), 1); const o = place(d5, D('Hill Giant'), 1); const ob = hand(d5, D('Oblation'), 0); pool(d5, 0, { W: 1, C: 2 }); d5.cast(d5.players[0], ob, { targets: [{ type: 'perm', id: o.id }] }); processAndResolve(d5);
+  ok(o.zone !== 'battlefield' && d5.players[1].hand.length === 2, 'shuffled in, owner draws two');
+  const d6 = newDuel(); mainPhase(d6); const m1 = place(d6, bears(), 1); m1.tapped = true; const ms = hand(d6, D('Misstep'), 0); pool(d6, 0, { U: 1, C: 1 }); d6.cast(d6.players[0], ms, { targets: [{ type: 'player', idx: 1 }] }); processAndResolve(d6);
+  ok(m1.flags.has('noUntapNext'), 'their creatures skip the next untap'); }
+
+section('Rhystic Syphon and Rethink');
+{ const d = newDuel(); mainPhase(d); const rs = hand(d, D('Rhystic Syphon'), 0); pool(d, 0, { B: 2, C: 3 }); d.cast(d.players[0], rs, { targets: [{ type: 'player', idx: 1 }] }); processAndResolve(d);
+  ok(d.players[1].life === 15 && d.players[0].life === 25, `AI can't pay: drain 5 (${d.players[1].life}/${d.players[0].life})`);
+  const d2 = newDuel(); mainPhase(d2); d2.active = 1; d2.priority = 1; const hg = hand(d2, D('Hill Giant'), 1); pool(d2, 1, { R: 1, C: 3 }); d2.cast(d2.players[1], hg, {}); const it = d2.stack[d2.stack.length - 1];
+  d2.priority = 0; const rt = hand(d2, D('Rethink'), 0); pool(d2, 0, { U: 1, C: 2 }); d2.cast(d2.players[0], rt, { targets: [{ type: 'spell', id: it.id }] }); processAndResolve(d2);
+  ok(hg.zone === 'graveyard', 'Rethink counters when they can\'t pay the mana value'); }
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

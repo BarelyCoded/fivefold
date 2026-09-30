@@ -114,7 +114,7 @@ function buildCastOpts(duel, p, card) {
   const specs = duel.targetSpecs(p, card, opts);
   opts.targets = [];
   for (const s of specs) {
-    const legal = duel.legalTargets(p, s.effect, card);
+    const legal = duel.legalTargets(p, s.effect, card).filter(l => !s.effect.distinct || !opts.targets.some(t => t && t.type === l.type && t.id === l.id && t.idx === l.idx));   // "two target lands": different ones
     let t;
     if (d.aura) { // aura: buff on own creature, curse on the opponent's
       const hostile = d.abilities.some(ab => ab.kind === 'pt' ? ab.p < 0 : ['cantAttack', 'cantBlock', 'cantAttackOrBlock', 'doesntUntap', 'control'].includes(ab.kind));
