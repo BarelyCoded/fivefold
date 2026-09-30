@@ -267,5 +267,97 @@ section('Elvish Vanguard counts only other Elves');
 { const d = newDuel(); mainPhase(d); const ev = hand(d, D('Elvish Vanguard'), 0); pool(d, 0, { G: 2 }); d.cast(d.players[0], ev, {}); processAndResolve(d);
   ok(!(ev.counters['+1/+1'] > 0), 'no counter for itself'); const le = hand(d, D('Llanowar Elves'), 0); pool(d, 0, { G: 1 }); d.cast(d.players[0], le, {}); processAndResolve(d); ok(ev.counters['+1/+1'] === 1, 'counter for another Elf'); }
 
+section('Necromancy at instant speed is sacrificed at cleanup; Dance of the Dead returns tapped and pumped');
+{ const d = newDuel(); mainPhase(d); const vf = gy(d, D('Verdant Force'), 1); const nc = hand(d, D('Necromancy'), 0); pool(d, 0, { B: 1, C: 2 });
+  d.active = 1; d.step = 'end';   // opponent's end step: instant speed
+  ok(d.cast(d.players[0], nc, {}), 'Necromancy cast at instant speed'); processAndResolve(d, [{ type: 'card', id: vf.id }]);
+  ok(vf.zone === 'battlefield' && vf.controller === 0, `Verdant Force reanimated under my control (${vf.zone})`);
+  ok(nc.sacAtCleanup === true, 'flagged for sacrifice at cleanup');
+  const d2 = newDuel(); mainPhase(d2); const b = gy(d2, bears(), 0); const dd = hand(d2, D('Dance of the Dead'), 0); pool(d2, 0, { B: 1, C: 1 });
+  d2.cast(d2.players[0], dd, {}); processAndResolve(d2, [{ type: 'card', id: b.id }]); d2.refresh();
+  ok(b.zone === 'battlefield' && b.tapped && power(b) === 3, `Bears back tapped as a 3/3 (${b.tapped}, ${power(b)})`); }
+
+section('Pattern of Rebirth fetches a creature when the host dies');
+{ const d = newDuel(); mainPhase(d); const b = place(d, bears(), 0); const vf = lib(d, D('Verdant Force'), 0); lib(d, D('Island'), 0);
+  const pr = hand(d, D('Pattern of Rebirth'), 0); pool(d, 0, { G: 1, C: 3 }); d.cast(d.players[0], pr, { targets: [{ type: 'perm', id: b.id }] }); processAndResolve(d);
+  ok(pr.attachedTo === b, 'Pattern on the Bears'); d.destroy(b); processAndResolve(d, [], y => y.options.filter(o => o.label === 'Verdant Force').map(o => o.id));
+  ok(vf.zone === 'battlefield', `Verdant Force fetched onto the battlefield (${vf.zone})`); }
+
+section('Mox Diamond: discard a land or it goes to the graveyard');
+{ const d = newDuel(); mainPhase(d); const md = hand(d, D('Mox Diamond'), 0); const f = hand(d, D('Forest'), 0); pool(d, 0, {});
+  d.cast(d.players[0], md, {}); processAndResolve(d, [], y => y.options.map(o => o.id).slice(0, 1));
+  ok(md.zone === 'battlefield' && f.zone === 'graveyard', `Mox in play, Forest discarded (${md.zone}, ${f.zone})`);
+  const d2 = newDuel(); mainPhase(d2); const md2 = hand(d2, D('Mox Diamond'), 0); hand(d2, bears(), 0); d2.cast(d2.players[0], md2, {}); processAndResolve(d2);
+  ok(md2.zone === 'graveyard', `no land to discard: Mox to the graveyard (${md2.zone})`); }
+
+section('Gilded Drake swaps for an opposing creature, or is sacrificed');
+{ const d = newDuel(); mainPhase(d); const vf = place(d, D('Verdant Force'), 1); const gd = hand(d, D('Gilded Drake'), 0); pool(d, 0, { U: 1, C: 1 });
+  d.cast(d.players[0], gd, {}); processAndResolve(d, [], y => y.options.map(o => o.id).slice(0, 1));
+  ok(vf.controller === 0 && gd.controller === 1, `exchanged (Force: ${vf.controller}, Drake: ${gd.controller})`);
+  const d2 = newDuel(); mainPhase(d2); const gd2 = hand(d2, D('Gilded Drake'), 0); pool(d2, 0, { U: 1, C: 1 }); d2.cast(d2.players[0], gd2, {}); processAndResolve(d2);
+  ok(gd2.zone === 'graveyard', `nothing to take: sacrificed (${gd2.zone})`); }
+
+section('Sneak Attack: haste, sacrificed at end of turn');
+{ const d = newDuel(); mainPhase(d); const sa = place(d, D('Sneak Attack'), 0); const vf = hand(d, D('Verdant Force'), 0); pool(d, 0, { R: 1 });
+  d.activate(d.players[0], sa, abIdx(sa.def, a => a.type === 'activated'), {}); processAndResolve(d, [], y => y.options.map(o => o.id).slice(0, 1));
+  ok(vf.zone === 'battlefield' && has(vf, 'Haste'), `Force in play with haste (${vf.zone})`);
+  ok(d.delayed.some(x => x.when === 'end'), 'end-step sacrifice scheduled'); for (const it of d.delayed.filter(x => x.when === 'end')) d.runDelayed(it);
+  ok(vf.zone === 'graveyard', `sacrificed at end of turn (${vf.zone})`); }
+
+section('Parallax Wave returns what it exiled when it leaves');
+{ const d = newDuel(); mainPhase(d); const pw = place(d, D('Parallax Wave'), 0); pw.counters.fade = 5; const b = place(d, bears(), 1); const i = abIdx(pw.def, a => a.type === 'activated');
+  d.activate(d.players[0], pw, i, { targets: [{ type: 'perm', id: b.id }] }); processAndResolve(d); ok(b.zone === 'exile', 'Bears exiled');
+  d.destroy(pw); processAndResolve(d); ok(b.zone === 'battlefield' && b.controller === 1, `Bears back for its owner (${b.zone})`); }
+
+section('Plainscycling fetches a Plains');
+{ const d = newDuel(); mainPhase(d); const ed = hand(d, D('Eternal Dragon'), 0); const pl = lib(d, D('Plains'), 0); lib(d, bears(), 0); pool(d, 0, { C: 2 });
+  ok(d.cast(d.players[0], ed, { cycling: true }), 'cycle it'); processAndResolve(d, [], y => y.options.map(o => o.id).slice(0, 1));
+  ok(pl.zone === 'hand' && ed.zone === 'graveyard', `Plains in hand (${pl.zone})`); }
+
+section('Spawning Pool regenerates only while animated');
+{ const d = newDuel(); mainPhase(d); const sp = place(d, D('Spawning Pool'), 0); const ab = sp.def.abilities; const regen = ab.findIndex(a => a.type === 'activated' && a.effects[0]?.type === 'regenerate'); const anim = ab.findIndex(a => a.type === 'activated' && a.effects[0]?.type === 'animateSelf');
+  ok(regen >= 0 && anim >= 0, 'has both abilities'); pool(d, 0, { B: 3, C: 1 });
+  ok(!d.canActivate(d.players[0], sp, regen, {}), 'no regeneration as a land'); d.activate(d.players[0], sp, anim, {}); processAndResolve(d); d.refresh();
+  ok(isCreature(sp) && d.canActivate(d.players[0], sp, regen, {}), 'regeneration once it is a Skeleton'); }
+
+section('Phyrexian Negator: sacrifice a permanent per damage');
+{ const d = newDuel(); mainPhase(d); const ng = place(d, D('Phyrexian Negator'), 0); for (let k = 0; k < 4; k++) place(d, D('Swamp'), 0);
+  const bolt = hand(d, D('Shock'), 1); d.priority = 1; pool(d, 1, { R: 1 }); d.cast(d.players[1], bolt, { targets: [{ type: 'perm', id: ng.id }] }); processAndResolve(d);
+  ok(d.players[0].battlefield.length === 3, `two permanents sacrificed (${d.players[0].battlefield.length} left)`); }
+
+section('Goblin Welder swaps artifacts');
+{ const d = newDuel(); mainPhase(d); const gw = place(d, D('Goblin Welder'), 0); const ms = place(d, D('Mind Stone'), 0); const td = gy(d, D('Thran Dynamo'), 0);
+  d.activate(d.players[0], gw, abIdx(gw.def, a => a.type === 'activated'), { targets: [{ type: 'perm', id: ms.id }, { type: 'card', id: td.id }] }); processAndResolve(d);
+  ok(ms.zone === 'graveyard' && td.zone === 'battlefield', `Mind Stone for Thran Dynamo (${ms.zone}, ${td.zone})`); }
+
+section('Goblin Cadets change sides when blocked; Wild Dogs follow the life lead');
+{ const d = newDuel(); mainPhase(d); const gc = place(d, D('Goblin Cadets'), 0); d.fireEvent({ type: 'becomesBlocked', card: gc, by: [] }); processAndResolve(d, [{ type: 'player', idx: 1 }]);
+  ok(gc.controller === 1, `opponent controls the Cadets (${gc.controller})`);
+  const d2 = newDuel(); mainPhase(d2); const wd = place(d2, D('Wild Dogs'), 0); d2.players[1].life = 25; d2.fireEvent({ type: 'upkeep', player: 0 }); processAndResolve(d2);
+  ok(wd.controller === 1, 'the player with most life takes Wild Dogs'); }
+
+section("Kirtar's Wrath adds Spirits with threshold");
+{ const d = newDuel(); mainPhase(d); place(d, bears(), 1); for (let k = 0; k < 7; k++) gy(d, D('Island'), 0); const kw = hand(d, D("Kirtar's Wrath"), 0); pool(d, 0, { W: 2, C: 4 });
+  d.cast(d.players[0], kw, {}); processAndResolve(d); const sp = d.players[0].battlefield.filter(c => c.token);
+  ok(sp.length === 2 && d.players[1].battlefield.length === 0, `wrath + two Spirits (${sp.length})`); }
+
+section('Golden / Living / Death Wish');
+{ const d = new Duel({ player: { name: 'A', deck: [], life: 20, sideboard: [D('Worship'), D('Verdant Force'), D('Lightning Bolt')] }, ai: { name: 'B', deck: [], life: 20, ai: true }, hooks: {}, rules: {} }); mainPhase(d);
+  const gw = hand(d, D('Golden Wish'), 0); pool(d, 0, { W: 2, C: 3 }); d.cast(d.players[0], gw, {}); processAndResolve(d);
+  ok(d.players[0].hand.some(c => c.def.name === 'Worship') && gw.zone === 'exile', 'Golden Wish finds Worship');
+  const dw = hand(d, D('Death Wish'), 0); pool(d, 0, { B: 2, C: 1 }); d.cast(d.players[0], dw, {}); processAndResolve(d, [], y => y.options.filter(o => o.label === 'Lightning Bolt').map(o => o.id));
+  ok(d.players[0].hand.some(c => c.def.name === 'Lightning Bolt') && d.players[0].life === 10, `Death Wish: any card, lose half (${d.players[0].life})`); }
+
+section('Catastrophe: choose lands or creatures');
+{ const d = newDuel(); mainPhase(d); const b = place(d, bears(), 1); const f = place(d, D('Forest'), 1); const cat = hand(d, D('Catastrophe'), 0); pool(d, 0, { W: 2, C: 4 });
+  d.cast(d.players[0], cat, {}); processAndResolve(d, [], y => [y.options.find(o => /land/.test(o.label)).id]);
+  ok(f.zone === 'graveyard' && b.zone === 'battlefield', `chose lands (${f.zone}, ${b.zone})`); }
+
+section('Doomsday: five cards on top, the rest exiled, lose half');
+{ const d = newDuel(); mainPhase(d); for (let k = 0; k < 8; k++) lib(d, bears(), 0); const g = gy(d, D('Brainstorm'), 0); const dd = hand(d, D('Doomsday'), 0); pool(d, 0, { B: 3 });
+  d.cast(d.players[0], dd, {}); processAndResolve(d, [], y => y.kind === 'choose' ? [g.id, ...y.options.filter(o => o.id !== g.id).slice(0, 4).map(o => o.id)] : undefined);
+  ok(d.players[0].library.length === 5 && d.players[0].library.includes(g) && d.players[0].exile.length === 4, `library 5 incl. the graveyard card, 4 exiled (${d.players[0].library.length}, ${d.players[0].exile.length})`);
+  ok(d.players[0].life === 10, `lost half (${d.players[0].life})`); }
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

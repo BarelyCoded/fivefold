@@ -329,6 +329,7 @@ const rules = [
   [/^put (?:a|an) (.+?) card from your hand onto the battlefield$/, m => [{ type: 'putFromHand', filter: parseCardFilter(m[1]) }]],
   // Mesmeric Fiend's leave trigger.
   [/^return the exiled card to its owner's hand$/, () => [{ type: 'returnLinkedExile' }]],
+  [/^each player returns to the battlefield all cards (?:they own )?exiled with (?:~|it)$/, () => [{ type: 'returnExiledWith' }]],   // Parallax Wave
   // Gaea's Blessing (approximated: the whole graveyard is shuffled back rather than three chosen cards).
   [/^target player shuffles up to three target cards from their graveyard into their library$/, () => [{ type: 'shuffleGraveyard', sel: 'player', restrict: { players: 'all' }, note: 'shuffles the whole graveyard rather than three chosen cards' }]],
   [/^shuffle your graveyard into your library$/, () => [{ type: 'shuffleGraveyard', sel: 'you' }]],
@@ -353,7 +354,8 @@ const rules = [
   [/^pay any amount of life$/, () => [{ type: 'payAnyLife' }]],
   [/^create an? x\/x (.*?) creature tokens?, where x is the life paid(?: as ~ entered)?$/, m => { const desc = m[1].split(/\s+/); return [{ type: 'token', count: 1, p: { calc: 'paidLife' }, t: { calc: 'paidLife' }, colors: desc.filter(w => COLOR_WORD[w]).map(w => COLOR_WORD[w]), types: ['creature'], subtypes: desc.filter(w => !COLOR_WORD[w]).map(cap), keywords: [] }]; }],
   // Cunning Wish: fetch a card from the sideboard, then the spell exiles itself.
-  [/^(?:choose an? (instant|sorcery|creature|artifact|enchantment|land) card you own from outside the game, reveal that card, and put it into your hand|reveal an? (instant|sorcery|creature|artifact|enchantment|land) card you own from outside the game and put it into your hand)$/, m => [{ type: 'wish', what: m[1] || m[2] }]],
+  [/^(?:choose an? (instant|sorcery|creature|artifact|enchantment|land) card you own from outside the game, reveal that card, and put it into your hand|reveal an? ((?:instant|sorcery|creature|artifact|enchantment|land)(?: or (?:instant|sorcery|creature|artifact|enchantment|land))?) card you own from outside the game and put it into your hand|put a card you own from outside the game into your hand)$/, m => [{ type: 'wish', what: m[1] || m[2] || 'card' }]],   // Cunning / Golden / Living / Death Wish
+  [/^you lose half your life, rounded up$/, () => [{ type: 'loseHalfLife' }]],   // Death Wish
   [/^exile ~$/, () => [{ type: 'exileSelfSpell' }]],
   [/^destroy ~$/, () => [{ type: 'destroy', sel: 'self' }]],   // Volrath's Dungeon's escape hatch
   // Chain of Vapor: the bounce works; the chain (sacrifice a land to copy the spell) is not offered.
@@ -388,6 +390,25 @@ const rules = [
   [/^that (?:artifact|creature|permanent) deals damage equal to its mana value to ~$/, () => [{ type: 'prevDealsCmcToSelf' }]],
   // Emerald Charm mode, Magnetic Web & co.: "target creature loses flying until end of turn"
   [/^(target .+?) loses (flying|first strike|trample|haste|shadow|fear) until end of turn$/, m => tgt({ type: 'loseTemp', keyword: cap(m[2]) }, m[1])],
+  // Pattern of Rebirth: the enchanted creature's controller searches for a creature and puts it onto the battlefield.
+  [/^that creature's controller may search their library for a creature card, put that card onto the battlefield, then shuffle$/, () => [{ type: 'tutor', what: 'creature', to: 'battlefield', forThatPlayer: true, optional: true }]],
+  // Sneak Attack riders on the creature it put onto the battlefield
+  [/^that creature gains haste$/, () => [{ type: 'grantPrev', keyword: 'Haste' }]],
+  [/^sacrifice the creature at the beginning of the next end step$/, () => [{ type: 'delayed', when: 'end', effects: [{ type: 'sacrificePrev' }] }]],
+  // Phyrexian Negator: "sacrifice that many permanents"
+  [/^sacrifice that many permanents$/, () => [{ type: 'sacrificeN', amount: 'LAST', what: 'permanent' }]],
+  // Goblin Cadets
+  [/^target opponent gains control of (?:it|~)$/, () => [{ type: 'giveControl', sel: 'opponent' }]],
+  // Wild Dogs
+  [/^if a player has more life than each other player, the player with the most life gains control of ~$/, () => [{ type: 'mostLifeGainsControl' }]],
+  // Kirtar's Wrath: the threshold rider adds the Spirit tokens (the destroy already happens on the line before).
+  [/^threshold — if there are seven or more cards in your graveyard, instead destroy all creatures, then (create .+)$/, m => { const e = parseEffects(m[1]); return e.effects.length && e.effects.every(x => x.type === 'token') ? e.effects.map(x => ({ ...x, threshold: true })) : null; }],
+  [/^creatures destroyed this way can't be regenerated$/, () => []],
+  // Catastrophe: the caster chooses lands or creatures as it resolves.
+  [/^destroy all (lands|creatures|artifacts|enchantments) or all (lands|creatures|artifacts|enchantments)$/, m => [{ type: 'destroyAllChoice', options: [m[1].replace(/s$/, ''), m[2].replace(/s$/, '')] }]],
+  // Doomsday
+  [/^search your library and graveyard for five cards and exile the rest$/, () => [{ type: 'doomsday', n: 5 }]],
+  [/^put the chosen cards on top of your library in any order$/, () => []],
   [/^choose a color$/, () => [{ type: 'chooseColorSelf' }]],
   [/^~ becomes the color of your choice until end of turn$/, () => [{ type: 'chooseColorSelf', temp: true }]],
   [/^~ gets \+(\d+)\/\+(\d+) and becomes the color of your choice until end of turn$/, m => [{ type: 'pump', p: Number(m[1]), t: Number(m[2]), sel: 'self', restrict: {} }, { type: 'chooseColorSelf', temp: true }]],   // Wild Mongrel
@@ -650,6 +671,10 @@ export function parseEffects(text) {
   if ((wm = whole.match(/^domain — (target player|you) draws? a card for each basic land type among lands (?:they|you) controls?$/))) { const k = wm[1] === 'you' ? { sel: 'you' } : T(wm[1]); if (k) { out.effects.push({ type: 'draw', amount: { calc: 'domain', of: k.sel === 'you' ? 'you' : 'subject' }, ...k }); return out; } }
   if (/^draw four cards, then choose x cards in your hand and discard the rest$/.test(whole)) { out.effects.push({ type: 'draw', amount: 4, sel: 'you' }, { type: 'discardDownTo', amount: 'X', sel: 'you' }); return out; }
   if (/^draw a card, then draw cards equal to the number of cards named ~ in all graveyards$/.test(whole)) { out.effects.push({ type: 'draw', amount: 1, sel: 'you' }, { type: 'draw', amount: { calc: 'graveyardNameAll' }, sel: 'you' }); return out; }
+  // Gilded Drake: swap it for up to one opposing creature, or sacrifice it.
+  if (/^exchange control of ~ and up to one target creature an opponent controls\. if you don't or can't make an exchange, sacrifice ~\. this ability still resolves if its target becomes illegal$/.test(whole)) { out.effects.push({ type: 'gildedDrake' }); return out; }
+  // Goblin Welder: swap an artifact a player controls for an artifact card in that player's graveyard.
+  if (/^choose target artifact a player controls and target artifact card in that player's graveyard\. if both targets are still legal as this ability resolves, that player simultaneously sacrifices the artifact and returns the artifact card to the battlefield$/.test(whole)) { out.effects.push({ type: 'welderPick', sel: 'permanent', restrict: { types: ['artifact'] } }, { type: 'welderSwap', sel: 'card', restrict: { zone: 'graveyard', who: 'any', what: 'artifact' } }); return out; }
   // Hermit Druid: dig until a matching card, it goes to hand (or play), the rest into the graveyard.
   if ((wm = whole.match(/^reveal cards from the top of your library until you reveal (?:a|an) (.+?) card\. put that card (into your hand|onto the battlefield) and all other cards revealed this way into your graveyard$/))) { out.effects.push({ type: 'digUntil', what: wm[1], hit: wm[2] === 'into your hand' ? 'hand' : 'battlefield', rest: 'graveyard' }); return out; }
   // Hand disruption: Duress / Unmask ("... that player discards that card") and Mesmeric Fiend ("exile that card").
@@ -796,6 +821,7 @@ function parseKeywordLine(line, def) {
     else if ((m = p.match(/^(Legendary )?landwalk$/i))) def.notes.push(`${p} ignored`);
     else if ((m = p.match(/^Cumulative upkeep[—\s-]+(.+)$/))) { const c = parseAbilityCost(m[1].replace(/\.$/, '')); if (c && !c.sacSelf) found.push({ k: 'Cumulative upkeep', cost: c }); else def.notes.push('Cumulative upkeep ignored'); }
     else if ((m = p.match(/^Cycling (\{.+\})$/))) found.push({ k: 'Cycling', cost: parseCost(m[1]) });
+    else if ((m = p.match(/^(Plains|Island|Swamp|Mountain|Forest|Basic land)cycling (\{.+\})$/i))) found.push({ k: 'Cycling', cost: parseCost(m[2]), search: m[1].toLowerCase() === 'basic land' ? 'basic land' : m[1].toLowerCase() });   // Eternal Dragon
     else if ((m = p.match(/^Kicker (\{.+\})$/))) found.push({ k: 'Kicker', cost: parseCost(m[1]) });
     else if ((m = p.match(/^Flashback[—-](\{.+?\}), pay (\d+) life$/i))) found.push({ k: 'Flashback', cost: parseCost(m[1]), life: Number(m[2]) });   // Spirit Flare, Chill to the Bone, …
     else if ((m = p.match(/^Flashback (\{.+\})$/))) found.push({ k: 'Flashback', cost: parseCost(m[1]) });
@@ -1002,6 +1028,13 @@ function parseAbilityLine(line, ctx) {
   t = t.replace(/^as (~|this [a-z]+) enters(?: the battlefield)?, /i, 'when ~ enters, ');   // lower-case: the trigger matcher below is case-sensitive
   // "Threshold — {R}, {T}, Sacrifice ~: ..." — the ability word is decoration; the condition rides at the end.
   const thresholdWord = /^threshold — /i.test(t); if (thresholdWord) t = t.replace(/^threshold — /i, '');
+  // Manland granting a quoted ability (Spawning Pool: 'becomes a 1/1 black Skeleton creature with "{B}: Regenerate this creature"'):
+  // animate without the quote, and give the card the quoted ability itself, usable only while it is a creature.
+  let qm;
+  if ((qm = t.match(/^(.+?: ~ becomes an? .+? creature) with "([^"]+)"( until end of turn(?:\. it's still a land)?)$/i))) {
+    const a = parseAbilityLine(qm[1] + qm[3]), b = parseAbilityLine(qm[2].replace(/this creature/gi, '~'));
+    if (a && b && a.type === 'activated' && b.type === 'activated') { b.condition = { ...(b.condition || {}), selfCreature: true }; return { type: 'multi', list: [a, b] }; }
+  }
   // activated: "cost: effect"
   if ((m = t.match(/^((?:(?:\{[^}]+\})+|[^:{}]+?)(?:,\s*(?:(?:\{[^}]+\})+|[^:{}]+?))*):\s+(.+)$/)) && /\{|sacrifice|discard|pay|remove|tap|put a|return|exile/i.test(m[1])) {
     const cost = parseAbilityCost(m[1]);
@@ -1271,6 +1304,20 @@ export function compile(c) {
   // Animate Dead: a reanimation Aura. The generic aura machinery only enchants permanents, so it's hand-built:
   // when it enters, pick a creature card in any graveyard, return it under your control and attach the Aura;
   // the creature gets -1/-0 while enchanted and is sacrificed when the Aura leaves.
+  // Necromancy: Animate Dead without the -1/-0, castable as though it had flash (sacrificed at cleanup if so).
+  // Dance of the Dead: returns the creature tapped, +1/+1, doesn't untap unless its controller pays {1}{B} each upkeep.
+  if (c.name === 'Necromancy' || c.name === 'Dance of the Dead') {
+    const dance = c.name === 'Dance of the Dead';
+    def.abilities.push({ type: 'triggered', event: 'etb', effects: [{ type: 'animateDead', sel: 'card', restrict: { zone: 'graveyard', who: 'any', what: 'creature' }, tapped: dance }], optional: false, text: `When ${c.name} enters, put target creature card from a graveyard onto the battlefield under your control${dance ? ' tapped' : ''} and attach ${c.name} to it.` });
+    if (dance) {
+      def.abilities.push({ type: 'static', kind: 'pt', p: 1, t: 1, scope: { who: 'enchanted' } });
+      def.abilities.push({ type: 'static', kind: 'doesntUntap', scope: { who: 'enchanted' } });
+      def.abilities.push({ type: 'triggered', event: 'upkeep', who: 'enchantedController', effects: [{ type: 'untap', sel: 'enchanted' }], optional: false, pay: { pips: [['B']], generic: 1, x: 0 }, payer: 'thatPlayer', text: 'at the beginning of the upkeep of enchanted creature\'s controller, that player may pay {1}{b}. if they do, untap that creature.' });
+    } else { def.keywords.push({ k: 'Flash' }); def.necromancy = true; }
+    def.notes = def.notes.filter(n => !/^Ignored|^Approximated: cast at instant speed/.test(n));
+    def.status = 'approx'; def.animateDead = true; def.notes.push('Approximated: the creature is chosen as the Aura enters rather than as it is cast');
+    return def;
+  }
   if (c.name === 'Animate Dead') {
     def.abilities.push({ type: 'triggered', event: 'etb', effects: [{ type: 'animateDead', sel: 'card', restrict: { zone: 'graveyard', who: 'any', what: 'creature' } }], optional: false, text: 'When Animate Dead enters, return target creature card from a graveyard to the battlefield under your control and attach Animate Dead to it. When Animate Dead leaves the battlefield, sacrifice that creature.' });
     def.abilities.push({ type: 'static', kind: 'pt', p: -1, t: 0, scope: { who: 'enchanted' } });
@@ -1334,7 +1381,9 @@ export function compile(c) {
     if (parseKeywordLine(line, def)) continue;
     if (def.unsupportedReason) break;
     // Instant / sorcery text is spell effects; permanents have abilities.
-    if (/^(?:this spell|~) can't be countered(?: by spells or abilities)?\.?$/i.test(lower)) { def.uncounterable = true; continue; }   // Blurred Mongoose, Kavu Chameleon, Vexing Beetle, …
+    if (/^(?:this spell|~) can't be countered(?: by spells or abilities)?\.?$/i.test(lower)) { def.uncounterable = true; continue; }
+    // Mox Diamond: "If ~ would enter, you may discard a land card instead. If you do, put ~ onto the battlefield. If you don't, put it into its owner's graveyard."
+    if (/^if ~ would enter(?: the battlefield)?, you may discard a land card instead\. if you do, put ~ onto the battlefield\. if you don't, put it into its owner's graveyard\.?$/.test(lower)) { def.entersDiscard = 'land'; continue; }   // Blurred Mongoose, Kavu Chameleon, Vexing Beetle, …
     if ((m = lower.match(/^flashback[—-]\s*(\{.+?\}), pay (\d+) life\.?$/))) { def.keywords.push({ k: 'Flashback', cost: parseCost(m[1]), life: Number(m[2]) }); continue; }   // Spirit Flare, Chill to the Bone
     // "You may cast ~ as though it had flash. …": approximate as Flash; the "sacrifice at cleanup if cast at instant speed" downside is dropped.
     if (/^you may cast ~ as though it had flash\b/.test(lower)) { if (!def.keywords.some(k => k.k === 'Flash')) def.keywords.push({ k: 'Flash' }); def.notes.push('Approximated: cast at instant speed; the "sacrifice it at cleanup if cast that way" downside is not enforced'); continue; }
