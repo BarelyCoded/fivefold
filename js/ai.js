@@ -69,7 +69,7 @@ function pickTarget(duel, p, e, options, x = 0) {
     return nb ? nb.o : null;
   }
   if (HOSTILE.has(e.type)) {
-    if (e.type === 'counter') { const s = options.find(o => o.type === 'spell' && duel.stack.find(i => i.id === o.id)?.controller !== p.idx); return s || null; }
+    if (e.type === 'counter') { const s = options.find(o => (o.type === 'spell' || o.type === 'ability') && duel.stack.find(i => i.id === o.id)?.controller !== p.idx); return s || null; }
     if (['lose', 'discard', 'mill', 'sacrifice', 'poison'].includes(e.type)) return players.find(o => o.idx === opp.idx) || null;
     const b = best(oppPerms.filter(t => isCreature(t.c) || !oppPerms.some(x => isCreature(x.c))));
     if (b && (value(b.c) >= 3 || e.type === 'tap' || e.type === 'freeze' || e.type === 'flag' || !isCreature(b.c))) return b.o;

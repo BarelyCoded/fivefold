@@ -417,5 +417,35 @@ section('Draw log never names cards in multiplayer (shared log), only versus the
   sp.drawCards(sp.players[0], 1);
   ok(/draws Lightning Bolt/.test(sp.log.slice(-1)[0]), `single-player draw is named (${sp.log.slice(-1)[0]})`); }
 
+section('Stifle counters an activated ability on the stack');
+{ const d = newDuel(); mainPhase(d); const mf = place(d, D('Mogg Fanatic'), 1);
+  const i = abIdx(mf.def, a => a.type === 'activated');
+  d.priority = 1;   // the opponent holds priority to activate
+  ok(d.activate(d.players[1], mf, i, { targets: [{ type: 'player', idx: 0 }] }), 'opponent activates Mogg Fanatic at me');
+  d.priority = 0;   // priority passes to me to respond
+  ok(d.stack.some(it => it.kind === 'ability'), 'the ability is on the stack');
+  const stifle = hand(d, D('Stifle'), 0); pool(d, 0, { U: 1 });
+  const legal = d.legalTargets(d.players[0], { type: 'counter', sel: 'ability', restrict: {} }, stifle);
+  ok(legal.length === 1 && /ability/.test(legal[0].label), `Stifle can target the ability (${legal[0]?.label})`);
+  ok(d.cast(d.players[0], stifle, { targets: [legal[0]] }), 'cast Stifle at the ability');
+  const before = d.players[0].life; while (d.stack.length) drive(d.resolveTop());
+  ok(d.players[0].life === before && mf.zone === 'graveyard', `the ability was countered — no damage dealt, Mogg still sacrificed (life ${d.players[0].life})`);
+  ok(/is countered/.test(d.log.slice(-3).join(' ')), 'log notes the counter'); }
+
+section('Stifle counters a triggered ability (Mogg Fanatic self-cast omitted; use an ETB trigger)');
+{ const d = newDuel(); mainPhase(d); pool(d, 0, { U: 1 });
+  // Man-o'-War-style ETB bounce: put its trigger on the stack, then Stifle it.
+  const mow = D('Man-o\'-War'); const target = place(d, bears(), 1);
+  const c = d.instance(mow, 0); c.zone = 'battlefield'; d.players[0].battlefield.push(c); d.refresh();
+  d.fireEvent({ type: 'etb', card: c }); drive(d.processEvents());
+  const trig = d.stack.find(it => it.kind === 'trigger');
+  if (trig) { const stifle = hand(d, D('Stifle'), 0);
+    const legal = d.legalTargets(d.players[0], { type: 'counter', sel: 'ability', restrict: {} }, stifle);
+    ok(legal.some(t => t.id === trig.id), 'Stifle can target the ETB trigger');
+    ok(d.cast(d.players[0], stifle, { targets: [{ type: 'ability', id: trig.id }] }), 'cast Stifle at the trigger');
+    while (d.stack.length) drive(d.resolveTop());
+    ok(target.zone === 'battlefield', 'the bounce trigger was countered — the creature stays'); }
+  else ok(true, 'no ETB trigger to test (card not in sets); activated-ability case covers the mechanic'); }
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -926,6 +926,7 @@ export class Duel {
       if (!t) return null;
       if (t.type === 'player') return t.label || this.players[t.idx]?.name;
       if (t.type === 'spell') { const it = this.stack.find(x => x.id === t.id); return (t.label || it?.card?.def?.name || 'a spell') + ' on the stack'; }
+      if (t.type === 'ability') { return t.label || 'an ability on the stack'; }
       const c = this.card(t.id); const name = t.label || c?.def?.name;
       if (!name) return null;
       if (t.type === 'card' || c?.zone === 'graveyard') { const who = this.players[c?.owner ?? c?.controller]; return who ? `${name} in ${who.name}'s graveyard` : `${name} in the graveyard`; }
@@ -946,6 +947,14 @@ export class Duel {
       case 'permanent': for (const pl of this.players) for (const c of pl.battlefield) addPerm(c); break;
       case 'player': for (const pl of this.players) out.push({ type: 'player', idx: pl.idx, label: pl.name }); break;
       case 'opponent': out.push({ type: 'player', idx: 1 - p.idx, label: this.opponentOf(p).name }); break;
+      case 'ability':   // Stifle: an activated or triggered ability on the stack (mana abilities never go on the stack)
+        for (const it of this.stack) {
+          if (it.kind !== 'ability' && it.kind !== 'trigger') continue;
+          if (r.abilityKind === 'activated' && it.kind !== 'ability') continue;
+          if (r.abilityKind === 'triggered' && it.kind !== 'trigger') continue;
+          out.push({ type: 'ability', id: it.id, label: (it.card?.def?.name || 'an ability') + (it.kind === 'trigger' ? '’s trigger' : '’s ability') });
+        }
+        break;
       case 'spell':
         for (const it of this.stack) {
           if (it.kind !== 'spell') continue;
@@ -1164,7 +1173,7 @@ export class Duel {
     if (ref.type === 'player') return { player: this.players[ref.idx] };
     if (ref.type === 'perm') { const c = this.card(ref.id); return c && c.zone === 'battlefield' ? { card: c } : null; }
     if (ref.type === 'card') { const c = this.card(ref.id); return c ? { card: c } : null; }
-    if (ref.type === 'spell') { const it = this.stack.find(x => x.id === ref.id); return it ? { item: it } : null; }
+    if (ref.type === 'spell' || ref.type === 'ability') { const it = this.stack.find(x => x.id === ref.id); return it ? { item: it } : null; }
     return null;
   }
   *applyEffect(e, ctx) {
