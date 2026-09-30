@@ -90,6 +90,8 @@ function buildCastOpts(duel, p, card) {
   const opts = {};
   const d = card.def;
   if (info.pitch && !duel.canPay(p, d.cost)) { const pc = p.hand.find(c => c !== card && c.def.colors.includes(info.pitch) && cardValue(c) < 6); if (pc) opts.pitch = pc.id; }
+  if (info.sacLands && !duel.canPay(p, d.cost) && duel.canCast(p, card, { sacLands: true })) opts.sacLands = true;   // Fireblast for free
+  if (info.bounceLands && !duel.canPay(p, d.cost) && duel.canCast(p, card, { bounceLands: true })) opts.bounceLands = true;   // Daze for free
   if (info.x) {
     const spend = maxX(duel, p, d.cost);
     if (spend <= 0) return null;

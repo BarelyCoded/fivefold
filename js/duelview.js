@@ -67,6 +67,7 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     if (duel.canCast(me, card)) return true;
     if (pitchCandidates(card).some(c => duel.canCast(me, card, { pitch: c.id }))) return true;
     if (card.def.spell?.alternativeCost?.sacLands && duel.canCast(me, card, { sacLands: true })) return true;
+    if (card.def.spell?.alternativeCost?.bounceLands && duel.canCast(me, card, { bounceLands: true })) return true;
     return false;
   }
   function hasAnyPlay() {
@@ -566,6 +567,11 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
       const lands = me.battlefield.filter(c => isLand(c) && c.def.subtypes.includes(info.sacLands.land));
       if (lands.length >= info.sacLands.n) { const canPayMana = duel.canPay(me, card.def.cost); ui.menu = { title: `Sacrifice ${info.sacLands.n} ${info.sacLands.land}s instead of paying?`, items: [{ label: `Sacrifice ${info.sacLands.n} ${info.sacLands.land}s`, primary: !canPayMana, action: () => { opts.sacLands = true; ui.menu = null; next(w); } }, ...(canPayMana ? [{ label: 'Pay mana instead', primary: true, action: () => { opts.sacLands = false; ui.menu = null; next(w); } }] : [])] }; render(); return; }
       opts.sacLands = false;
+    }
+    if (info.bounceLands && !('bounceLands' in opts)) {   // Daze: return an Island rather than pay
+      const lands = me.battlefield.filter(c => isLand(c) && c.def.subtypes.includes(info.bounceLands.land));
+      if (lands.length >= info.bounceLands.n) { const canPayMana = duel.canPay(me, card.def.cost); ui.menu = { title: `Return ${info.bounceLands.n} ${info.bounceLands.land} to hand instead of paying?`, items: [{ label: `Return ${info.bounceLands.n} ${info.bounceLands.land}`, primary: !canPayMana, action: () => { opts.bounceLands = true; ui.menu = null; next(w); } }, ...(canPayMana ? [{ label: 'Pay mana instead', primary: true, action: () => { opts.bounceLands = false; ui.menu = null; next(w); } }] : [])] }; render(); return; }
+      opts.bounceLands = false;
     }
     if (info.x && !('x' in opts)) { let maxX = 0; for (let x = 20; x >= 0; x--) if (duel.canPay(me, card.def.cost, x)) { maxX = x; break; } w.maxX = maxX; w.stage = 'x'; render(); return; }
     if (info.additional && !w.extraDone) {

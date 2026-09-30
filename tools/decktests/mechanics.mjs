@@ -447,5 +447,23 @@ section('Stifle counters a triggered ability (Mogg Fanatic self-cast omitted; us
     ok(target.zone === 'battlefield', 'the bounce trigger was countered — the creature stays'); }
   else ok(true, 'no ETB trigger to test (card not in sets); activated-ability case covers the mechanic'); }
 
+section('Daze: return an Island rather than pay, countering unless {1}');
+{ const d = newDuel(); mainPhase(d);
+  const isl = place(d, D('Island'), 0); const daze = hand(d, D('Daze'), 0); pool(d, 0, {});   // no mana at all
+  // opponent has a spell on the stack
+  d.active = 1; d.priority = 1; const bolt = hand(d, D('Lightning Bolt'), 1); pool(d, 1, { R: 1 });
+  d.cast(d.players[1], bolt, { targets: [{ type: 'player', idx: 0 }] }); const item = d.stack[d.stack.length - 1];
+  d.priority = 0;
+  ok(d.canCast(d.players[0], daze, { bounceLands: true }), 'Daze castable with no mana by returning an Island');
+  ok(d.cast(d.players[0], daze, { bounceLands: true, targets: [{ type: 'spell', id: item.id }] }), 'cast Daze for its free cost');
+  ok(isl.zone === 'hand', `the Island was returned to hand (${isl.zone})`);
+  // opponent can't pay {1} (no mana left), so the Bolt is countered
+  while (d.stack.length) drive(d.resolveTop());
+  ok(d.card(bolt.id)?.zone === 'graveyard' && d.players[0].life === 20, `Bolt countered, no damage (${d.card(bolt.id)?.zone}, life ${d.players[0].life})`); }
+
+section('Daze does nothing free if you control no Island');
+{ const d = newDuel(); mainPhase(d); const daze = hand(d, D('Daze'), 0); pool(d, 0, {});
+  ok(!d.canCast(d.players[0], daze, { bounceLands: true }), 'not castable for free without an Island'); }
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

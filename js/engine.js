@@ -729,6 +729,8 @@ export class Duel {
       const pc = this.card(opts.pitch); if (!pc || !p.hand.includes(pc) || pc === card || !pc.def.colors.includes(d.spell.alternativeCost.pitch)) return false;
     } else if (opts.sacLands && d.spell?.alternativeCost?.sacLands) {
       const alt = d.spell.alternativeCost.sacLands; if (p.battlefield.filter(l => isLand(l) && hasSubtype(l, alt.land)).length < alt.n) return false;   // Fireblast
+    } else if (opts.bounceLands && d.spell?.alternativeCost?.bounceLands) {
+      const alt = d.spell.alternativeCost.bounceLands; if (p.battlefield.filter(l => isLand(l) && hasSubtype(l, alt.land)).length < alt.n) return false;   // Daze
     } else if (!this.canPay(p, cost, opts.x || 0, opts.poolOnly)) return false;
     const fbSac = fromGrave ? d.keywords.find(k => k.k === 'Flashback')?.sacrifice : null;   // Cabal Therapy's flashback
     const add = (fbSac ? { sacrifice: fbSac } : null) || d.spell?.additionalCost || d.additionalCost;
@@ -827,6 +829,14 @@ export class Duel {
       while (chosen.length < alt.n && rest.length) chosen.push(rest.shift());
       for (const l of chosen) this.sacrifice(l);
       this.say(`${p.name} sacrifices ${chosen.map(l => l.def.name).join(' and ')} to cast ${d.name}.`);
+    }
+    else if (opts.bounceLands && d.spell?.alternativeCost?.bounceLands) {   // Daze: return an Island to hand instead of paying
+      const alt = d.spell.alternativeCost.bounceLands;
+      const chosen = [].concat(opts.bounceLands === true ? [] : opts.bounceLands).map(id => this.card(id)).filter(l => l && p.battlefield.includes(l) && isLand(l) && hasSubtype(l, alt.land));
+      const rest = p.battlefield.filter(l => isLand(l) && hasSubtype(l, alt.land) && !chosen.includes(l)).sort((a, b) => (a.tapped ? 0 : 1) - (b.tapped ? 0 : 1));
+      while (chosen.length < alt.n && rest.length) chosen.push(rest.shift());
+      for (const l of chosen) this.moveTo(l, 'hand');
+      this.say(`${p.name} returns ${chosen.map(l => l.def.name).join(' and ')} to hand to cast ${d.name}.`);
     }
     else this.payMana(p, this.planPayment(p, cost, opts.x || 0, opts.poolOnly));
     if (fromGrave) { const fl = d.keywords.find(k => k.k === 'Flashback')?.life; if (fl) { p.life -= fl; this.say(`${p.name} pays ${fl} life for flashback.`); } }

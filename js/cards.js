@@ -1243,6 +1243,8 @@ export function compile(c) {
     if ((m = lower.match(/^you may (?:pay (\d+) life and )?(?:exile|remove) (?:a|an) (white|blue|black|red|green) card from your hand rather than pay (?:this spell's|~'s) mana cost\.?$/))) { alternativeCost = { pitch: COLOR_WORD[m[2]], life: m[1] ? Number(m[1]) : 0 }; continue; }
     // Fireblast: "You may sacrifice two Mountains rather than pay this spell's mana cost."
     if ((m = lower.match(/^you may sacrifice (\w+) (plains|islands|swamps|mountains|forests) rather than pay (?:this spell's|~'s) mana cost\.?$/))) { alternativeCost = { ...(alternativeCost || {}), sacLands: { land: cap(m[2].replace(/s$/, '')), n: amt(m[1]) || 1 } }; continue; }
+    // Daze: "You may return an Island you control to its owner's hand rather than pay this spell's mana cost."
+    if ((m = lower.match(/^you may return (a|an|\w+) (plains|island|swamp|mountain|forest)s? you control to (?:its owner's|your) hand rather than pay (?:this spell's|~'s) mana cost\.?$/))) { alternativeCost = { ...(alternativeCost || {}), bounceLands: { land: cap(m[2]), n: amt(m[1]) || 1 } }; continue; }
     if ((m = lower.match(/^if (?:~|this spell) was kicked, (.+)$/))) { const eff = parseEffects(m[1]); if (eff.effects.length) kickedEffects = eff.effects; else def.notes.push('Kicker effect ignored'); continue; }
     if ((m = lower.match(/^if ~ was kicked, it enters(?: the battlefield)? with (\S+) ([+-]1\/[+-]1) counters? on it$/))) { kickedEffects = [{ type: 'counters', kind: m[2], amount: amt(m[1]), sel: 'self' }]; continue; }
     if (parseKeywordLine(line, def)) continue;
