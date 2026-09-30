@@ -766,7 +766,7 @@ export class Duel {
     if (!instantSpeed && !this.sorcerySpeed(p)) return false;
     let cost = fromGrave ? (d.keywords.find(k => k.k === 'Flashback')?.cost || d.cost) : d.cost;
     if (opts.kicked) { const k = d.keywords.find(k => k.k === 'Kicker'); if (!k) return false; cost = addCosts(cost, k.cost); }
-    if (opts.buyback) { const k = d.keywords.find(k => k.k === 'Buyback'); if (!k) return false; cost = addCosts(cost, k.cost); }
+    if (opts.buyback) { const k = d.keywords.find(k => k.k === 'Buyback'); if (!k) return false; if (k.sacrifice && !p.battlefield.some(c => this.sacMatches(c, k.sacrifice))) return false; cost = addCosts(cost, k.cost); }
     if (d.flashTax && !this.sorcerySpeed(p)) cost = addCosts(cost, { pips: [], generic: d.flashTax });   // Rout at instant speed
     cost = this.modifiedCost(p, card, cost);
     if (opts.pitch !== undefined && d.spell?.alternativeCost?.pitch) {
@@ -778,6 +778,10 @@ export class Duel {
     } else if (opts.discardAlt && d.spell?.alternativeCost?.discardAlt) {
       const alt = d.spell.alternativeCost.discardAlt; const hand = p.hand.filter(c => c !== card);   // Foil: a named-type card + N others
       if (!hand.some(c => hasSubtype(c, alt.land)) || hand.length < 1 + alt.others) return false;
+    } else if (opts.tapCreature && d.spell?.alternativeCost?.tapCreature) {
+      const alt = d.spell.alternativeCost.tapCreature; if (!p.battlefield.some(l => hasSubtype(l, alt.land)) || !p.battlefield.some(c => isCreature(c) && !c.tapped)) return false;   // Orim's Cure
+    } else if (opts.giftLife && d.spell?.alternativeCost?.giftLife) {
+      if (!p.battlefield.some(l => hasSubtype(l, d.spell.alternativeCost.giftLife.land))) return false;   // Invigorate
     } else if (opts.freeIf && d.spell?.alternativeCost?.freeIf) {
       const f = d.spell.alternativeCost.freeIf; if (!this.opponentOf(p).battlefield.some(l => hasSubtype(l, f.oppLand)) || !p.battlefield.some(l => hasSubtype(l, f.youLand))) return false;   // Submerge
     } else if (opts.lifeAlt && d.spell?.alternativeCost?.lifeAlt) {
@@ -812,7 +816,7 @@ export class Duel {
   }
   // Feroz's Ban, Gloom, Planar Gate, Stone Calendar: generic cost changes from statics on the battlefield.
   modifiedCost(p, card, cost) {
-    let delta = 0;
+    let delta = 0; const extra = [];
     for (const src of this.permanents()) for (const ab of src.def.abilities) {
       if (ab.type !== 'static' || ab.kind !== 'costMod') continue;
       if (ab.who === 'you' && src.controller !== p.idx) continue;
@@ -823,9 +827,10 @@ export class Duel {
       if (f.subtypes && !f.subtypes.some(st => card.def.subtypes.includes(st))) continue;   // "Goblin spells cost {1} less"
       if (ab.offTurn && this.active === p.idx) continue;   // Defense Grid only taxes off-turn casting
       delta += ab.delta;
+      if (ab.pips) extra.push(...ab.pips.map(c => [c]));   // Leeches: "cost {W} more"
     }
-    if (!delta) return cost;
-    return { ...cost, generic: Math.max(0, (cost.generic || 0) + delta) };
+    if (!delta && !extra.length) return cost;
+    return { ...cost, pips: [...(cost.pips || []), ...extra], generic: Math.max(0, (cost.generic || 0) + delta) };
   }
   landLimit(p) {
     let n = 1 + (p.extraLandsTurn === this.turn ? p.extraLandsN || 0 : 0);   // Summer Bloom
@@ -848,7 +853,7 @@ export class Duel {
   castOptions(p, card) {
     const d = card.def;
     const lifeX = !!(d.spell?.additionalCost || d.additionalCost)?.lifeX;
-    const out = { targets: [], x: !!d.cost.x || lifeX, lifeX, kicker: d.keywords.find(k => k.k === 'Kicker')?.cost || null, buyback: d.keywords.find(k => k.k === 'Buyback')?.cost || null, modes: null, additional: d.spell?.additionalCost || d.additionalCost || null, pitch: d.spell?.alternativeCost?.pitch || null, sacLands: d.spell?.alternativeCost?.sacLands || null, bounceLands: d.spell?.alternativeCost?.bounceLands || null, discardAlt: d.spell?.alternativeCost?.discardAlt || null, lifeAlt: d.spell?.alternativeCost?.lifeAlt || null, freeIf: d.spell?.alternativeCost?.freeIf || null, aluren: this.alurenOk(card), morph: d.morph || null, flashback: card.zone === 'graveyard', cycling: d.keywords.find(k => k.k === 'Cycling')?.cost || null };
+    const out = { targets: [], x: !!d.cost.x || lifeX, lifeX, kicker: d.keywords.find(k => k.k === 'Kicker')?.cost || null, buyback: d.keywords.find(k => k.k === 'Buyback')?.cost || null, modes: null, additional: d.spell?.additionalCost || d.additionalCost || null, pitch: d.spell?.alternativeCost?.pitch || null, sacLands: d.spell?.alternativeCost?.sacLands || null, bounceLands: d.spell?.alternativeCost?.bounceLands || null, discardAlt: d.spell?.alternativeCost?.discardAlt || null, lifeAlt: d.spell?.alternativeCost?.lifeAlt || null, freeIf: d.spell?.alternativeCost?.freeIf || null, tapCreature: d.spell?.alternativeCost?.tapCreature || null, giftLife: d.spell?.alternativeCost?.giftLife || null, aluren: this.alurenOk(card), morph: d.morph || null, flashback: card.zone === 'graveyard', cycling: d.keywords.find(k => k.k === 'Cycling')?.cost || null };
     if (d.spell?.modes) out.modes = { pick: d.spell.modal === 'one' ? 1 : 2, options: this.availableModes(p, card) };
     if (d.aura) out.targets.push({ text: `Enchant ${d.aura}`, options: this.legalTargets(p, { sel: 'permanent', restrict: auraRestrict(d.aura) }, card) });
     return out;
@@ -890,7 +895,7 @@ export class Duel {
     const fromGrave = card.zone === 'graveyard';
     let cost = fromGrave ? (d.keywords.find(k => k.k === 'Flashback')?.cost || d.cost) : d.cost;
     if (opts.kicked) cost = addCosts(cost, d.keywords.find(k => k.k === 'Kicker').cost);
-    if (opts.buyback) cost = addCosts(cost, d.keywords.find(k => k.k === 'Buyback').cost);
+    if (opts.buyback) { const bk = d.keywords.find(k => k.k === 'Buyback'); cost = addCosts(cost, bk.cost); if (bk.sacrifice) { const l = p.battlefield.filter(c => this.sacMatches(c, bk.sacrifice)).sort((a, b) => (a.tapped ? 0 : 1) - (b.tapped ? 0 : 1))[0]; if (l) this.sacrifice(l); } }   // Buyback—sacrifice a land
     if (d.flashTax && !this.sorcerySpeed(p)) cost = addCosts(cost, { pips: [], generic: d.flashTax });
     cost = this.modifiedCost(p, card, cost);
     if (opts.pitch !== undefined && d.spell?.alternativeCost?.pitch) { const pc = this.card(opts.pitch); this.moveTo(pc, 'exile'); p.life -= d.spell.alternativeCost.life || 0; this.say(`${p.name} exiles ${pc.def.name} from hand.`); }
@@ -921,6 +926,8 @@ export class Duel {
       this.discardCards(p, chosen);
       this.say(`${p.name} discards ${chosen.map(c => c.def.name).join(' and ')} to cast ${d.name}.`);
     }
+    else if (opts.tapCreature && d.spell?.alternativeCost?.tapCreature) { const t = this.card(opts.tapCreatureId) || p.battlefield.filter(c => isCreature(c) && !c.tapped).sort((a, b) => power(a) - power(b))[0]; this.tap(t); this.say(`${p.name} taps ${t.def.name} to cast ${d.name}.`); }
+    else if (opts.giftLife && d.spell?.alternativeCost?.giftLife) { const o = this.opponentOf(p), k = d.spell.alternativeCost.giftLife.n; this.gainLife(o, k); this.say(`${o.name} gains ${k} life so ${p.name} can cast ${d.name}.`); }
     else if (opts.freeIf && d.spell?.alternativeCost?.freeIf) this.say(`${p.name} casts ${d.name} without paying its mana cost.`);
     else if (opts.lifeAlt && d.spell?.alternativeCost?.lifeAlt) { const k = d.spell.alternativeCost.lifeAlt.life; p.life -= k; this.say(`${p.name} pays ${k} life to cast ${d.name}.`); }
     else if (opts.aluren && this.alurenOk(card)) this.say(`${p.name} casts ${d.name} without paying its mana cost (Aluren).`);
@@ -930,7 +937,8 @@ export class Duel {
     const add = (fbSac ? { sacrifice: fbSac } : null) || d.spell?.additionalCost || d.additionalCost;
     if (add) {
       if (add.sacrifice) { const c = this.card(opts.sacrifice) || p.battlefield.filter(x => this.sacMatches(x, add.sacrifice)).sort((a, b) => a.def.cmc - b.def.cmc)[0]; if (c) { opts._sacrificed = c; this.sacrifice(c); } }
-      if (add.discard) { const cs = (opts.discard || []).map(id => this.card(id)).filter(c => c && p.hand.includes(c) && c !== card); while (cs.length < add.discard) { const c = p.hand.find(x => x !== card && !cs.includes(x)); if (!c) break; cs.push(c); } this.discardCards(p, cs); }
+      if (add.discard && add.random) { const h = p.hand.filter(c => c !== card); const cs = []; for (let i = 0; i < add.discard && h.length; i++) cs.push(h.splice(Math.floor(this.rng() * h.length), 1)[0]); this.discardCards(p, cs); }   // Sonic Burst
+      else if (add.discard) { const cs = (opts.discard || []).map(id => this.card(id)).filter(c => c && p.hand.includes(c) && c !== card); while (cs.length < add.discard) { const c = p.hand.find(x => x !== card && !cs.includes(x)); if (!c) break; cs.push(c); } this.discardCards(p, cs); }
       if (add.life) p.life -= add.life;
       if (add.lifeX && opts.x) { p.life -= opts.x; this.say(`${p.name} pays ${opts.x} life.`); }
     }
@@ -1093,6 +1101,7 @@ export class Duel {
     if (isCreature(c) && source?.def && source.zone !== 'battlefield' && this.permanents().some(x => x.def.abilities.some(ab => ab.type === 'static' && ab.kind === 'creaturesUntargetableBySpells'))) return false;   // Dense Foliage
     if (source?.def?.aura && c.cur?.flags.has('noAuras')) return false;
     if (has(c, 'Hexproof') && c.controller !== p.idx) return false;
+    if (source?.def && c.def.abilities.some(ab => ab.type === 'static' && ab.kind === 'untargetableByColor' && colorsOf(source).includes(ab.color))) return false;   // Suq'Ata Firewalker
     if (source && this.protectedFrom(c, source)) return false;
     return true;
   }
@@ -1646,7 +1655,7 @@ export class Duel {
         const ctrl = this.players[s.item.controller];
         if (e.unlessPay) { const pay = e.unlessPay === 'CMC' ? (s.item.card?.def.cmc || 0) : this.amount(e.unlessPay, ctx); /* Rethink */ const cost = { pips: [], generic: pay, x: false }; if (this.canPay(ctrl, cost)) { const yes = yield { kind: 'yesno', player: ctrl.idx, text: `Pay {${pay}} to stop ${s.item.card.def.name} from being countered?`, value: 'pay' }; if (yes) { this.payMana(ctrl, this.planPayment(ctrl, cost)); this.say(`${ctrl.name} pays ${pay}.`); continue; } } }
         if (e.drawController) this.delayed.push({ player: s.item.controller, type: 'draw', amount: e.drawController });
-        ctx.prevItemController = s.item.controller;
+        ctx.prevItemController = s.item.controller; ctx.prevCounteredCard = s.item.card;
         this.counterItem(s.item);
       } break;
       // Misdirection: change the single target of the targeted spell to a new legal target that I choose.
@@ -1933,6 +1942,7 @@ export class Duel {
         if (k > 0 && this.canPay(who, cost)) { paid = yield { kind: 'yesno', player: who.idx, text: `${src.def.name}: pay {${k}} to save ${s.card.def.name}?`, card: s.card.id, value: 'unlessPay' }; if (paid) { this.payMana(who, this.planPayment(who, cost)); this.say(`${who.name} pays {${k}}.`); } }
         if (!paid) yield* this.runEffects(e.effects, ctx, false); } break;   // Excise
       case 'weeds': for (const pl of this.players) { const k = pl.battlefield.filter(l => isLand(l) && hasSubtype(l, 'Forest') && !l.tapped).length; for (let i = 0; i < k; i++) this.createToken(pl, { p: 1, t: 1, colors: ['G'], types: ['creature'], subtypes: ['Cat'], keywords: [] }); } break;
+      case 'exileNamedPrev': { const c = this.prevCard(ctx) || ctx.prevCounteredCard; if (!c) break; const pl = this.players[c.owner]; const nm = c.def.name; const all = [...pl.graveyard, ...pl.hand, ...pl.library].filter(x => x.def.name === nm); for (const x of all) this.moveTo(x, 'exile'); shuffle(pl.library, this.rng); if (all.length) this.say(`${all.length} more ${nm} exiled.`); break; }   // Eradicate
       case 'madness': {   // the discarded card waits in exile: cast it for its madness cost, or it goes to the graveyard
         if (src.zone !== 'exile') break;
         const mad = src.def.keywords.find(k => k.k === 'Madness'); const owner = this.players[src.owner];
@@ -2601,6 +2611,7 @@ export class Duel {
     if (cond.attackedOrBlocked && !(src.attackedThisTurn || src.blockedThisTurn)) ok = false;
     if (cond.threshold && me.graveyard.length < 7) ok = false;
     if (cond.selfCreature && !isCreature(src)) ok = false;
+    if (cond.attacking && !this.attackers.includes(src.id)) ok = false;   // Purraj: first strike while attacking
     if (cond.lifeLE !== undefined && me.life > cond.lifeLE) ok = false;
     if (cond.lifeGE !== undefined && me.life < cond.lifeGE) ok = false;
     if (cond.creaturesGE !== undefined && me.battlefield.filter(isCreature).length < cond.creaturesGE) ok = false;

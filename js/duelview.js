@@ -71,6 +71,8 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     if (card.def.spell?.alternativeCost?.discardAlt && duel.canCast(me, card, { discardAlt: true })) return true;
     if (card.def.spell?.alternativeCost?.lifeAlt && duel.canCast(me, card, { lifeAlt: true })) return true;
     if (card.def.spell?.alternativeCost?.freeIf && duel.canCast(me, card, { freeIf: true })) return true;
+    if (card.def.spell?.alternativeCost?.tapCreature && duel.canCast(me, card, { tapCreature: true })) return true;
+    if (card.def.spell?.alternativeCost?.giftLife && duel.canCast(me, card, { giftLife: true })) return true;
     if (duel.alurenOk?.(card) && duel.canCast(me, card, { aluren: true })) return true;   // Aluren: free creature spells
     if (card.def.morph && duel.canCast(me, card, { faceDown: true })) return true;   // morph: face down for {3}
     return false;
@@ -599,6 +601,12 @@ export function mountDuel(root, duel, { onEnd, ante, speed = 420, portraits = nu
     if (info.aluren && !('aluren' in opts)) {   // Aluren: cast it for free (and at instant speed)
       if (duel.canCast(me, card, { ...opts, aluren: true })) { const canPayMana = duel.canCast(me, card, { ...opts, aluren: false }); ui.menu = { title: `Cast ${card.def.name} without paying its mana cost (Aluren)?`, items: [{ label: 'Cast it free', primary: true, action: () => { opts.aluren = true; ui.menu = null; next(w); } }, ...(canPayMana ? [{ label: `Pay ${costString(card.def.cost)} instead`, action: () => { opts.aluren = false; ui.menu = null; next(w); } }] : [])] }; render(); return; }
       opts.aluren = false;
+    }
+    for (const [key, label] of [['tapCreature', () => 'Tap an untapped creature'], ['giftLife', () => `Let ${duel.opponentOf(me).name} gain ${info.giftLife.n} life`]]) {   // Orim's Cure / Invigorate
+      if (info[key] && !(key in opts)) {
+        if (duel.canCast(me, card, { ...opts, [key]: true })) { const canPayMana = duel.canPay(me, card.def.cost); ui.menu = { title: `${card.def.name}: ${label()} instead of paying ${costString(card.def.cost)}?`, items: [{ label: label(), primary: !canPayMana, action: () => { opts[key] = true; ui.menu = null; next(w); } }, ...(canPayMana ? [{ label: 'Pay mana instead', primary: true, action: () => { opts[key] = false; ui.menu = null; next(w); } }] : [])] }; render(); return; }
+        opts[key] = false;
+      }
     }
     if (info.freeIf && !('freeIf' in opts)) {   // Submerge: free when the opponent has a Forest and you an Island
       if (duel.canCast(me, card, { ...opts, freeIf: true })) { ui.menu = { title: `Cast ${card.def.name} without paying its mana cost?`, items: [{ label: 'Cast it free', primary: true, action: () => { opts.freeIf = true; ui.menu = null; next(w); } }, ...(duel.canPay(me, card.def.cost) ? [{ label: `Pay ${costString(card.def.cost)} instead`, action: () => { opts.freeIf = false; ui.menu = null; next(w); } }] : [])] }; render(); return; }

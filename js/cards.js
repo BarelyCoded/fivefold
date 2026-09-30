@@ -509,6 +509,8 @@ const rules = [
   [/^sacrifice ~ and counter that spell$/, () => [{ type: 'sacrificeSelf' }, { type: 'counter', sel: 'castSpell', unlessPay: null }]],   // Hesitation
   [/^counter (target spell) if it was kicked$/, m => { const k = T(m[1]); return k ? [{ type: 'counter', unlessPay: null, onlyKicked: true, ...k }] : null; }],   // Ertai's Trickery
   [/^counter (target spell) that targets a creature$/, m => { const k = T(m[1]); return k ? [{ type: 'counter', unlessPay: null, onlyIfTargetsCreature: true, ...k }] : null; }],   // Intervene
+  [/^return the exiled card to the battlefield under its owner's control$/, () => [{ type: 'returnExiledWith' }]],   // Icy Prison
+  [/^search its controller's graveyard, hand, and library for (?:all|any number of) cards with the same name as that (?:creature|card|permanent|land|artifact|enchantment|spell) and exile them$/, () => [{ type: 'exileNamedPrev' }]],   // Eradicate, Splinter, Scour
   [/^choose a color$/, () => [{ type: 'chooseColorSelf' }]],
   [/^~ becomes the color of your choice until end of turn$/, () => [{ type: 'chooseColorSelf', temp: true }]],
   [/^~ gets \+(\d+)\/\+(\d+) and becomes the color of your choice until end of turn$/, m => [{ type: 'pump', p: Number(m[1]), t: Number(m[2]), sel: 'self', restrict: {} }, { type: 'chooseColorSelf', temp: true }]],   // Wild Mongrel
@@ -749,11 +751,11 @@ function parseSentence(s) {
     const inner = single !== t ? parseClause(single) : null;
     if (inner && inner.length && inner.every(e => needsTarget(e))) { const out = []; for (let i = 0; i < n; i++) for (const e of inner) out.push({ ...e, ...(i ? { distinct: true } : {}) }); return out; }
   }
-  if ((um = t.match(/^(.+?) unless (you|they|that player) pays? ((?:\{[^}]+\})+)$/)) || (um = t.match(/^unless (you) pay ((?:\{[^}]+\})+), (.+)$/))) {
+  if ((um = t.match(/^(.+?) unless (you|they|that player|any player) pays? ((?:\{[^}]+\})+)$/)) || (um = t.match(/^unless (you) pay ((?:\{[^}]+\})+), (.+)$/))) {
     const pre = um[3].startsWith('{') ? false : true;
     const body = pre ? um[3] : um[1], cost = pre ? um[2] : um[3], payer = pre ? 'you' : um[2];
     const inner = parseSentence(body);
-    if (inner) return [{ type: 'unlessPay', cost: parseCost(cost.toUpperCase()), effects: inner, payer: payer === 'you' ? 'you' : 'thatPlayer' }];
+    if (inner) return [{ type: 'unlessPay', cost: parseCost(cost.toUpperCase()), effects: inner, payer: payer === 'you' || payer === 'any player' ? 'you' : 'thatPlayer' }];
   }
   if ((um = t.match(/^(.+?) unless (you|they|that player) pays? (\d+) life$/))) {
     const inner = parseSentence(um[1]);
@@ -953,6 +955,7 @@ function parseKeywordLine(line, def) {
     else if ((m = p.match(/^Flashback (\{.+\})$/))) found.push({ k: 'Flashback', cost: parseCost(m[1]) });
     else if ((m = p.match(/^Flashback—sacrifice (?:a|an) (\w+)$/i))) found.push({ k: 'Flashback', cost: { pips: [], generic: 0, x: false }, sacrifice: m[1].toLowerCase() });   // Cabal Therapy
     else if ((m = p.match(/^Buyback (\{.+\})$/))) found.push({ k: 'Buyback', cost: parseCost(m[1]) });
+    else if (/^Buyback—sacrifice a land$/i.test(p)) found.push({ k: 'Buyback', cost: { pips: [], generic: 0, x: false }, sacrifice: 'land' });   // Pegasus Stampede
     else if ((m = p.match(/^Madness (\{.+\})$/))) found.push({ k: 'Madness', cost: parseCost(m[1]) });
     else if (p === 'Storm') found.push('Storm');
     else if ((m = p.match(/^Echo (\{.+\})$/))) found.push({ k: 'Echo', cost: parseCost(m[1]) });
@@ -974,6 +977,8 @@ function parseStatic(t) {
   // Effect-first threshold wording: "~ gets +2/+2 as long as there are seven or more cards in your graveyard." (Nimble Mongoose, Werebear, Krosan Beast).
   if ((m = t.match(/^(?:threshold — )?(.+?) as long as (?:there are )?seven or more cards (?:are )?in your graveyard$/))) { const inner = parseStatic(m[1]); if (!inner) return null; for (const o of inner) o.condition = { ...(o.condition || {}), threshold: true }; return inner; }
   // ---- global / aura statics (coverage sweep) ----
+  if ((m = t.match(/^~ has (first strike|flying|trample|vigilance) as long as it's attacking$/))) return [{ type: 'static', kind: 'keyword', keyword: cap(m[1]), scope: { who: 'self' }, condition: { attacking: true } }];   // Purraj of Urborg
+  if ((m = t.match(/^~ can't be the target of (white|blue|black|red|green) spells or abilities from \1 sources$/))) return [{ type: 'static', kind: 'untargetableByColor', color: COLOR_WORD[m[1]], scope: { who: 'self' } }];   // Suq'Ata Firewalker
   if (/^if a source would deal damage to you, prevent 1 of that damage$/.test(t)) return [{ type: 'static', kind: 'reduceColorDamage', color: 'any', n: 1, scope: { who: 'self' } }];   // Urza's Armor
   if (/^prevent all damage that would be dealt to creatures$/.test(t)) return [{ type: 'static', kind: 'preventAllDamage', scope: { who: 'all', types: ['creature'] } }];   // Bubble Matrix
   if ((m = t.match(/^enchanted creature gets \+(\d)\/\+(\d) for each other enchantment on the battlefield$/))) return [{ type: 'static', kind: 'ptPer', p: Number(m[1]), t: Number(m[2]), per: { calc: 'count', base: -1, restrict: { types: ['enchantment'] } }, scope: { who: 'enchanted' } }];   // Ancestral Mask
@@ -1038,8 +1043,9 @@ function parseStatic(t) {
   if (/^creatures with landwalk abilities can be blocked as though they didn't have those abilities$/.test(t)) return [{ type: 'static', kind: 'ignoreLandwalk', land: null, scope: { who: 'self' } }];
   // Defense Grid: a tax that only applies off-turn.
   if ((m = t.match(/^each spell costs \{(\d+)\} more to cast except during its controller's turn$/))) return [{ type: 'static', kind: 'costMod', delta: Number(m[1]), filter: {}, who: 'all', offTurn: true, scope: { who: 'self' } }];
-  if ((m = t.match(/^(?:(.+?) )?spells?( you cast| your opponents cast)? costs? \{(\d+)\} (more|less) to cast$/))) {
-    const kinds = !m[1] ? null : m[1].split(/ and | or /).map(w => w.trim());
+  if ((m = t.match(/^(?:(.+?) )?spells?( you cast| your opponents cast)? costs? \{(\d+|[wubrg])\} (more|less) to cast$/))) {
+    const kinds = !m[1] ? null : m[1].replace(/ spells\b/g, '').split(/ and | or /).map(w => w.trim());   // "green spells and blue spells" (Familiars)
+    if (/^[wubrg]$/.test(m[3])) { if (m[4] !== 'more') return null; const cols = (kinds || []).filter(k => COLOR_WORD[k]).map(k => COLOR_WORD[k]); if (!cols.length || cols.length !== (kinds || []).length) return null; return [{ type: 'static', kind: 'costMod', delta: 0, pips: [m[3].toUpperCase()], filter: { colors: cols }, who: m[2] === ' your opponents cast' ? 'opp' : m[2] ? 'you' : 'all', scope: { who: 'self' } }]; }   // Leeches: "white spells you cast cost {W} more"
     const f = {};
     if (kinds) {
       const cols = kinds.filter(k => COLOR_WORD[k]).map(k => COLOR_WORD[k]); const ks = kinds.filter(k => !COLOR_WORD[k]);
@@ -1570,7 +1576,8 @@ export function compile(c) {
     }
     inModes = false;
     let m;
-    if (/^as an additional cost to cast (?:this spell|~), pay x life\.?$/.test(lower)) { additionalCost = { lifeX: true }; continue; }   // Hatred, Necrologia
+    if (/^as an additional cost to cast (?:this spell|~), pay x life\.?$/.test(lower)) { additionalCost = { lifeX: true }; continue; }
+    if (/^as an additional cost to cast (?:this spell|~), discard a card at random\.?$/.test(lower)) { additionalCost = { discard: 1, random: true }; continue; }   // Sonic Burst   // Hatred, Necrologia
     if ((m = lower.match(/^as an additional cost to cast (?:this spell|~), (sacrifice (?:a|an) (creature|land|artifact|permanent|goblin|\w+)|discard (?:a|\w+) cards?|pay (\d+) life|exile (?:a|an) \w+ card from your graveyard)\.?$/))) {
       if (m[2]) additionalCost = { sacrifice: m[2] };
       else if (/^discard/.test(m[1])) additionalCost = { discard: amt(m[1].split(' ')[1]) };
@@ -1582,10 +1589,14 @@ export function compile(c) {
     if (/^as ~ enters(?: the battlefield)?, choose an opponent\.?$/.test(lower)) continue;   // two players: the chosen player is the opponent
     // Submerge: "If an opponent controls a Forest and you control an Island, you may cast this spell without paying its mana cost."
     if ((m = lower.match(/^if an opponent controls (?:a|an) (plains|island|swamp|mountain|forest) and you control (?:a|an) (plains|island|swamp|mountain|forest), you may cast (?:this spell|~) without paying its mana cost\.?$/))) { alternativeCost = { ...(alternativeCost || {}), freeIf: { oppLand: cap(m[1]), youLand: cap(m[2]) } }; continue; }
+    // Orim's Cure & co.: "If you control a Plains, you may tap an untapped creature you control rather than pay this spell's mana cost."
+    if ((m = lower.match(/^if you control (?:a|an) (plains|island|swamp|mountain|forest), you may tap an untapped creature you control rather than pay (?:this spell's|~'s) mana cost\.?$/))) { alternativeCost = { ...(alternativeCost || {}), tapCreature: { land: cap(m[1]) } }; continue; }
+    // Invigorate & co.: "If you control a Forest, rather than pay this spell's mana cost, you may have an opponent gain 3 life."
+    if ((m = lower.match(/^if you control (?:a|an) (plains|island|swamp|mountain|forest), rather than pay (?:this spell's|~'s) mana cost, you may have an opponent gain (\d+) life\.?$/))) { alternativeCost = { ...(alternativeCost || {}), giftLife: { land: cap(m[1]), n: Number(m[2]) } }; continue; }
     // Snuff Out: "If you control a Swamp, you may pay 4 life rather than pay this spell's mana cost."
     if ((m = lower.match(/^if you control (?:a|an) (plains|island|swamp|mountain|forest), you may pay (\d+) life rather than pay (?:this spell's|~'s) mana cost\.?$/))) { alternativeCost = { ...(alternativeCost || {}), lifeAlt: { life: Number(m[2]), land: cap(m[1]) } }; continue; }
     // Fireblast: "You may sacrifice two Mountains rather than pay this spell's mana cost."
-    if ((m = lower.match(/^you may sacrifice (\w+) (plains|islands|swamps|mountains|forests) rather than pay (?:this spell's|~'s) mana cost\.?$/))) { alternativeCost = { ...(alternativeCost || {}), sacLands: { land: cap(m[2].replace(/s$/, '')), n: amt(m[1]) || 1 } }; continue; }
+    if ((m = lower.match(/^you may sacrifice (\w+) (plains|islands?|swamps?|mountains?|forests?) rather than pay (?:this spell's|~'s) mana cost\.?$/))) { alternativeCost = { ...(alternativeCost || {}), sacLands: { land: m[2] === 'plains' ? 'Plains' : cap(m[2].replace(/s$/, '')), n: amt(m[1]) || 1 } }; continue; }
     // Daze / Gush: "You may return an/two Island(s) you control to its/their owner's hand rather than pay this spell's mana cost."
     if ((m = lower.match(/^you may return (a|an|\w+) (plains|island|swamp|mountain|forest)s? you control to (?:its owner's|their owner's|your) hand rather than pay (?:this spell's|~'s) mana cost\.?$/))) { alternativeCost = { ...(alternativeCost || {}), bounceLands: { land: cap(m[2]), n: amt(m[1]) || 1 } }; continue; }
     // Foil: "You may discard an Island card and another card rather than pay this spell's mana cost."

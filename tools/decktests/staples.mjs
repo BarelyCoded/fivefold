@@ -636,5 +636,30 @@ section('Death Pits of Rath, Bubble Matrix, Urza\'s Armor, Intervene');
   const d4 = newDuel(); mainPhase(d4); d4.active = 1; d4.priority = 1; const x = place(d4, bears(), 0); const s4 = hand(d4, D('Shock'), 1); pool(d4, 1, { R: 1 }); d4.cast(d4.players[1], s4, { targets: [{ type: 'player', idx: 0 }] }); const it = d4.stack[d4.stack.length - 1];
   d4.priority = 0; const iv = hand(d4, D('Intervene'), 0); pool(d4, 0, { U: 1 }); d4.cast(d4.players[0], iv, { targets: [{ type: 'spell', id: it.id }] }); processAndResolve(d4); ok(d4.players[0].life === 18, 'Intervene can\'t counter a Shock aimed at a player'); }
 
+section('Icy Prison exiles until it leaves; Eradicate exiles every copy');
+{ const d = newDuel(); mainPhase(d); const b = place(d, bears(), 1); const ip = hand(d, D('Icy Prison'), 0); pool(d, 0, { U: 2 }); d.cast(d.players[0], ip, {}); processAndResolve(d, [{ type: 'perm', id: b.id }]);
+  ok(b.zone === 'exile', 'exiled'); d.destroy(ip); processAndResolve(d); ok(b.zone === 'battlefield', 'back when Icy Prison leaves');
+  const d2 = newDuel(); mainPhase(d2); const t = place(d2, bears(), 1); hand(d2, bears(), 1); lib(d2, bears(), 1); gy(d2, bears(), 1); lib(d2, D('Forest'), 1); const er = hand(d2, D('Eradicate'), 0); pool(d2, 0, { B: 2, C: 2 });
+  d2.cast(d2.players[0], er, { targets: [{ type: 'perm', id: t.id }] }); processAndResolve(d2); ok(d2.players[1].exile.length === 4, `all four Bears exiled (${d2.players[1].exile.length})`); }
+
+section('Leeches and Familiars change costs; Suq\'Ata dodges red');
+{ const d = newDuel(); mainPhase(d); place(d, D('Alabaster Leech'), 0); const sw = hand(d, D('Swords to Plowshares'), 0); const t = place(d, bears(), 1); pool(d, 0, { W: 1 });
+  ok(!d.canCast(d.players[0], sw, { targets: [{ type: 'perm', id: t.id }] }), 'Swords now costs WW'); pool(d, 0, { W: 2 }); ok(d.canCast(d.players[0], sw, { targets: [{ type: 'perm', id: t.id }] }), 'castable with WW');
+  const d2 = newDuel(); mainPhase(d2); place(d2, D('Sunscape Familiar'), 0); const gb = hand(d2, bears(), 0); pool(d2, 0, { G: 1 }); ok(d2.canCast(d2.players[0], gb), 'green spells cost 1 less');
+  const d3 = newDuel(); mainPhase(d3); const sq = place(d3, D("Suq'Ata Firewalker"), 1); const bolt = hand(d3, D('Lightning Bolt'), 0); pool(d3, 0, { R: 1 }); ok(!d3.cast(d3.players[0], bolt, { targets: [{ type: 'perm', id: sq.id }] }), 'red spells can\'t target it'); }
+
+section('Alternative costs: Orim\'s Cure, Invigorate, Crash; Sonic Burst; Pegasus Stampede buyback; Purraj');
+{ const d = newDuel(); mainPhase(d); place(d, D('Plains'), 0); const c = place(d, bears(), 0); const oc = hand(d, D("Orim's Cure"), 0); pool(d, 0, {});
+  ok(d.cast(d.players[0], oc, { tapCreature: true, targets: [{ type: 'player', idx: 0 }] }) && c.tapped, 'Orim\'s Cure for a tapped creature');
+  const d2 = newDuel(); mainPhase(d2); place(d2, D('Forest'), 0); const b = place(d2, bears(), 0); const iv = hand(d2, D('Invigorate'), 0); pool(d2, 0, {});
+  ok(d2.cast(d2.players[0], iv, { giftLife: true, targets: [{ type: 'perm', id: b.id }] }) && d2.players[1].life === 23, 'Invigorate: the opponent gains 3');
+  const d3 = newDuel(); mainPhase(d3); const m = place(d3, D('Mountain'), 0); const a = place(d3, D('Mind Stone'), 1); const cr = hand(d3, D('Crash'), 0); pool(d3, 0, {});
+  ok(d3.cast(d3.players[0], cr, { sacLands: true, targets: [{ type: 'perm', id: a.id }] }) && m.zone === 'graveyard', 'Crash by sacrificing a Mountain');
+  const d4 = newDuel(); mainPhase(d4); hand(d4, bears(), 0); const sb = hand(d4, D('Sonic Burst'), 0); pool(d4, 0, { R: 1, C: 1 }); d4.cast(d4.players[0], sb, { targets: [{ type: 'player', idx: 1 }] }); processAndResolve(d4);
+  ok(d4.players[0].graveyard.some(c => c.def.name === 'Grizzly Bears') && d4.players[1].life === 16, 'Sonic Burst discards at random, deals 4');
+  const d5 = newDuel(); mainPhase(d5); const l = place(d5, D('Plains'), 0); const ps = hand(d5, D('Pegasus Stampede'), 0); pool(d5, 0, { W: 1, C: 1 }); d5.cast(d5.players[0], ps, { buyback: true }); processAndResolve(d5);
+  ok(l.zone === 'graveyard' && ps.zone === 'hand', 'buyback by sacrificing a land');
+  const d6 = newDuel(); mainPhase(d6); const pu = place(d6, D('Purraj of Urborg'), 0); d6.refresh(); ok(!has(pu, 'First strike'), 'no first strike at home'); d6.attackers = [pu.id]; d6.refresh(); ok(has(pu, 'First strike'), 'first strike while attacking'); }
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
